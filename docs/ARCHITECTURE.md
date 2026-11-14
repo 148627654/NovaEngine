@@ -1086,26 +1086,28 @@ drawOutline 内部两遍：
 1. 功能完备且免费（MIT）：平移/旋转/缩放、局部/世界空间、屏幕空间手柄、遮挡判定（IsOver/IsUsing）、snap 支持，全部现成。
 2. 与 ImGui docking 无缝：直接往 ImGui drawlist 绘制，天然叠在 ImGui::Image 的 viewport 之上，无第二渲染层。
 3. 自研成本高：手柄射线命中、平面交点、多轴高亮、拖拽状态机等交互细节约 1–2 周且易出 bug；ImGuizmo 单头文件 + 一个 .cpp，集成半天。
-4. 风险可控：只需处理 glm 列主序 → ImGuizmo 行主序的转置（见下）与矩阵分解回写。
+4. 风险可控：只需处理矩阵直接传递（见下，无需转置）与矩阵分解回写。
 
 集成要点（GizmoController::update）：
 ```
 单选且 Edit 态时：
-  ImGuizmo::SetDrawlist(ImGui::GetForegroundDrawList())
+  ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList())   // 必须用当前 SceneView 窗口 drawlist（见下方陷阱）
   ImGuizmo::SetRect(vpPos.x, vpPos.y, vpSize.x, vpSize.y)
   glm::mat4 view = cam.viewMatrix(), proj = cam.projectionMatrix(aspect)
   glm::mat4 world = trans.worldMatrix()
-  ImGuizmo::Manipulate(glm::value_ptr(glm::transpose(view)),   // 关键：glm 列主序 → 转置后按行主序传递
-                       glm::value_ptr(glm::transpose(proj)),
-                       operation, space, glm::value_ptr(glm::transpose(world)))
-  if (ImGuizmo::IsUsing() && 矩阵有变化):
-      glm::decompose(world, scale, rot, pos, skew, persp)
-      若对象有父级且 space == Local：setLocalPosition/Rotation/Scale
-      否则按世界值换算（glm::inverse(parentWorld) * world 反解局部）
+  ImGuizmo::Manipulate(glm::value_ptr(view),          // 直接传 glm::value_ptr，无需转置：
+                       glm::value_ptr(proj),          // ImGuizmo 的 float[16] 与 glm 同为列主序内存布局
+                       operation, space, glm::value_ptr(world))
+  if (ImGuizmo::IsUsing()):
+      glm::decompose(world, scale, rot, pos, skew, persp)   // Manipulate 已写回同一矩阵
+      若对象有父级：glm::inverse(parentWorld) * world 反解局部
   m_using = ImGuizmo::IsUsing(); m_over = ImGuizmo::IsOver();
 ```
 - W/E/R 切换 Operation（cycleOperation），X 键切换 Local/World（toggleSpace）。
 - gizmo 拖拽期间（isUsing）跳过相机输入与点击选择。
+- 陷阱：不要用 ImGui::GetForegroundDrawList() 传给 SetDrawlist——ImGuizmo 的悬停判定
+  IsHoveringWindow 依赖 drawlist 的 _OwnerName 与 g.HoveredWindow 匹配，前台 drawlist 的
+  owner 永远不是当前面板 → 判定恒假 → gizmo 画出来也无法交互。
 
 ### 6.4 拖拽导入全流程
 
@@ -1403,7 +1405,7 @@ add_subdirectory(editor)
 4. **glad2 集成方式**：`glad_add_library(glad_gl_core_45 STATIC REPRODUCIBLE API gl:core=4.5)` 在 configure 期用 Python3 生成源码，机器必须装 Python 3（无则 configure 报错）。备选方案 B（写入文档）：从 glad.dav1d.de 网页生成一次 4.5 core 的 glad.c/glad.h/khrplatform.h 提交到 engine/vendor/glad 并改成普通静态库。头文件包含顺序：.cpp 中先 `<glad/gl.h>` 后 `<GLFW/glfw3.h>`。
 5. **stb_image**：`STB_IMAGE_IMPLEMENTATION` 必须且只能在 engine/src/Assets/TextureLoader.cpp 定义一次（多处定义 = LNK2005）；加载纹理一律 flip_vertically_on_load = false，与 Assimp 的 aiProcess_FlipUVs 配套，否则贴图上下颠倒（双翻转经典 bug）。
 6. **脚本静态注册被链接器丢弃**：STATIC 库中只有静态初始化器引用符号的 .obj 会被 MSVC 链接器整体丢弃 → 脚本「查无此类型」。对策：NovaScripts 用 OBJECT 库 + `$<TARGET_OBJECTS:NovaScripts>` 并入 NovaEditor（首选），或 `target_link_options(NovaEditor PRIVATE "/WHOLEARCHIVE:$<TARGET_FILE:NovaScripts>")`（备选）。
-7. **glm 列主序 vs ImGuizmo 行主序**：ImGuizmo 期望 OpenGL 风格行主序 float[16]；glm 是列主序。传 `glm::value_ptr(glm::transpose(m))`，写回时 `glm::decompose` 分解后再换算局部 TRS。忘记转置 = gizmo 变形/不响应。
+7. **glm 与 ImGuizmo 的矩阵传递**：ImGuizmo 的 float[16] 与 glm/OpenGL 同为列主序内存布局，直接传 `glm::value_ptr(m)` 即可（ImGuizmo 内部按行向量约定计算，双重转置恰好抵消；显式转置反而会破坏平移并触发 "behind camera" 检测把 gizmo 静默裁掉）。拖拽结束时 Manipulate 已把新矩阵写回同一指针，`glm::decompose` 分解后再换算局部 TRS。
 8. **ImGui::Image 显示 FBO**：MSAA resolve 完成前不能把颜色纹理给 ImGui；Image 的 UV 必须传 (0,1)-(1,0)（FBO 纹理上下颠倒）；viewport 尺寸为 0（最小化/折叠）时跳过整个 FBO 渲染路径。
 9. **中文字体**：ImGui 默认字体无 CJK 字形，Console 里的中文日志会显示为问号。启动时 `io.Fonts->AddFontFromFileTTF("C:/Windows/Fonts/msyh.ttc", 16, nullptr, io.Fonts->GetGlyphRangesChineseFull())` 并合并进默认字体；文件不存在则回退默认字体。编辑器 UI 文案建议英文（Unity 风格），避免字体负担。
 10. **场景内存模型**：父子树用 unique_ptr 持有 + 父裸指针，无循环引用；销毁走队列延迟，严禁在 forEachObject/update 回调内直接 delete；选中集在 flushDestroyQueue 后做有效性检查。

@@ -39,6 +39,12 @@
 14. **findScript\<T\>**：Behaviour.h 提供 `template<typename T> T* findScript(GameObject* go)`（dynamic_cast 线性扫描）；脚本共用 Behaviour 的 typeId，getComponent<具体脚本T>() 不保证命中。
 15. **material JSON 键名**：保持 schema 原键 "albedoMap"（字符串路径），不采用 "albedoMapPath" 键名（避免 schema 与 demo 场景漂移）。
 
+## 第四轮裁定（2026-11-15，Debugger 排查后）
+
+16. **ImGuizmo 矩阵直传，不转置**：glm 与 ImGuizmo 的 float[16] 同为列主序内存布局，`glm::value_ptr` 直传即可；转置会破坏平移并使 ImGuizmo 的 behind-camera 检测把 gizmo 静默裁掉。ARCHITECTURE §11.7 原「必须转置」结论有误，已修正为直传 + 陷阱说明。
+17. **gizmo drawlist 用 `ImGui::GetWindowDrawList()`**：ImGuizmo 的悬停判定依赖 drawlist `_OwnerName` 与 g.HoveredWindow 匹配；`GetForegroundDrawList()` 的 owner 永远不是 SceneView 面板 → 悬停恒假 → 手柄无法拖拽。
+18. **诊断日志保留**：GizmoController（显示/操作切换/空间切换）、SceneViewPanel（拾取命中）、EditorApplication（外部拖放分发）、SpinningCube（onStart/前 3 帧旋转）关键路径日志保留，便于后续交互问题排查。
+
 ## 环境确认
 
 - VS Community 2026 (MSVC) + CMake 4.4；无 ninja / vcpkg / MinGW → FetchContent + VS 多配置生成器

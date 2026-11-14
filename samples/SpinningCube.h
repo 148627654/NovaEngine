@@ -12,6 +12,11 @@ public:
     void onUpdate(float dt) override;                           // 绕自身 Y 轴旋转
     void onSerialize(nlohmann::json& out) const override;       // 写 "speed"
     void onDeserialize(const nlohmann::json& in) override;      // 读 "speed"
+
+private:
+    // 运行期调试状态（不序列化）：进入 Play 后前 3 帧打日志用
+    int m_logFrames = 0;
+    float m_totalDegrees = 0.0f;
 };
 
 }  // namespace NovaGame

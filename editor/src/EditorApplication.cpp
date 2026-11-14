@@ -296,6 +296,10 @@ void EditorApplication::handleExternalDrop(const std::vector<std::filesystem::pa
     const bool overBrowser =
         insideRect(mouse, m_context.assetBrowserScreenMin, m_context.assetBrowserScreenMax);
 
+    Logger::info("外部拖放 {} 个文件，鼠标在 {} 区域（{},{}）", paths.size(),
+                 overViewport ? "场景视口" : (overBrowser ? "资源浏览器" : "无效区域"),
+                 mouse.x, mouse.y);
+
     for (const auto& p : paths) {
         if (overViewport) {
             if (DragDrop::isModelFile(p)) {

@@ -5,10 +5,10 @@
 #include <imgui.h>
 #include <ImGuizmo.h>
 
+#include <NovaEngine/Core/Logger.h>
 #include <NovaEngine/Scene/GameObject.h>
 #include <NovaEngine/Scene/Transform.h>
 
-#include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/matrix_decompose.hpp>
@@ -30,6 +30,19 @@ ImGuizmo::MODE toImGuizmoMode(GizmoController::Space space) {
     return space == GizmoController::Space::Local ? ImGuizmo::LOCAL : ImGuizmo::WORLD;
 }
 
+const char* operationName(GizmoController::Operation op) {
+    switch (op) {
+    case GizmoController::Operation::Translate: return "移动 Translate";
+    case GizmoController::Operation::Rotate:    return "旋转 Rotate";
+    case GizmoController::Operation::Scale:     return "缩放 Scale";
+    }
+    return "?";
+}
+
+const char* spaceName(GizmoController::Space space) {
+    return space == GizmoController::Space::Local ? "Local" : "World";
+}
+
 }  // namespace
 
 void GizmoController::setCamera(const glm::mat4& view, const glm::mat4& projection) {
@@ -49,22 +62,35 @@ void GizmoController::update(EditorContext& ctx, const glm::vec2& viewportPos, c
     NovaEngine::Transform* transform = go->transform();
     if (!transform) return;
 
-    ImGuizmo::SetDrawlist(ImGui::GetForegroundDrawList());  // 覆盖在 ImGui::Image 之上
+    // 必须用当前 SceneView 窗口的 drawlist（而非前台 drawlist）：
+    // 1) gizmo 图元追加在本帧 ImGui::Image 之后，自然覆盖在视口之上；
+    // 2) ImGuizmo 的悬停判定 IsHoveringWindow 依赖 drawlist 的 _OwnerName 与
+    //    g.HoveredWindow 匹配；前台 drawlist 的 owner 永远不是当前面板，
+    //    mbMouseOver 恒假 → HandleTranslation/Scale/Rotation 直接返回，gizmo 无法交互。
+    ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
     ImGuizmo::SetRect(viewportPos.x, viewportPos.y, viewportSize.x, viewportSize.y);
 
-    // 关键（§11.7）：glm 列主序 vs ImGuizmo 行主序，必须转置后传递
-    const glm::mat4 viewT = glm::transpose(m_view);
-    const glm::mat4 projT = glm::transpose(m_projection);
+    // 矩阵直接传 glm::value_ptr，无需转置：ImGuizmo 的 float[16] 与 glm/OpenGL
+    // 同为列主序内存布局（内部按行向量约定计算，与列主序输入恰好互相抵消）。
+    // 显式转置会破坏平移并触发 "behind camera" 检测，令 gizmo 被静默裁掉不显示。
     glm::mat4 world = transform->worldMatrix();
-    glm::mat4 worldT = glm::transpose(world);
 
-    ImGuizmo::Manipulate(glm::value_ptr(viewT), glm::value_ptr(projT),
+    // 激活状态变化时打日志（选中对象/操作/空间三者任一变化输出一次，便于排查「gizmo 不显示」）
+    const uint64_t goId = go->id();
+    if (goId != m_lastGoId || m_operation != m_lastLoggedOp || m_space != m_lastLoggedSpace) {
+        NovaEngine::Logger::info("Gizmo 显示: {}（{}，{}）", go->name(),
+                                 operationName(m_operation), spaceName(m_space));
+        m_lastGoId = goId;
+        m_lastLoggedOp = m_operation;
+        m_lastLoggedSpace = m_space;
+    }
+
+    ImGuizmo::Manipulate(glm::value_ptr(m_view), glm::value_ptr(m_projection),
                          toImGuizmoOperation(m_operation), toImGuizmoMode(m_space),
-                         glm::value_ptr(worldT));
+                         glm::value_ptr(world));
 
     if (ImGuizmo::IsUsing()) {
-        // 转置回 glm 列主序，分解写回 Transform
-        const glm::mat4 newWorld = glm::transpose(worldT);
+        // Manipulate 已把新矩阵写回 world（同一列主序内存布局），直接分解写回 Transform
         glm::vec3 scale(1.0f), position(0.0f), skew(0.0f);
         glm::vec4 perspective;
         glm::quat rotation = glm::identity<glm::quat>();
@@ -72,10 +98,10 @@ void GizmoController::update(EditorContext& ctx, const glm::vec2& viewportPos, c
         if (go->parent() && go->parent()->transform()) {
             // 有父级：反解局部（local = inverse(parentWorld) * world）
             const glm::mat4 local =
-                glm::inverse(go->parent()->transform()->worldMatrix()) * newWorld;
+                glm::inverse(go->parent()->transform()->worldMatrix()) * world;
             glm::decompose(local, scale, rotation, position, skew, perspective);
         } else {
-            glm::decompose(newWorld, scale, rotation, position, skew, perspective);
+            glm::decompose(world, scale, rotation, position, skew, perspective);
         }
 
         transform->setLocalPosition(position);
@@ -95,8 +121,14 @@ void GizmoController::cycleOperation() {
     }
 }
 
+void GizmoController::setOperation(Operation op) {
+    m_operation = op;
+    NovaEngine::Logger::info("Gizmo 操作切换: {}", operationName(op));
+}
+
 void GizmoController::toggleSpace() {
     m_space = (m_space == Space::Local) ? Space::World : Space::Local;
+    NovaEngine::Logger::info("Gizmo 空间切换: {}", spaceName(m_space));
 }
 
 }  // namespace NovaEditor

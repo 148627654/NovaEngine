@@ -268,6 +268,9 @@ void SceneViewPanel::handlePicking(EditorContext& ctx, EditorCamera& camera,
         if (hitId != NovaEngine::UUID::kInvalid) {
             if (io.KeyCtrl) ctx.toggleSelected(hitId);  // Ctrl 加选/减选
             else ctx.setSelected(hitId);
+            // 拾取成功日志（配合 GizmoController 的激活日志排查「选中但 gizmo 不显示」）
+            if (NovaEngine::GameObject* hit = ctx.scene->findGameObject(hitId))
+                NovaEngine::Logger::info("拾取命中: {}（id={}）", hit->name(), hitId);
         } else if (!io.KeyCtrl) {
             ctx.clearSelection();  // 点击空白取消选择
         }

@@ -1,61 +1,192 @@
 {
-  "version": 1,
-  "name": "DemoScene",
-  "environment": {
-    "skyColor": [0.18, 0.22, 0.35],
-    "ambientColor": [0.15, 0.15, 0.18],
-    "showGrid": true
-  },
-  "editorCamera": { "target": [0.0, 1.0, 0.0], "distance": 8.0, "yaw": 0.6, "pitch": -0.35 },
-  "objects": [
-    {
-      "id": 16840732146653812735,
-      "name": "Main Camera",
-      "active": true,
-      "parent": 0,
-      "components": [
-        { "type": "Transform", "position": [0.0, 3.0, 8.0], "rotation": [0.0, 0.0, 0.0, 1.0], "scale": [1.0, 1.0, 1.0] },
-        { "type": "Camera", "fov": 60.0, "nearPlane": 0.1, "farPlane": 1000.0, "isMain": true }
-      ]
+    "editorCamera": {
+        "distance": 8.0,
+        "pitch": -0.3499999940395355,
+        "target": [
+            0.13947445154190063,
+            1.0,
+            0.20386940240859985
+        ],
+        "yaw": 0.6000000238418579
     },
-    {
-      "id": 9723810445972830153,
-      "name": "Sun",
-      "active": true,
-      "parent": 0,
-      "components": [
-        { "type": "Transform", "position": [0.0, 5.0, 0.0], "rotation": [-0.3536, 0.3536, -0.1464, 0.8536], "scale": [1.0, 1.0, 1.0] },
-        { "type": "DirectionalLight", "color": [1.0, 0.95, 0.85], "intensity": 1.2 }
-      ]
+    "environment": {
+        "ambientColor": [
+            0.15000000596046448,
+            0.15000000596046448,
+            0.18000000715255737
+        ],
+        "showGrid": true,
+        "skyColor": [
+            0.18000000715255737,
+            0.2199999988079071,
+            0.3499999940395355
+        ]
     },
-    {
-      "id": 12345678901234567890,
-      "name": "Cube",
-      "active": true,
-      "parent": 0,
-      "components": [
-        { "type": "Transform", "position": [0.0, 1.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0], "scale": [1.0, 1.0, 1.0] },
+    "name": "DemoScene",
+    "objects": [
         {
-          "type": "MeshRenderer",
-          "mesh": "assets/models/cube.obj",
-          "material": { "albedo": [0.9, 0.35, 0.2], "roughness": 0.5, "metallic": 0.0, "albedoMap": "" }
+            "active": true,
+            "components": [
+                {
+                    "position": [
+                        0.0,
+                        3.0,
+                        8.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "type": "Transform"
+                },
+                {
+                    "clearColor": [
+                        0.18000000715255737,
+                        0.2199999988079071,
+                        0.3499999940395355,
+                        1.0
+                    ],
+                    "farPlane": 1000.0,
+                    "fov": 60.0,
+                    "isMain": true,
+                    "nearPlane": 0.10000000149011612,
+                    "type": "Camera"
+                }
+            ],
+            "id": 16840732146653812735,
+            "name": "Main Camera",
+            "parent": 0
         },
-        { "type": "SpinningCube", "speed": 30.0 }
-      ]
-    },
-    {
-      "id": 9988776655443322110,
-      "name": "SmallCube",
-      "active": true,
-      "parent": 12345678901234567890,
-      "components": [
-        { "type": "Transform", "position": [1.5, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0], "scale": [0.4, 0.4, 0.4] },
         {
-          "type": "MeshRenderer",
-          "mesh": "assets/models/cube.obj",
-          "material": { "albedo": [1.0, 1.0, 1.0], "roughness": 0.4, "metallic": 0.1, "albedoMap": "" }
+            "active": true,
+            "components": [
+                {
+                    "position": [
+                        0.0,
+                        5.0,
+                        0.0
+                    ],
+                    "rotation": [
+                        -0.3535766899585724,
+                        0.3535766899585724,
+                        -0.14639034867286682,
+                        0.853543758392334
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "type": "Transform"
+                },
+                {
+                    "color": [
+                        1.0,
+                        0.949999988079071,
+                        0.8500000238418579
+                    ],
+                    "intensity": 1.2000000476837158,
+                    "type": "DirectionalLight"
+                }
+            ],
+            "id": 9723810445972830153,
+            "name": "Sun",
+            "parent": 0
+        },
+        {
+            "active": true,
+            "components": [
+                {
+                    "position": [
+                        0.0,
+                        1.0,
+                        0.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "type": "Transform"
+                },
+                {
+                    "material": {
+                        "albedo": [
+                            0.8999999761581421,
+                            0.3499999940395355,
+                            0.20000000298023224
+                        ],
+                        "albedoMap": "",
+                        "metallic": 0.0,
+                        "roughness": 0.5
+                    },
+                    "mesh": "assets/models/cube.obj",
+                    "type": "MeshRenderer"
+                },
+                {
+                    "enabled": true,
+                    "speed": 30.0,
+                    "type": "SpinningCube"
+                }
+            ],
+            "id": 12345678901234567890,
+            "name": "Cube",
+            "parent": 0
+        },
+        {
+            "active": true,
+            "components": [
+                {
+                    "position": [
+                        1.5,
+                        0.0,
+                        0.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "scale": [
+                        0.4000000059604645,
+                        0.4000000059604645,
+                        0.4000000059604645
+                    ],
+                    "type": "Transform"
+                },
+                {
+                    "material": {
+                        "albedo": [
+                            1.0,
+                            1.0,
+                            1.0
+                        ],
+                        "albedoMap": "",
+                        "metallic": 0.10000000149011612,
+                        "roughness": 0.4000000059604645
+                    },
+                    "mesh": "assets/models/cube.obj",
+                    "type": "MeshRenderer"
+                }
+            ],
+            "id": 9988776655443322110,
+            "name": "SmallCube",
+            "parent": 12345678901234567890
         }
-      ]
-    }
-  ]
+    ],
+    "version": 1
 }

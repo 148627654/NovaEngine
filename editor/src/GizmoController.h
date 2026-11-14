@@ -25,7 +25,7 @@ public:
 
     void cycleOperation();   // W/E/R 循环
     void toggleSpace();      // X 切换 Local/World
-    void setOperation(Operation op) { m_operation = op; }
+    void setOperation(Operation op);   // 设操作（含切换日志）
     Operation operation() const { return m_operation; }
     Space space() const { return m_space; }
 
@@ -36,6 +36,10 @@ private:
     bool m_over = false;
     glm::mat4 m_view{1.0f};
     glm::mat4 m_projection{1.0f};
+    // 上次打日志时的激活状态（选中对象/操作/空间变化时才输出一次）
+    uint64_t m_lastGoId = 0;
+    Operation m_lastLoggedOp = Operation::Translate;
+    Space m_lastLoggedSpace = Space::World;
 };
 
 }  // namespace NovaEditor
