@@ -1,0 +1,21 @@
+# Build output
+build/
+out/
+cmake-build-*/
+.vs/
+
+# CMake FetchContent
+_deps/
+
+# IDE
+.idea/
+.vscode/ipch/
+
+# Misc
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+
+# ImGui runtime state
+imgui.ini

@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "name": "DemoScene",
+  "environment": {
+    "skyColor": [0.18, 0.22, 0.35],
+    "ambientColor": [0.15, 0.15, 0.18],
+    "showGrid": true
+  },
+  "editorCamera": { "target": [0.0, 1.0, 0.0], "distance": 8.0, "yaw": 0.6, "pitch": -0.35 },
+  "objects": [
+    {
+      "id": 16840732146653812735,
+      "name": "Main Camera",
+      "active": true,
+      "parent": 0,
+      "components": [
+        { "type": "Transform", "position": [0.0, 3.0, 8.0], "rotation": [0.0, 0.0, 0.0, 1.0], "scale": [1.0, 1.0, 1.0] },
+        { "type": "Camera", "fov": 60.0, "nearPlane": 0.1, "farPlane": 1000.0, "isMain": true }
+      ]
+    },
+    {
+      "id": 9723810445972830153,
+      "name": "Sun",
+      "active": true,
+      "parent": 0,
+      "components": [
+        { "type": "Transform", "position": [0.0, 5.0, 0.0], "rotation": [-0.3536, 0.3536, -0.1464, 0.8536], "scale": [1.0, 1.0, 1.0] },
+        { "type": "DirectionalLight", "color": [1.0, 0.95, 0.85], "intensity": 1.2 }
+      ]
+    },
+    {
+      "id": 12345678901234567890,
+      "name": "Cube",
+      "active": true,
+      "parent": 0,
+      "components": [
+        { "type": "Transform", "position": [0.0, 1.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0], "scale": [1.0, 1.0, 1.0] },
+        {
+          "type": "MeshRenderer",
+          "mesh": "assets/models/cube.obj",
+          "material": { "albedo": [0.9, 0.35, 0.2], "roughness": 0.5, "metallic": 0.0, "albedoMap": "" }
+        },
+        { "type": "SpinningCube", "speed": 30.0 }
+      ]
+    },
+    {
+      "id": 9988776655443322110,
+      "name": "SmallCube",
+      "active": true,
+      "parent": 12345678901234567890,
+      "components": [
+        { "type": "Transform", "position": [1.5, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0], "scale": [0.4, 0.4, 0.4] },
+        {
+          "type": "MeshRenderer",
+          "mesh": "assets/models/cube.obj",
+          "material": { "albedo": [1.0, 1.0, 1.0], "roughness": 0.4, "metallic": 0.1, "albedoMap": "" }
+        }
+      ]
+    }
+  ]
+}
