@@ -10,6 +10,7 @@
 #include <NovaEngine/Render/Cubemap.h>
 #include <NovaEngine/Render/Primitives.h>
 #include <NovaEngine/Render/Shader.h>
+#include <NovaEngine/Assets/AssetStream.h>
 #include <NovaEngine/Assets/TextureLoader.h>
 #include <NovaEngine/Core/Logger.h>
 
@@ -70,10 +71,20 @@ std::shared_ptr<Cubemap> Cubemap::createFromFaces(
     for (int i = 0; i < 6; ++i) {
         int w = 0, h = 0;
         if (hdr) {
-            // HDR：stb 直接解码为 float RGB；翻转设置与 TextureLoader 一致（不翻转）
+            // HDR：stb 内存解码为 float RGB（AssetStream 读取：中文路径安全，裁定 1）；
+            // 翻转设置与 TextureLoader 一致（不翻转）
+            std::vector<uint8_t> bytes;
+            if (!AssetStream::readAllBytes(facePaths[i], bytes)) {
+                Logger::error("[Cubemap] 读取 HDR 面失败 {}", facePaths[i].string());
+                glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+                glDeleteTextures(1, &cubemap->m_id);
+                cubemap->m_id = 0;   // 已手动释放：置 0 防析构函数重复删除
+                return nullptr;
+            }
             stbi_set_flip_vertically_on_load(0);
             int channels = 0;
-            float* data = stbi_loadf(facePaths[i].string().c_str(), &w, &h, &channels, 3);
+            float* data = stbi_loadf_from_memory(bytes.data(), static_cast<int>(bytes.size()),
+                                                 &w, &h, &channels, 3);
             if (!data) {
                 Logger::error("[Cubemap] 解码 HDR 面失败 {}: {}", facePaths[i].string(),
                               stbi_failure_reason());
@@ -134,9 +145,17 @@ std::shared_ptr<Cubemap> Cubemap::createFromEquirect(const std::filesystem::path
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     if (hdr) {
+        // HDR：AssetStream 内存读取 + stbi_loadf_from_memory（裁定 1）
+        std::vector<uint8_t> bytes;
+        if (!AssetStream::readAllBytes(absolutePath, bytes)) {
+            Logger::error("[Cubemap] 读取 HDR 失败 {}", absolutePath.string());
+            glDeleteTextures(1, &srcTex);
+            return nullptr;
+        }
         stbi_set_flip_vertically_on_load(0);   // 与 TextureLoader 一致：不翻转
         int channels = 0;
-        float* data = stbi_loadf(absolutePath.string().c_str(), &srcW, &srcH, &channels, 3);
+        float* data = stbi_loadf_from_memory(bytes.data(), static_cast<int>(bytes.size()),
+                                             &srcW, &srcH, &channels, 3);
         if (!data) {
             Logger::error("[Cubemap] 解码 HDR 失败 {}: {}", absolutePath.string(),
                           stbi_failure_reason());

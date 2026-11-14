@@ -1,4 +1,5 @@
 #include <NovaEngine/Serialization/SceneSerializer.h>
+#include <NovaEngine/Assets/AssetStream.h>
 #include <NovaEngine/Scene/Scene.h>
 #include <NovaEngine/Scene/GameObject.h>
 #include <NovaEngine/Scene/Transform.h>
@@ -12,7 +13,6 @@
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <fstream>
-#include <sstream>
 #include <string_view>
 #include <typeinfo>
 #include <unordered_map>
@@ -143,7 +143,7 @@ void writeGameObjectNode(nlohmann::json& out, GameObject* go) {
 
 std::string SceneSerializer::serialize(const Scene& scene, int indent) {
     nlohmann::json root;
-    root["version"] = 2;   // V0.2-7：+天空 6 字段（读时兼容 1/2）
+    root["version"] = 3;   // V0.2-8/V0.2-14：+fogColor / material alpha+blendMode（读时兼容 1/2/3）
     root["name"] = scene.name();
 
     {
@@ -151,6 +151,7 @@ std::string SceneSerializer::serialize(const Scene& scene, int indent) {
         env["skyColor"] = vec3ToJson(scene.skyColor);
         env["ambientColor"] = vec3ToJson(scene.ambientColor);
         env["showGrid"] = scene.showGrid;
+        env["fogColor"] = vec3ToJson(scene.fogColor);   // V0.2-5：网格雾色（缺省随 skyColor 联动）
         // 天空（V0.2-7）：skyMode 存字符串
         env["skyMode"] = scene.skyMode == SkyMode::Cubemap ? "Cubemap" : "Gradient";
         env["skyHorizonColor"] = vec3ToJson(scene.skyHorizonColor);
@@ -202,8 +203,8 @@ void SceneSerializer::deserialize(Scene& target, const std::string& json) {
         return;
     }
     const int version = safeGet(root, "version", 0);
-    if (version != 1 && version != 2)
-        Logger::warn("场景文件版本为 {}（期望 1 或 2），仍尝试加载", version);
+    if (version != 1 && version != 2 && version != 3)
+        Logger::warn("场景文件版本为 {}（期望 1/2/3），仍尝试加载", version);
 
     // 1. 清空 target（保留 Scene 对象身份）：全部对象入销毁队列并立即执行
     {
@@ -273,6 +274,16 @@ void SceneSerializer::deserialize(Scene& target, const std::string& json) {
         }
     }
 
+    // 3.5 无 Transform 防御（V0.2-14）：畸形文件/旧文件缺 Transform 时补默认 Transform，
+    //     保证 setParent/transform() 等路径不空指针崩溃（callAwake=false，第 5 步统一补调）
+    for (const auto& rec : records) {
+        if (rec.go->transform() != nullptr) continue;
+        Logger::warn("反序列化：对象 \"{}\" 缺少 Transform 组件，已补充默认 Transform", rec.go->name());
+        rec.go->attachComponent(std::make_unique<Transform>(rec.go),
+                                Component::componentTypeId<Transform>(),
+                                /*callAwake=*/false);
+    }
+
     // 4. 重建父子层级：全部对象已挂根，按 parent 字段 setParent(keepWorldTransform=false)
     //    （直接用文件里的局部值，不改动世界矩阵语义）
     for (const auto& rec : records) {
@@ -298,6 +309,8 @@ void SceneSerializer::deserialize(Scene& target, const std::string& json) {
         target.skyColor = jsonToVec3(env.value("skyColor", nlohmann::json()), glm::vec3(0.18f, 0.22f, 0.35f));
         target.ambientColor = jsonToVec3(env.value("ambientColor", nlohmann::json()), glm::vec3(0.15f, 0.15f, 0.18f));
         target.showGrid = safeGet(env, "showGrid", true);
+        // V0.2-5：fogColor 缺省随 skyColor 联动（旧文件无此字段 → 取刚读到的 skyColor）
+        target.fogColor = jsonToVec3(env.value("fogColor", nlohmann::json()), target.skyColor);
 
         // 天空（V0.2-7）：全部字段默认值兜底，旧 JSON 开箱即用
         const std::string skyModeStr = safeGet(env, "skyMode", std::string("Gradient"));
@@ -342,18 +355,12 @@ bool SceneSerializer::saveToFile(const Scene& scene, const std::filesystem::path
 }
 
 bool SceneSerializer::loadFromFile(Scene& target, const std::filesystem::path& path) {
-    std::ifstream file(path, std::ios::binary);
-    if (!file.is_open()) {
+    // 读取收敛到 AssetStream（中文路径安全；Wave 2 pak 挂载后场景也可从内存 entry 读）
+    std::string content;
+    if (!AssetStream::readAllText(path, content)) {
         Logger::error("加载场景失败：无法打开文件 {}", path.string());
         return false;
     }
-    std::ostringstream ss;
-    ss << file.rdbuf();
-    if (file.bad()) {
-        Logger::error("加载场景失败：读取文件 {} 出错", path.string());
-        return false;
-    }
-    const std::string content = ss.str();
     // 先做一次解析校验，失败时返回 false 且不改动场景
     try {
         static_cast<void>(nlohmann::json::parse(content));

@@ -11,22 +11,28 @@ namespace NovaEngine {
 
 namespace {
 
-// 上传 RGBA8 像素为 2D 纹理（含 mipmap）。
+// 上传 RGBA8 像素为 2D 纹理（采样参数化，V0.3-5 .novameta 消费；默认参数等价旧行为）。
 // 参数用引用回写纹理 id 与尺寸——冻结头不允许添加成员函数，工厂先 new 出 Texture 再经本函数填充
 void uploadRgba8(uint32_t& outId, int& outWidth, int& outHeight,
-                 const uint8_t* pixels, int width, int height, bool srgb) {
+                 const uint8_t* pixels, int width, int height, bool srgb,
+                 TextureWrap wrap, TextureFilter filter, bool generateMipmaps) {
     glGenTextures(1, &outId);
     glBindTexture(GL_TEXTURE_2D, outId);
 
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    const GLint wrapMode = (wrap == TextureWrap::Repeat) ? GL_REPEAT : GL_CLAMP_TO_EDGE;
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrapMode);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrapMode);
+    // Trilinear 且生成 mipmap → 三线性；其余（Bilinear，或未生成 mipmap 防纹理不完整）→ 线性
+    const GLint minFilter =
+        (filter == TextureFilter::Trilinear && generateMipmaps) ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR;
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, minFilter);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
     // srgb 贴图用 sRGB 内部格式：采样自动线性化，配合片元着色器末尾的 gamma 校正输出
     const GLint internal = srgb ? GL_SRGB8_ALPHA8 : GL_RGBA8;
     glTexImage2D(GL_TEXTURE_2D, 0, internal, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-    glGenerateMipmap(GL_TEXTURE_2D);
+    if (generateMipmaps)
+        glGenerateMipmap(GL_TEXTURE_2D);
 
     glBindTexture(GL_TEXTURE_2D, 0);
     outWidth = width;
@@ -38,7 +44,8 @@ void uploadRgba8(uint32_t& outId, int& outWidth, int& outHeight,
 std::shared_ptr<Texture> Texture::createWhite() {
     const uint8_t white[4] = {255, 255, 255, 255};
     auto tex = std::shared_ptr<Texture>(new Texture());
-    uploadRgba8(tex->m_id, tex->m_width, tex->m_height, white, 1, 1, false);
+    uploadRgba8(tex->m_id, tex->m_width, tex->m_height, white, 1, 1, false,
+                TextureWrap::Repeat, TextureFilter::Trilinear, true);
     return tex;
 }
 
@@ -61,11 +68,19 @@ std::shared_ptr<Texture> Texture::createCheckerboard(int cells, glm::vec4 colorA
     }
 
     auto tex = std::shared_ptr<Texture>(new Texture());
-    uploadRgba8(tex->m_id, tex->m_width, tex->m_height, pixels.data(), size, size, false);
+    uploadRgba8(tex->m_id, tex->m_width, tex->m_height, pixels.data(), size, size, false,
+                TextureWrap::Repeat, TextureFilter::Trilinear, true);
     return tex;
 }
 
 std::shared_ptr<Texture> Texture::createFromFile(const std::filesystem::path& path, bool srgb) {
+    // 旧签名：转发默认采样参数（Repeat/Trilinear/生成 mipmap），行为与旧版逐字节等价
+    return createFromFile(path, srgb, TextureWrap::Repeat, TextureFilter::Trilinear, true);
+}
+
+std::shared_ptr<Texture> Texture::createFromFile(const std::filesystem::path& path, bool srgb,
+                                                 TextureWrap wrap, TextureFilter filter,
+                                                 bool generateMipmaps) {
     int w = 0, h = 0;
     std::vector<uint8_t> pixels;
     // 解码委托给 TextureLoader（stb_image 唯一实现点，翻转标志 false 与 Assimp FlipUVs 配套）
@@ -75,7 +90,8 @@ std::shared_ptr<Texture> Texture::createFromFile(const std::filesystem::path& pa
     }
 
     auto tex = std::shared_ptr<Texture>(new Texture());
-    uploadRgba8(tex->m_id, tex->m_width, tex->m_height, pixels.data(), w, h, srgb);
+    uploadRgba8(tex->m_id, tex->m_width, tex->m_height, pixels.data(), w, h, srgb,
+                wrap, filter, generateMipmaps);
     return tex;
 }
 

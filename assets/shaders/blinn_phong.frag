@@ -16,6 +16,7 @@ uniform vec3 uAmbient;
 uniform vec3 uAlbedo;
 uniform float uRoughness;
 uniform float uMetallic;
+uniform float uAlpha;         // V0.2-8：AlphaBlend 混合系数（Opaque 恒 1.0）
 uniform int uUseAlbedoMap;
 uniform sampler2D uAlbedoMap; // unit 0
 
@@ -71,5 +72,5 @@ void main() {
 
     // 输出前 gamma 校正（引擎管线按线性计算，显示器按 sRGB 显示）
     color = pow(max(color, vec3(0.0)), vec3(1.0 / 2.2));
-    fragColor = vec4(color, 1.0);
+    fragColor = vec4(color, uAlpha);
 }

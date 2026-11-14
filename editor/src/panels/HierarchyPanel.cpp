@@ -51,8 +51,10 @@ void HierarchyPanel::onGui(EditorContext& ctx, EditorCamera&) {
         return;
     }
 
-    // F2 重命名（单选对象；输入框激活期间 WantCaptureKeyboard 会挡住 Del 等快捷键）
-    if (Input::isKeyPressed(Key::F2) && !ImGui::GetIO().WantCaptureKeyboard)
+    // F2 重命名（单选对象；Play 态禁用——修复 7.2-2 结构修改守卫；
+    // 输入框激活期间 WantCaptureKeyboard 会挡住 Del 等快捷键）
+    if (ctx.state == EditorContext::EditorState::Edit &&
+        Input::isKeyPressed(Key::F2) && !ImGui::GetIO().WantCaptureKeyboard)
         if (GameObject* go = ctx.activeObject()) {
             m_renamingId = go->id();
             m_renameBuffer = go->name();
@@ -63,9 +65,9 @@ void HierarchyPanel::onGui(EditorContext& ctx, EditorCamera&) {
     for (GameObject* root : scene->rootObjects())
         drawNode(ctx, root);
 
-    // 点击空白取消选择
+    // 点击空白取消选择（Ctrl 语义统一 7.2-12：Ctrl 按住时保留选择）
     if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-        !ImGui::IsAnyItemHovered())
+        !ImGui::IsAnyItemHovered() && !ImGui::GetIO().KeyCtrl)
         ctx.clearSelection();
 
     // 空白右键菜单（挂根创建）

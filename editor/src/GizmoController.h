@@ -1,4 +1,6 @@
 #pragma once
+#include <cstddef>
+#include <cstdint>
 #include <glm/mat4x4.hpp>
 #include <glm/vec2.hpp>
 
@@ -39,6 +41,7 @@ private:
     glm::mat4 m_projection{1.0f};
     // 上次打日志时的激活状态（选中对象/操作/空间变化时才输出一次）
     uint64_t m_lastGoId = 0;
+    size_t m_lastGoCount = 1;          // 多选日志用（选中数量）
     Operation m_lastLoggedOp = Operation::Translate;
     Space m_lastLoggedSpace = Space::World;
 };

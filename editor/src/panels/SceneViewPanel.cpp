@@ -20,7 +20,13 @@
 #include <NovaEngine/Scene/DirectionalLight.h>
 #include <NovaEngine/Scene/MeshRenderer.h>
 #include <NovaEngine/Scene/Scene.h>
+#include <NovaEngine/Scene/SceneRenderer.h>
 #include <NovaEngine/Scene/Transform.h>
+
+// glfwGetTime（Play toast 时间戳）用；顺序要求与 EditorApplication 一致：
+// glad 先行（__gl_h_ 守卫令 GLFW 内嵌 <GL/gl.h> 变 no-op），GLFW 头在 glad 之后。
+#include <glad/gl.h>
+#include <GLFW/glfw3.h>
 
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -100,13 +106,17 @@ void accumulateAabb(NovaEngine::GameObject* go, NovaEngine::AABB& out, bool& any
     for (const auto& child : go->children()) accumulateAabb(child.get(), out, any);
 }
 
-// Play 模式渲染相机（§7.3）：isMain 优先，无则第一个 Camera，再无返回 nullptr（回退编辑器相机）
+// Play 模式渲染相机（§7.3）：isMain 优先，无则第一个 Camera，再无返回 nullptr（回退编辑器相机）。
+// Reviewer 追加：跳过非激活层级（!activeInHierarchy）的对象，与引擎侧 collectCamera 逻辑对齐——
+// followSelected 的相机选择与 Play 渲染保持一致。
 NovaEngine::Camera* pickPlayCamera(NovaEngine::Scene* scene) {
     auto cameras = scene->findComponents<NovaEngine::Camera>();
     if (cameras.empty()) return nullptr;
     for (auto* c : cameras)
-        if (c->isMain) return c;
-    return cameras.front();
+        if (c->isMain && c->gameObject()->activeInHierarchy()) return c;
+    for (auto* c : cameras)
+        if (c->gameObject()->activeInHierarchy()) return c;
+    return nullptr;   // 无激活相机：回退编辑器相机
 }
 
 }  // namespace
@@ -116,12 +126,18 @@ SceneViewPanel::SceneViewPanel() : Panel("Scene") {}
 void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
     using namespace NovaEngine;
     Scene* scene = ctx.scene;
+    const bool playMode = ctx.state == EditorContext::EditorState::Play;
+    const bool editMode = !playMode;
 
     ImGui::Begin(m_name.c_str(), &open);
 
     // 上报屏幕区域（外部拖放目标判定用）
     ctx.viewportScreenMin = ImGui::GetWindowPos();
     ctx.viewportScreenMax = ImGui::GetWindowPos() + ImGui::GetWindowSize();
+
+    // Play 态顶部工具栏（V0.2-13/V0.3-10 子集）：分辨率预设 / Render Scale / Follow Selected。
+    // Edit 态完全不变（不显示工具栏）。
+    if (playMode) drawPlayToolbar(ctx);
 
     const ImVec2 vpPos = ImGui::GetCursorScreenPos();
     const ImVec2 vpSize = ImGui::GetContentRegionAvail();
@@ -131,114 +147,162 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
         return;
     }
 
+    // 游戏分辨率（V0.2-13，仅 Play 生效）：free = 面板尺寸；否则固定 (width,height)。
+    // 相机投影 aspect 用「目标分辨率」宽高比；FBO 实际尺寸 = 目标 × renderScale（0.5–2.0，取整）。
+    int targetW = static_cast<int>(vpSize.x), targetH = static_cast<int>(vpSize.y);
+    if (playMode && !ctx.gameViewSettings.free) {
+        targetW = std::max(1, ctx.gameViewSettings.width);
+        targetH = std::max(1, ctx.gameViewSettings.height);
+    }
+    const float renderScale =
+        playMode ? std::clamp(ctx.gameViewSettings.renderScale, 0.5f, 2.0f) : 1.0f;
+    int w = std::max(1, static_cast<int>(std::round(targetW * renderScale)));
+    int h = std::max(1, static_cast<int>(std::round(targetH * renderScale)));
+    if (playMode) {
+        // Reviewer P2-4：Custom 分辨率 × renderScale 2.0 可达 16384² MSAA（数 GB 显存必挂），
+        // 每维 clamp [16, 4096]（Edit 态尺寸即面板尺寸，不受影响）
+        w = std::clamp(w, 16, 4096);
+        h = std::clamp(h, 16, 4096);
+    }
+    const float targetAspect = static_cast<float>(targetW) / static_cast<float>(targetH);
+
     // FBO 尺寸同步（尺寸 0 已跳过；变化时全删重建）
-    const int w = static_cast<int>(vpSize.x), h = static_cast<int>(vpSize.y);
+    bool fboReady = true;
     if (!m_fboCreated) {
         if (!m_fbo.create(w, h, 4)) {
-            Logger::error("SceneView: Framebuffer 创建失败");
-            ImGui::End();
-            return;
+            Logger::error("SceneView: Framebuffer 创建失败 ({}x{})", w, h);
+            fboReady = false;   // m_fboCreated 保持 false，下帧重试
+        } else {
+            m_fboCreated = true;
         }
-        m_fboCreated = true;
     } else if (w != m_fbo.width() || h != m_fbo.height()) {
         m_fbo.resize(w, h);
-    }
-
-    // 渲染相机：Play 切场景主相机（isMain 优先，无则第一个，再无回退编辑器相机）；Edit 用编辑器相机
-    RenderCamera renderCam;
-    glm::vec4 clearColor(scene->skyColor, 1.0f);  // §3.2：Edit 用 scene.skyColor
-    if (ctx.state == EditorContext::EditorState::Play) {
-        if (Camera* cam = pickPlayCamera(scene)) {
-            Transform* t = cam->transform();
-            const glm::vec3 camPos = t->worldPosition();
-            // 引擎约定 forward = +Z：用 lookAt 让相机看向 Transform.forward。
-            // （inverse(world) 的视空间看向 -Z，与 forward=+Z 约定矛盾，相机会看到反方向）
-            renderCam.view = glm::lookAt(camPos, camPos + t->forward(), glm::vec3(0.0f, 1.0f, 0.0f));
-            renderCam.projection = glm::perspective(glm::radians(cam->fov), static_cast<float>(w) / h,
-                                                    cam->nearPlane, cam->farPlane);
-            renderCam.position = camPos;
-            clearColor = cam->clearColor;
-        } else {
-            renderCam.view = camera.viewMatrix();
-            renderCam.projection = camera.projectionMatrix(static_cast<float>(w) / h);
-            renderCam.position = camera.position();
+        if (m_fbo.width() != w || m_fbo.height() != h) {
+            // resize 无返回值：尺寸未生效视为重建失败，销毁并下帧重试（Reviewer P2-4）
+            Logger::error("SceneView: Framebuffer 重建失败 ({}x{})", w, h);
+            m_fbo.destroy();
+            m_fboCreated = false;
+            fboReady = false;
         }
+    }
+    if (!fboReady) {
+        // FBO 不可用：跳过本帧 3D 渲染（不画图、不跑渲染管线），下帧自动重试
+        ImGui::End();
+        return;
+    }
+
+    // Follow Selected（V0.3-10 子集）：每帧渲染前把主相机 Transform 设到 选中世界位置+偏移
+    if (playMode && ctx.followSelected) {
+        applyFollowSelected(ctx);
     } else {
+        m_followOffsetValid = false;   // 未跟随时重置：退出 Play / 关闭开关后偏移失效
+    }
+
+    // 离屏渲染（Stats "render" 段：FBO bind 前取 t0）
+    const auto renderT0 = std::chrono::steady_clock::now();
+    RenderCamera renderCam;  // Edit 路径 + gizmo 用
+    if (playMode) {
+        // Play 路径（V0.5-1）：整帧渲染交给 SceneRenderer（天空/阴影/grid/submit/endFrame 全在引擎内；
+        // play 相机选择逻辑也在引擎内，无场景相机时回退编辑器相机）
+        RenderCamera fallback;
+        fallback.view = camera.viewMatrix();
+        fallback.projection = camera.projectionMatrix(targetAspect);
+        fallback.position = camera.position();
+        m_fbo.bind();
+        SceneRenderer::renderScene(*scene, fallback);
+        m_fbo.resolveMsaa();
+        m_fbo.unbind();
+    } else {
+        // Edit 路径：手写（保持原实现；V0.2-5 drawGrid 传雾色；V0.2-8 阴影收集跳过透明物体）
         renderCam.view = camera.viewMatrix();
-        renderCam.projection = camera.projectionMatrix(static_cast<float>(w) / h);
+        renderCam.projection = camera.projectionMatrix(targetAspect);
         renderCam.position = camera.position();
-    }
+        glm::vec4 clearColor(scene->skyColor, 1.0f);  // §3.2：Edit 用 scene.skyColor
 
-    // 灯光：场景第一个 DirectionalLight（方向取自 Transform.forward），无则默认方向
-    DirectionalLightData light;
-    DirectionalLight* dirLight = nullptr;
-    auto lights = scene->findComponents<DirectionalLight>();
-    if (!lights.empty()) {
-        dirLight = lights.front();
-        light.direction = dirLight->transform()->forward();
-        light.color = dirLight->color;
-        light.intensity = dirLight->intensity;
-    }
-    light.ambient = scene->ambientColor;
+        // 灯光：场景第一个 DirectionalLight（方向取自 Transform.forward），无则默认方向
+        DirectionalLightData light;
+        DirectionalLight* dirLight = nullptr;
+        auto lights = scene->findComponents<DirectionalLight>();
+        if (!lights.empty()) {
+            dirLight = lights.front();
+            light.direction = dirLight->transform()->forward();
+            light.color = dirLight->color;
+            light.intensity = dirLight->intensity;
+        }
+        light.ambient = scene->ambientColor;
 
-    // 阴影参数（V0.2-6）：castShadows 时组装；阴影盒中心 = 相机位置沿光轴投影到过原点平面（跟随相机）
-    ShadowCameraParams shadowParams;
-    std::vector<ShadowItem> shadowItems;
-    const bool shadowEnabled = dirLight && dirLight->castShadows;
-    if (shadowEnabled) {
-        shadowParams.lightDirection = light.direction;
-        shadowParams.mapSize = dirLight->shadowMapSize;
-        shadowParams.bias = dirLight->shadowBias;
-        const glm::vec3 camCenter =
-            renderCam.position - light.direction * glm::dot(renderCam.position, light.direction);
-        shadowParams.lightViewProj = computeLightViewProj(light.direction, camCenter,
-                                                          dirLight->shadowRange,
-                                                          dirLight->shadowMapSize);
-    }
+        // 阴影参数（V0.2-6）：castShadows 时组装；阴影盒中心 = 相机位置沿光轴投影到过原点平面（跟随相机）
+        ShadowCameraParams shadowParams;
+        std::vector<ShadowItem> shadowItems;
+        const bool shadowEnabled = dirLight && dirLight->castShadows;
+        if (shadowEnabled) {
+            shadowParams.lightDirection = light.direction;
+            shadowParams.mapSize = dirLight->shadowMapSize;
+            shadowParams.bias = dirLight->shadowBias;
+            const glm::vec3 camCenter =
+                renderCam.position - light.direction * glm::dot(renderCam.position, light.direction);
+            shadowParams.lightViewProj = computeLightViewProj(light.direction, camCenter,
+                                                              dirLight->shadowRange,
+                                                              dirLight->shadowMapSize);
+        }
 
-    // 天空 cubemap（V0.2-7）：Cubemap 模式且路径非空时加载；失败/渐变走 nullptr（内部回退渐变）
-    std::shared_ptr<Cubemap> skyCube;
-    if (scene->skyMode == SkyMode::Cubemap && !scene->skyCubemapPath.empty())
-        skyCube = AssetDatabase::instance().getCubemap(scene->skyCubemapPath);
+        // 天空 cubemap（V0.2-7）：Cubemap 模式且路径非空时加载；失败/渐变走 nullptr（内部回退渐变）
+        std::shared_ptr<Cubemap> skyCube;
+        if (scene->skyMode == SkyMode::Cubemap && !scene->skyCubemapPath.empty())
+            skyCube = AssetDatabase::instance().getCubemap(scene->skyCubemapPath);
 
-    // 离屏渲染（严格按 ARCHITECTURE-V0.2 顺序：天空 → 单次遍历收集 → 阴影 → grid → 描边）
-    const auto renderT0 = std::chrono::steady_clock::now();  // Stats "render" 段：FBO bind 前取 t0
-    m_fbo.bind();
-    Renderer::beginFrame(renderCam, light, clearColor);
-    SkyboxRenderer::draw(glm::inverse(renderCam.projection * renderCam.view), renderCam.position,
-                         scene->skyMode, scene->skyHorizonColor, scene->skyZenithColor,
-                         skyCube, scene->skyRotation, scene->skyExposure);
-    scene->forEachObject([&](GameObject* go) {
-        if (!go->activeInHierarchy()) return;
-        auto* mr = go->getComponent<MeshRenderer>();
-        if (!mr || !mr->mesh) return;
-        const glm::mat4 world = go->transform()->worldMatrix();
-        Renderer::submit(mr->mesh, mr->material, world);
-        if (shadowEnabled) shadowItems.push_back(ShadowItem{mr->mesh, world});
-    });
-    if (shadowEnabled) Renderer::drawShadowPass(shadowParams, shadowItems);
-    if (scene->showGrid) Renderer::drawGrid();
-    const glm::vec3 kOutlineColor(1.0f, 0.55f, 0.1f);  // 选中橙色描边
-    for (uint64_t id : ctx.selectedIds) {
-        GameObject* go = scene->findGameObject(id);
-        if (!go) continue;
-        auto* mr = go->getComponent<MeshRenderer>();
-        if (mr && mr->mesh)
-            Renderer::drawOutline(mr->mesh, go->transform()->worldMatrix(), kOutlineColor);
+        // 严格按 ARCHITECTURE-V0.2 顺序：天空 → 单次遍历收集 → 阴影 → grid → 描边
+        m_fbo.bind();
+        Renderer::beginFrame(renderCam, light, clearColor);
+        SkyboxRenderer::draw(glm::inverse(renderCam.projection * renderCam.view), renderCam.position,
+                             scene->skyMode, scene->skyHorizonColor, scene->skyZenithColor,
+                             skyCube, scene->skyRotation, scene->skyExposure);
+        scene->forEachObject([&](GameObject* go) {
+            if (!go->activeInHierarchy()) return;
+            auto* mr = go->getComponent<MeshRenderer>();
+            if (!mr || !mr->mesh) return;
+            const glm::mat4 world = go->transform()->worldMatrix();
+            Renderer::submit(mr->mesh, mr->material, world);
+            // V0.2-8：透明物体（blendMode != Opaque）不进阴影深度 pass
+            if (shadowEnabled && mr->material.blendMode == BlendMode::Opaque)
+                shadowItems.push_back(ShadowItem{mr->mesh, world});
+        });
+        if (shadowEnabled) Renderer::drawShadowPass(shadowParams, shadowItems);
+        if (scene->showGrid) Renderer::drawGrid(scene->fogColor);  // V0.2-5：网格雾色参数化
+        const glm::vec3 kOutlineColor(1.0f, 0.55f, 0.1f);  // 选中橙色描边
+        for (uint64_t id : ctx.selectedIds) {
+            GameObject* go = scene->findGameObject(id);
+            if (!go) continue;
+            auto* mr = go->getComponent<MeshRenderer>();
+            if (mr && mr->mesh)
+                Renderer::drawOutline(mr->mesh, go->transform()->worldMatrix(), kOutlineColor);
+        }
+        Renderer::endFrame();
+        m_fbo.resolveMsaa();
+        m_fbo.unbind();
     }
-    Renderer::endFrame();
-    m_fbo.resolveMsaa();
-    m_fbo.unbind();
     const auto renderT1 = std::chrono::steady_clock::now();
     Stats::setSectionMs("render",
                         std::chrono::duration<float, std::milli>(renderT1 - renderT0).count());
 
-    // FBO 纹理相对 ImGui 上下颠倒：UV 必须 (0,1)-(1,0)（§11.8）
-    ImGui::Image((ImTextureID)(intptr_t)m_fbo.colorTextureId(), vpSize,
-                 ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
-    const bool hovered = ImGui::IsItemHovered();
+    // 显示：Edit 与旧行为逐像素一致（FBO = 面板尺寸，直接铺满）；
+    // Play 在面板内容区内等比 fit-rect 居中（letterbox），FBO 纹理相对 ImGui 上下颠倒：
+    // UV 必须 (0,1)-(1,0)（§11.8）
+    bool hovered = false;
+    if (editMode) {
+        ImGui::Image((ImTextureID)(intptr_t)m_fbo.colorTextureId(), vpSize,
+                     ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
+        hovered = ImGui::IsItemHovered();
+    } else {
+        const float fitScale = std::min(1.0f, std::min(vpSize.x / targetW, vpSize.y / targetH));
+        const ImVec2 dstSize(targetW * fitScale, targetH * fitScale);
+        const ImVec2 offset((vpSize.x - dstSize.x) * 0.5f, (vpSize.y - dstSize.y) * 0.5f);
+        ImGui::SetCursorPos(ImGui::GetCursorPos() + offset);  // 居中偏移
+        ImGui::Image((ImTextureID)(intptr_t)m_fbo.colorTextureId(), dstSize,
+                     ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
+        hovered = ImGui::IsItemHovered();
+    }
     const bool windowHovered = ImGui::IsWindowHovered();
-    const bool editMode = ctx.state == EditorContext::EditorState::Edit;
     const glm::vec2 vpPosF(vpPos.x, vpPos.y), vpSizeF(vpSize.x, vpSize.y);
 
     // gizmo（ImGui::Image 之后绘制进前景 drawlist，覆盖在视口之上）
@@ -285,7 +349,91 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
         ImGui::EndDragDropTarget();
     }
 
+    // Play toast（V0.3-10 子集）：进入 Play 未保存提示，3 秒非阻塞。
+    // 纯文本绘制用前景 drawlist 无妨（非 gizmo 交互，无悬停判定依赖）。
+    if (playMode && ctx.playToastUntil > glfwGetTime()) {
+        ImDrawList* dl = ImGui::GetForegroundDrawList();
+        const char* text = "Scene has unsaved changes (Play snapshot will restore)";
+        const ImVec2 ts = ImGui::CalcTextSize(text);
+        const float pad = 10.0f;
+        const ImVec2 center(vpPos.x + vpSize.x * 0.5f, vpPos.y + ts.y + pad);
+        const ImVec2 mn(center.x - ts.x * 0.5f - pad, center.y - ts.y * 0.5f - pad * 0.5f);
+        const ImVec2 mx(center.x + ts.x * 0.5f + pad, center.y + ts.y * 0.5f + pad * 0.5f);
+        dl->AddRectFilled(mn, mx, IM_COL32(30, 30, 38, 235), 4.0f);
+        dl->AddText(ImVec2(center.x - ts.x * 0.5f, center.y - ts.y * 0.5f),
+                    IM_COL32(240, 220, 140, 255), text);
+    }
+
     ImGui::End();
+}
+
+void SceneViewPanel::drawPlayToolbar(EditorContext& ctx) {
+    // V0.2-13：Free / 1920x1080 / 1280x720 / Custom 预设；Custom 时 W/H 可编辑；Render Scale 0.5–2.0
+    auto& gv = ctx.gameViewSettings;
+    int preset = 0;
+    if (!gv.free) {
+        if (gv.width == 1920 && gv.height == 1080) preset = 1;
+        else if (gv.width == 1280 && gv.height == 720) preset = 2;
+        else preset = 3;   // Custom
+    }
+    const char* presets[] = {"Free", "1920x1080", "1280x720", "Custom"};
+    if (ImGui::Combo("Resolution", &preset, presets,
+                     static_cast<int>(sizeof(presets) / sizeof(presets[0])))) {
+        if (preset == 0) gv.free = true;
+        else {
+            gv.free = false;
+            if (preset == 1) { gv.width = 1920; gv.height = 1080; }
+            else if (preset == 2) { gv.width = 1280; gv.height = 720; }
+            // Custom：保留当前 W/H
+        }
+    }
+    const bool custom = !gv.free && preset == 3;
+    if (custom) {
+        // Custom：W/H 可编辑（DragInt 直接改运行期设置）
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(70.0f);
+        ImGui::DragInt("W", &gv.width, 1.0f, 64, 8192);
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(70.0f);
+        ImGui::DragInt("H", &gv.height, 1.0f, 64, 8192);
+    }
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(150.0f);
+    if (ImGui::SliderFloat("Render Scale", &gv.renderScale, 0.5f, 2.0f, "%.1f"))
+        gv.renderScale = std::round(gv.renderScale * 10.0f) / 10.0f;   // 步长 0.1
+    // Follow Selected（V0.3-10 子集）：开关切换时重置偏移
+    ImGui::SameLine();
+    if (ImGui::Checkbox("Follow Selected", &ctx.followSelected)) m_followOffsetValid = false;
+    ImGui::Separator();
+}
+
+void SceneViewPanel::applyFollowSelected(EditorContext& ctx) {
+    // V0.3-10 子集：主相机跟随选中对象。启用时记录 相机世界位置 − 选中对象世界位置 偏移，
+    // 每帧渲染前把相机 Transform 设到 选中世界位置+偏移（朝向不变；退出 Play 快照自动还原）。
+    using namespace NovaEngine;
+    Scene* scene = ctx.scene;
+    if (!scene) return;
+    Camera* cam = pickPlayCamera(scene);   // isMain 优先，无则第一个
+    if (!cam) return;
+    const auto selected = ctx.selectedObjects();
+    if (selected.empty()) return;
+    Transform* ct = cam->transform();
+    Transform* st = selected.front()->transform();
+    if (!ct || !st) return;
+
+    if (!m_followOffsetValid) {
+        m_followOffset = ct->worldPosition() - st->worldPosition();
+        m_followOffsetValid = true;
+    }
+    const glm::vec3 targetWorld = st->worldPosition() + m_followOffset;
+    // 有父级：反解局部（朝向不变，只改位置）
+    GameObject* camGo = cam->gameObject();
+    if (camGo->parent() && camGo->parent()->transform())
+        ct->setLocalPosition(
+            glm::vec3(glm::inverse(camGo->parent()->transform()->worldMatrix()) *
+                      glm::vec4(targetWorld, 1.0f)));
+    else
+        ct->setLocalPosition(targetWorld);
 }
 
 void SceneViewPanel::handlePicking(EditorContext& ctx, EditorCamera& camera,

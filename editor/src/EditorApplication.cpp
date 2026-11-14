@@ -3,6 +3,7 @@
 #include "DragDrop.h"
 #include "panels/AssetBrowserPanel.h"
 #include "panels/ConsolePanel.h"
+#include "panels/EnvironmentPanel.h"
 #include "panels/HierarchyPanel.h"
 #include "panels/InspectorPanel.h"
 #include "panels/SceneViewPanel.h"
@@ -117,6 +118,7 @@ void EditorApplication::init() {
     m_panels.push_back(std::move(scenePanel));
     m_panels.push_back(std::make_unique<HierarchyPanel>());
     m_panels.push_back(std::make_unique<InspectorPanel>());
+    m_panels.push_back(std::make_unique<EnvironmentPanel>());  // V0.2-5：dockRight 与 Inspector 并排 Tab
     m_panels.push_back(std::make_unique<ConsolePanel>());
     auto browser = std::make_unique<AssetBrowserPanel>();
     browser->openSceneCallback = [this](const std::filesystem::path& p) { openScene(p); };
@@ -203,7 +205,12 @@ void EditorApplication::update(float dt) {
     // 场景更新段（Stats "update" 分段：scene->update / flushDestroyQueue 前后计时）
     const auto updateT0 = std::chrono::steady_clock::now();
     if (m_context.state == EditorContext::EditorState::Play) {
-        if (!m_context.paused) m_scene->update(dt);
+        if (m_context.paused && m_context.stepRequested) {
+            m_context.stepRequested = false;
+            m_scene->update(dt);  // V0.3-10 子集：Pause 中单步推进一帧（F10 / Edit→Step）
+        } else if (!m_context.paused) {
+            m_scene->update(dt);
+        }
     } else {
         m_scene->flushDestroyQueue();
         // 编辑器相机状态回写场景（随 Ctrl+S 持久化）
@@ -271,6 +278,7 @@ void EditorApplication::buildDockLayout(ImGuiID dockspaceId) {
 
     ImGui::DockBuilderDockWindow("Hierarchy", dockLeft);
     ImGui::DockBuilderDockWindow("Inspector", dockRight);
+    ImGui::DockBuilderDockWindow("Environment", dockRight);  // V0.2-5：与 Inspector 并排 Tab
     ImGui::DockBuilderDockWindow("Console", dockBottom);
     ImGui::DockBuilderDockWindow("Assets", dockBottom);
     ImGui::DockBuilderDockWindow("Stats", dockBottom);
@@ -309,6 +317,9 @@ void EditorApplication::showMainMenu() {
             }
             if (ImGui::MenuItem("Pause", nullptr, m_context.paused, !editMode))
                 m_context.paused = !m_context.paused;
+            // V0.3-10 子集：仅 Play 且 Paused 时可点，推进一帧
+            if (ImGui::MenuItem("Step", "F10", false, !editMode && m_context.paused))
+                m_context.stepRequested = true;
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("View")) {
@@ -341,6 +352,11 @@ void EditorApplication::handleGlobalShortcuts() {
     // F8：Stats 面板开关（V0.2-11）
     if (Input::isKeyPressed(Key::F8) && m_statsPanel)
         m_statsPanel->open = !m_statsPanel->open;
+
+    // F10：Play+Paused 单步推进一帧（V0.3-10 子集）
+    if (m_context.state == EditorContext::EditorState::Play && m_context.paused &&
+        Input::isKeyPressed(Key::F10))
+        m_context.stepRequested = true;
 
     // Undo/Redo（V0.2-1）：仅 Edit 态且 gizmo 未拖拽；Ctrl+Z=undo、Ctrl+Shift+Z/Ctrl+Y=redo
     if (m_context.state == EditorContext::EditorState::Edit && !m_gizmo.isUsing()) {
@@ -414,6 +430,11 @@ void EditorApplication::enterPlayMode() {
     m_context.m_playEntryDirty = m_context.sceneDirty;  // 记录进 Play 前脏状态（修复 7.2-4）
     m_context.state = EditorContext::EditorState::Play;
     m_context.paused = false;
+    // V0.3-10 子集：进入 Play 时未保存 → 警告日志 + 非阻塞 3 秒视口 toast
+    if (m_context.sceneDirty) {
+        Logger::warn("场景存在未保存修改（Play 快照将在退出时还原）");
+        m_context.playToastUntil = glfwGetTime() + 3.0;
+    }
     m_scene->start();  // 深度优先广播 onStart（内置过滤：非激活子树与 disabled Behaviour）
     Logger::info("进入 Play 模式");
 }
@@ -427,6 +448,7 @@ void EditorApplication::exitPlayMode() {
     m_context.state = EditorContext::EditorState::Edit;
     m_context.paused = false;
     m_context.playSnapshot.clear();
+    m_context.playToastUntil = 0.0;                     // toast 仅 Play 态显示，退出即失效
     m_context.sceneDirty = m_context.m_playEntryDirty;  // 还原进 Play 前脏状态（修复 7.2-4）
     applyEditorCameraFromScene();
     std::erase_if(m_context.selectedIds,

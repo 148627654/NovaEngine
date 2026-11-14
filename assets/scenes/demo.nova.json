@@ -20,6 +20,20 @@
             0.18000000715255737,
             0.2199999988079071,
             0.3499999940395355
+        ],
+        "skyCubemapPath": "",
+        "skyExposure": 1.0,
+        "skyHorizonColor": [
+            0.550000011920929,
+            0.6200000047683716,
+            0.7200000286102295
+        ],
+        "skyMode": "Gradient",
+        "skyRotation": 0.0,
+        "skyZenithColor": [
+            0.2199999988079071,
+            0.30000001192092896,
+            0.47999998927116394
         ]
     },
     "name": "DemoScene",
@@ -87,12 +101,16 @@
                     "type": "Transform"
                 },
                 {
+                    "castShadows": true,
                     "color": [
                         1.0,
                         0.949999988079071,
                         0.8500000238418579
                     ],
                     "intensity": 1.2000000476837158,
+                    "shadowBias": 0.0005000000237487257,
+                    "shadowMapSize": 2048,
+                    "shadowRange": 60.0,
                     "type": "DirectionalLight"
                 }
             ],
@@ -188,5 +206,5 @@
             "parent": 12345678901234567890
         }
     ],
-    "version": 1
+    "version": 3
 }

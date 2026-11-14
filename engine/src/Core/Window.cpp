@@ -103,6 +103,11 @@ Window::~Window() {
         glfwDestroyWindow(m_handle);
         m_handle = nullptr;
     }
+    // 引擎全局单窗口：销毁即进程结束路径，补 glfwTerminate 释放 GLFW 进程级资源
+    if (s_glfwInitialized) {
+        glfwTerminate();
+        s_glfwInitialized = false;
+    }
 }
 
 bool Window::shouldClose() const {

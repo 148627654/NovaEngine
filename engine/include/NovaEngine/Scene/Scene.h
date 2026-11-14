@@ -44,6 +44,7 @@ public:
     glm::vec3 skyColor = glm::vec3(0.18f, 0.22f, 0.35f);
     glm::vec3 ambientColor = glm::vec3(0.15f, 0.15f, 0.18f);
     bool showGrid = true;
+    glm::vec3 fogColor = glm::vec3(0.18f, 0.22f, 0.35f);   // 网格雾色（V0.2-5；反序列化缺省随 skyColor 联动）
 
     // 天空（V0.2-7；SceneSerializer 直接读写）
     SkyMode skyMode = SkyMode::Gradient;                          // 天空模式

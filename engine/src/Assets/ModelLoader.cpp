@@ -3,6 +3,7 @@
 // assimp 类型只在本 .cpp 内部使用，不泄漏到公共头（公共头只暴露 MeshData/Material/路径）。
 
 #include <NovaEngine/Assets/ModelLoader.h>
+#include <NovaEngine/Assets/AssetStream.h>
 #include <NovaEngine/Core/Logger.h>
 
 #include <assimp/Importer.hpp>
@@ -98,7 +99,23 @@ void extractAiMaterial(const aiMaterial* src, Material& out, std::filesystem::pa
 }  // namespace
 
 ModelImportResult ModelLoader::load(const std::filesystem::path& absolutePath) {
+    // 读取收敛到 AssetStream（中文路径安全 + Wave 2 pak 内存读取），解析逻辑转发 loadFromMemory
+    std::vector<uint8_t> bytes;
+    if (!AssetStream::readAllBytes(absolutePath, bytes)) {
+        Logger::error("ModelLoader: 读取文件失败 {}", absolutePath.string());
+        return {};  // 失败：meshes 为空
+    }
+    // 解析失败原因由 loadFromMemory 内部记录（含 hint），此处不重复打日志
+    return loadFromMemory(bytes.data(), bytes.size(), absolutePath.extension().string());
+}
+
+ModelImportResult ModelLoader::loadFromMemory(const uint8_t* data, size_t size,
+                                              const std::string& extensionHint) {
     ModelImportResult result;
+    if (!data || size == 0) {
+        Logger::error("ModelLoader: 输入字节为空，无法导入");
+        return result;
+    }
 
     Assimp::Importer importer;
     // 后处理标志（§6.4）：
@@ -108,9 +125,12 @@ ModelImportResult ModelLoader::load(const std::filesystem::path& absolutePath) {
         aiProcess_Triangulate | aiProcess_JoinIdenticalVertices |
         aiProcess_CalcTangentSpace | aiProcess_GenSmoothNormals | aiProcess_FlipUVs;
 
-    const aiScene* scene = importer.ReadFile(absolutePath.string(), kPostProcess);
+    // ReadFileFromMemory：hint = 扩展名（如 ".obj"/".gltf"）供 Assimp 定格式
+    const aiScene* scene =
+        importer.ReadFileFromMemory(data, size, kPostProcess, extensionHint.c_str());
     if (!scene || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) || !scene->HasMeshes()) {
-        Logger::error("ModelLoader: 导入失败 {}: {}", absolutePath.string(), importer.GetErrorString());
+        Logger::error("ModelLoader: 导入失败（hint {}）: {}", extensionHint,
+                      importer.GetErrorString());
         return result;  // 失败：meshes 为空
     }
 
@@ -129,7 +149,7 @@ ModelImportResult ModelLoader::load(const std::filesystem::path& absolutePath) {
         result.albedoMapPaths.push_back(albedoPath);
     }
 
-    Logger::info("ModelLoader: 导入成功 {}（{} 个子网格）", absolutePath.string(), scene->mNumMeshes);
+    Logger::info("ModelLoader: 导入成功（{} 个子网格）", scene->mNumMeshes);
     return result;
 }
 

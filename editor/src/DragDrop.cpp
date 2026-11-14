@@ -3,7 +3,6 @@
 #include <nlohmann/json.hpp>
 
 #include <NovaEngine/Assets/AssetDatabase.h>
-#include <NovaEngine/Assets/ModelLoader.h>
 #include <NovaEngine/Core/Logger.h>
 #include <NovaEngine/Core/UUID.h>
 #include <NovaEngine/Render/Mesh.h>
@@ -81,6 +80,24 @@ std::pair<std::shared_ptr<NovaEngine::Texture>, std::filesystem::path> resolveTe
     return {nullptr, {}};
 }
 
+// importModel 返回的贴图路径（契约：已解析为项目内相对路径，失败为空）→ GPU 纹理 + 项目内相对路径。
+// 引擎未解析成功（意外为项目外/绝对路径）时回退旧逻辑：按模型目录/项目根候选搜索 + 拷贝进项目。
+std::pair<std::shared_ptr<NovaEngine::Texture>, std::filesystem::path> resolveImportedTexture(
+    const std::filesystem::path& texPath, const std::filesystem::path& modelDir) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path root = NovaEngine::AssetDatabase::projectRoot();
+    const fs::path abs = fs::absolute(texPath, ec).lexically_normal();
+    const fs::path rel = fs::relative(abs, root, ec);
+    const bool inside = !ec && !rel.empty() && *rel.begin() != "..";
+    if (inside) {
+        auto tex = NovaEngine::AssetDatabase::instance().getTexture(rel);
+        if (tex) return {tex, rel};
+    }
+    // 回退：搜索 + 拷贝（拷贝/缓存逻辑保持）
+    return resolveTextureAndPath(modelDir, texPath);
+}
+
 }  // namespace
 
 bool isModelFile(const std::filesystem::path& p) {
@@ -148,38 +165,34 @@ NovaEngine::GameObject* importModelToScene(NovaEngine::Scene& scene,
     const fs::path rel = copyIntoAssets(srcAbs);
     if (rel.empty()) return nullptr;
 
-    // 网格走 AssetDatabase（缓存生效：同一模型重复拖入不重复导入）
-    std::vector<std::shared_ptr<Mesh>> meshes = AssetDatabase::instance().loadModel(rel);
-    if (meshes.empty()) return nullptr;  // loadModel 内部已 Logger::error
-
-    // 材质信息（loadModel 只返回网格，材质需另解析；与 loadModel 的子网格顺序一致）
-    const ModelImportResult imported = ModelLoader::load(srcAbs);
+    // 单次解析（V0.2-14 裁定 5）：importModel 返回网格 + 材质 + 贴图路径（Assimp 只解析一次；
+    // 网格走既有缓存，材质/贴图路径入旁表缓存）。不再二次调 ModelLoader::load。
+    const AssetImportResult imported = AssetDatabase::instance().importModel(rel);
+    if (imported.meshes.empty()) return nullptr;  // importModel 内部已 Logger::error
 
     // 根 GO（文件名）+ 每个子网格一个子 GO
     GameObject* root = scene.createGameObject(srcAbs.stem().string());
     root->transform()->setLocalPosition(spawnPosition);
 
-    for (size_t i = 0; i < meshes.size(); ++i) {
-        const std::string subName =
-            (i < imported.meshes.size() && !imported.meshes[i].name.empty())
-                ? imported.meshes[i].name
-                : std::format("SubMesh{}", i);
+    for (size_t i = 0; i < imported.meshes.size(); ++i) {
+        const std::string subName = std::format("SubMesh{}", i);
         GameObject* sub = scene.createGameObject(subName, root);
         auto* mr = sub->addComponent<MeshRenderer>();
-        mr->mesh = meshes[i];
+        mr->mesh = imported.meshes[i];
         mr->meshPath = toPortable(rel);  // 所有子网格指向源文件
         if (i < imported.materials.size())
             mr->material = imported.materials[i];
         if (i < imported.albedoMapPaths.size() && !imported.albedoMapPaths[i].empty()) {
+            // 贴图解析改用 importModel 返回的 albedoMapPaths（第 i 子网格对应）；
             // 同时写入 albedoMapPath（序列化用），保证 Ctrl+S 后贴图不丢失
             const auto [tex, texRel] =
-                resolveTextureAndPath(srcAbs.parent_path(), imported.albedoMapPaths[i]);
+                resolveImportedTexture(imported.albedoMapPaths[i], srcAbs.parent_path());
             mr->material.albedoMap = tex;
             mr->material.albedoMapPath = toPortable(texRel);  // 空路径 = 纯色
         }
     }
 
-    Logger::info("导入模型 {}（{} 个子网格）", toPortable(rel), meshes.size());
+    Logger::info("导入模型 {}（{} 个子网格）", toPortable(rel), imported.meshes.size());
     return root;
 }
 

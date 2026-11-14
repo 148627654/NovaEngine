@@ -13,6 +13,19 @@ NovaEngine::GameObject* EditorContext::activeObject() {
     return go;
 }
 
+std::vector<NovaEngine::GameObject*> EditorContext::selectedObjects() {
+    std::vector<NovaEngine::GameObject*> out;
+    if (!scene) return out;
+    std::vector<uint64_t> stale;
+    for (uint64_t id : selectedIds) {   // 按集合迭代顺序（稳定），保持选中顺序
+        NovaEngine::GameObject* go = scene->findGameObject(id);
+        if (go) out.push_back(go);
+        else stale.push_back(id);       // 对象已销毁：清理失效 ID
+    }
+    for (uint64_t id : stale) selectedIds.erase(id);
+    return out;
+}
+
 void EditorContext::setSelected(uint64_t id) {
     selectedIds.clear();
     selectedIds.insert(id);

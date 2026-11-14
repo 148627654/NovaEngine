@@ -16,6 +16,8 @@ class ModelLoader {
 public:
     // 失败时 meshes 为空 + Logger::error
     static ModelImportResult load(const std::filesystem::path& absolutePath);
+    // 从内存字节导入（AssetStream/pak 用；extensionHint 如 ".obj"/".gltf" 供 Assimp 定格式）
+    static ModelImportResult loadFromMemory(const uint8_t* data, size_t size, const std::string& extensionHint);
     // convertAiMesh/extractAiMaterial 为 .cpp 内部自由函数（assimp 类型不进公共头）
 };
 

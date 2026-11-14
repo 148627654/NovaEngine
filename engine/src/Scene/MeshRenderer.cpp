@@ -29,6 +29,9 @@ void MeshRenderer::onSerialize(nlohmann::json& out) const {
     mat["metallic"] = material.metallic;
     // JSON 键名保持 schema 的 "albedoMap" 不变，值取自 material.albedoMapPath（空串 = 纯色）
     mat["albedoMap"] = material.albedoMapPath;
+    // V0.2-8：alpha + blendMode（字符串 "Opaque"/"AlphaBlend"）
+    mat["alpha"] = material.alpha;
+    mat["blendMode"] = material.blendMode == BlendMode::AlphaBlend ? "AlphaBlend" : "Opaque";
     out["material"] = std::move(mat);
 }
 
@@ -56,6 +59,17 @@ void MeshRenderer::onDeserialize(const nlohmann::json& in) {
             Logger::warn("MeshRenderer 加载贴图失败：{}（回退纯色）", material.albedoMapPath);
     } else {
         material.albedoMap = nullptr;
+    }
+
+    // V0.2-8：旧文件（schema 1/2）无 alpha/blendMode 字段 → 默认值兜底（1.0 / Opaque）
+    material.alpha = mat.value("alpha", 1.0f);
+    const std::string blendStr = mat.value("blendMode", std::string("Opaque"));
+    if (blendStr == "AlphaBlend") {
+        material.blendMode = BlendMode::AlphaBlend;
+    } else {
+        if (blendStr != "Opaque")
+            Logger::warn("MeshRenderer 反序列化：未知 blendMode \"{}\"，回退 Opaque", blendStr);
+        material.blendMode = BlendMode::Opaque;
     }
 }
 

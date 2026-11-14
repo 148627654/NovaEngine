@@ -15,6 +15,9 @@ public:
     // 失败返回 nullptr 并 Logger::error 编译日志
     static std::shared_ptr<Shader> createFromFiles(const std::filesystem::path& vsPath,
                                                    const std::filesystem::path& fsPath);
+    // 从内存源码编译（AssetStream/pak 路径用）；失败同上返回 nullptr
+    static std::shared_ptr<Shader> createFromSource(const std::string& vsSource,
+                                                    const std::string& fsSource);
     ~Shader();
     Shader(const Shader&) = delete;
     Shader& operator=(const Shader&) = delete;

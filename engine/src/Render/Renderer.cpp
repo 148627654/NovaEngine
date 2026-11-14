@@ -7,6 +7,7 @@
 #include <GLFW/glfw3.h>
 
 #include <algorithm>
+#include <iterator>
 #include <vector>
 #include <glm/gtc/type_ptr.hpp>
 
@@ -45,6 +46,7 @@ uint32_t s_lastDrawCalls = 0;
 uint32_t s_lastSubmittedCount = 0;
 uint32_t s_lastTriangleCount = 0;
 uint32_t s_lastShadowItemCount = 0;
+uint32_t s_lastTransparentCount = 0;   // 上一帧透明队列项数（V0.2-8）
 
 uint32_t s_gridVao = 0;
 uint32_t s_gridVbo = 0;
@@ -52,12 +54,19 @@ uint32_t s_gridVertexCount = 0;
 
 // 当前帧相机/光照（beginFrame 填充，drawGrid / drawOutline / endFrame 使用）
 glm::mat4 s_viewProj{1.0f};
+glm::mat4 s_view{1.0f};      // 当前帧 view 矩阵（V0.2-8：透明队列 viewDepth 排序用）
 glm::vec3 s_camPos{0.0f};
 DirectionalLightData s_light;
 
-// 网格地面配色：雾色与 Scene::skyColor 默认值一致（render 模块不 include scene 头，直接常量）
-const glm::vec3 kGridFogColor(0.18f, 0.22f, 0.35f);
+// 网格地面配色：雾色已参数化（drawGrid(fogColor) 由 Scene::fogColor 传入，V0.2-5）
 const glm::vec3 kGridLineColor(0.55f, 0.55f, 0.60f);
+
+// 透明排序深度（裁定 2）：AABB 中心的视空间深度（负 Z 为前方，取负后远→大）
+float viewDepthOf(const RenderItem& item) {
+    const AABB& box = item.mesh->aabb();
+    const glm::vec3 center = (box.min + box.max) * 0.5f;
+    return -(s_view * (item.model * glm::vec4(center, 1.0f))).z;
+}
 
 // ===== 内置网格地面（40x40m，1m 次线 / 5m 主线，GL_LINES 直接绘制）=====
 void buildGrid() {
@@ -100,6 +109,9 @@ void setBlinnPhongUniforms(const std::shared_ptr<Shader>& shader,
     shader->setVec3("uAlbedo", material.albedo);
     shader->setFloat("uRoughness", material.roughness);
     shader->setFloat("uMetallic", material.metallic);
+    // V0.2-8：AlphaBlend 混合系数。Opaque 材质强制 alpha=1——alpha<1 且 blendMode=Opaque 时
+    // 半透明 alpha 会写进 FBO 颜色附件 alpha 通道（不混合但值<1），导致视口图像幽灵半透明
+    shader->setFloat("uAlpha", material.blendMode == BlendMode::Opaque ? 1.0f : material.alpha);
     if (material.albedoMap) {
         material.albedoMap->bind(0);
         shader->setInt("uAlbedoMap", 0);
@@ -206,6 +218,7 @@ void Renderer::beginFrame(const RenderCamera& camera, const DirectionalLightData
 
     // 每帧填充 CameraBlock UBO
     s_viewProj = camera.projection * camera.view;
+    s_view = camera.view;   // V0.2-8：透明队列 viewDepth 排序用
     s_camPos = camera.position;
     s_light = light;
 
@@ -269,12 +282,25 @@ void Renderer::drawShadowPass(const ShadowCameraParams& shadow,
 }
 
 void Renderer::endFrame() {
+    uint32_t transparentCount = 0;
     if (s_initialized) {
-        // 按 albedoMap 句柄排序（同一 shader 下减少纹理绑定切换；无贴图排最前）
-        std::stable_sort(s_queue.begin(), s_queue.end(), [](const RenderItem& a, const RenderItem& b) {
+        // 裁定 2：stable_partition 按 blendMode 分两段——opaque 在前、transparent 在后
+        const auto transparentBegin = std::stable_partition(
+            s_queue.begin(), s_queue.end(),
+            [](const RenderItem& item) { return item.material.blendMode == BlendMode::Opaque; });
+        transparentCount = static_cast<uint32_t>(std::distance(transparentBegin, s_queue.end()));
+
+        // opaque 段：保持现有 albedoMap 句柄排序（减少纹理绑定切换；无贴图排最前）
+        std::stable_sort(s_queue.begin(), transparentBegin,
+                         [](const RenderItem& a, const RenderItem& b) {
             const uint32_t ta = a.material.albedoMap ? a.material.albedoMap->handle() : 0;
             const uint32_t tb = b.material.albedoMap ? b.material.albedoMap->handle() : 0;
             return ta < tb;
+        });
+
+        // transparent 段：viewDepth 降序（远→近，画家算法后→前绘制）
+        std::sort(transparentBegin, s_queue.end(), [](const RenderItem& a, const RenderItem& b) {
+            return viewDepthOf(a) > viewDepthOf(b);
         });
 
         if (s_blinnPhong) {
@@ -283,31 +309,50 @@ void Renderer::endFrame() {
             // drawOutline 第一遍已先绘过选中物体（写入深度），endFrame 重绘同深度物体必须用 LEQUAL，
             // 否则选中物体会以 drawOutline 的默认材质显示、真实材质被深度测试拒绝
             glDepthFunc(GL_LEQUAL);
-            for (const RenderItem& item : s_queue) {
-                setBlinnPhongUniforms(s_blinnPhong, item.material, item.model);
-                item.mesh->draw();
-                s_tris += item.mesh->indexCount() / 3;
+
+            // opaque 照旧绘制（深度照写）
+            for (auto it = s_queue.begin(); it != transparentBegin; ++it) {
+                setBlinnPhongUniforms(s_blinnPhong, it->material, it->model);
+                it->mesh->draw();
+                s_tris += it->mesh->indexCount() / 3;
                 ++s_drawCalls;
             }
+
+            // transparent：标准 alpha 混合 + 禁深度写（深度仍测试，保证被 opaque 正确遮挡）
+            if (transparentCount > 0) {
+                glEnable(GL_BLEND);
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                glDepthMask(GL_FALSE);
+                for (auto it = transparentBegin; it != s_queue.end(); ++it) {
+                    setBlinnPhongUniforms(s_blinnPhong, it->material, it->model);
+                    it->mesh->draw();
+                    s_tris += it->mesh->indexCount() / 3;
+                    ++s_drawCalls;
+                }
+                glDepthMask(GL_TRUE);
+                glDisable(GL_BLEND);
+            }
+
             glDepthFunc(GL_LESS);
         }
     }
 
     s_queue.clear();
 
-    // 结算上一帧统计（V0.2-11）：4 个 last* 访问器返回的都是上一帧值
+    // 结算上一帧统计（V0.2-11）：last* 访问器返回的都是上一帧值（透明项数同一结算点）
     s_lastDrawCalls = s_drawCalls;
     s_lastSubmittedCount = s_submitted;
     s_lastTriangleCount = s_tris;
     s_lastShadowItemCount = s_shadowDrawCalls;
+    s_lastTransparentCount = transparentCount;
 }
 
-void Renderer::drawGrid() {
+void Renderer::drawGrid(const glm::vec3& fogColor) {
     if (!s_initialized || !s_gridShader || !s_gridVao) return;
     s_gridShader->bind();
     s_gridShader->setMat4("uViewProj", s_viewProj);
     s_gridShader->setVec3("uCamPos", s_camPos);
-    s_gridShader->setVec3("uFogColor", kGridFogColor);
+    s_gridShader->setVec3("uFogColor", fogColor);   // V0.2-5：雾色参数化（Scene::fogColor）
     s_gridShader->setVec3("uLineColor", kGridLineColor);
     s_gridShader->setVec3("uLightDir", s_light.direction);
 
@@ -376,5 +421,6 @@ uint32_t Renderer::lastDrawCalls() { return s_lastDrawCalls; }
 uint32_t Renderer::lastSubmittedCount() { return s_lastSubmittedCount; }
 uint32_t Renderer::lastTriangleCount() { return s_lastTriangleCount; }
 uint32_t Renderer::lastShadowItemCount() { return s_lastShadowItemCount; }
+uint32_t Renderer::lastTransparentCount() { return s_lastTransparentCount; }
 
 }  // namespace NovaEngine

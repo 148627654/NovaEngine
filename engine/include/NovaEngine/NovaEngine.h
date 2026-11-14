@@ -25,11 +25,13 @@
 #include <NovaEngine/Scene/Component.h>
 #include <NovaEngine/Scene/Transform.h>
 #include <NovaEngine/Scene/Scene.h>
+#include <NovaEngine/Scene/SceneRenderer.h>
 #include <NovaEngine/Scene/MeshRenderer.h>
 #include <NovaEngine/Scene/Camera.h>
 #include <NovaEngine/Scene/DirectionalLight.h>
 
 #include <NovaEngine/Assets/AssetDatabase.h>
+#include <NovaEngine/Assets/AssetStream.h>
 #include <NovaEngine/Assets/ModelLoader.h>
 #include <NovaEngine/Assets/TextureLoader.h>
 

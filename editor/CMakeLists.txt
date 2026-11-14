@@ -14,6 +14,7 @@ add_executable(NovaEditor
     src/panels/SceneViewPanel.cpp
     src/panels/HierarchyPanel.cpp
     src/panels/InspectorPanel.cpp
+    src/panels/EnvironmentPanel.cpp
     src/panels/ConsolePanel.cpp
     src/panels/AssetBrowserPanel.cpp
     src/panels/StatsPanel.cpp

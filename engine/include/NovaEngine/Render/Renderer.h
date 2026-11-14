@@ -32,7 +32,7 @@ public:
                            const glm::vec4& clearColor);    // 清屏 + 填充每帧 UBO
     static void submit(std::shared_ptr<Mesh> mesh, const Material& material,
                        const glm::mat4& modelMatrix);       // 入队，不立即绘制
-    static void drawGrid();                                 // 内置网格着色器（约 40x40m，主次线）
+    static void drawGrid(const glm::vec3& fogColor = glm::vec3(0.18f, 0.22f, 0.35f));  // 内置网格着色器（约 40x40m，主次线；雾色参数化 V0.2-5）
     static void drawOutline(std::shared_ptr<Mesh> mesh, const glm::mat4& modelMatrix,
                             const glm::vec3& color);        // stencil 两遍描边，立即绘制
     static void endFrame();     // 按 (shader, texture) 排序后统一绘制队列并清空
@@ -49,6 +49,7 @@ public:
     static uint32_t lastSubmittedCount();   // 上一帧 submit() 次数
     static uint32_t lastTriangleCount();    // 上一帧主 pass 累计三角形数（indexCount/3）
     static uint32_t lastShadowItemCount();  // 上一帧阴影 pass 项数（不计入 lastDrawCalls）
+    static uint32_t lastTransparentCount(); // 上一帧透明队列项数（V0.2-8）
 };
 
 }  // namespace NovaEngine

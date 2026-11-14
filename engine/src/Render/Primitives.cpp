@@ -54,7 +54,10 @@ std::shared_ptr<Mesh> Primitives::cube() {
     addCubeFace(data, glm::vec3( 0.0f, 0.0f, 1.0f), glm::vec3( 1.0f, 0.0f,  0.0f));
     addCubeFace(data, glm::vec3( 0.0f, 0.0f, -1.0f), glm::vec3(-1.0f, 0.0f,  0.0f));
     data.aabb = computeAabb(data.vertices);
-    return Mesh::create(data);
+    // 裁定 4：故意泄漏的函数内 static（裸指针 new），跳过静态析构——
+    // 防程序退出时静态析构序晚于 GL 上下文销毁导致 Mesh 析构访问已失效的 GL 调用
+    static std::shared_ptr<Mesh>* s = new std::shared_ptr<Mesh>(Mesh::create(data));
+    return *s;
 }
 
 std::shared_ptr<Mesh> Primitives::sphere(int segments) {
@@ -100,7 +103,10 @@ std::shared_ptr<Mesh> Primitives::sphere(int segments) {
     }
 
     data.aabb = computeAabb(data.vertices);
-    return Mesh::create(data);
+    // 裁定 4：故意泄漏的函数内 static（跳过静态析构，防 GL 上下文时序问题）；
+    // 注意：缓存后首个调用方的 segments 参数生效（后续调用返回同一网格）
+    static std::shared_ptr<Mesh>* s = new std::shared_ptr<Mesh>(Mesh::create(data));
+    return *s;
 }
 
 std::shared_ptr<Mesh> Primitives::plane(float size) {
@@ -117,7 +123,9 @@ std::shared_ptr<Mesh> Primitives::plane(float size) {
     };
     data.indices = { 0, 2, 1, 0, 3, 2 };   // 从 +Y 俯视逆时针
     data.aabb = computeAabb(data.vertices);
-    return Mesh::create(data);
+    // 裁定 4：故意泄漏的函数内 static（跳过静态析构，防 GL 上下文时序问题）
+    static std::shared_ptr<Mesh>* s = new std::shared_ptr<Mesh>(Mesh::create(data));
+    return *s;
 }
 
 }  // namespace NovaEngine
