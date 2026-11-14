@@ -1,7 +1,7 @@
 # NovaEngine 用户指南：已实现功能与操作方法
 
-> 本文档以**实际代码**为准（快照时间 2026-11-15，已并入 V0.2 第一批功能），面向首次使用的用户回答三个问题：**哪些功能已实现、每个功能怎么用、有哪些已知限制**。
-> 规格说明见 [ARCHITECTURE.md](ARCHITECTURE.md) 与 [ARCHITECTURE-V0.2.md](ARCHITECTURE-V0.2.md)（V0.2 第一批：阴影映射 / 天空盒 / Undo-Redo / 未保存确认 / 统计面板），已确认的问题清单见 [KNOWN-ISSUES.md](KNOWN-ISSUES.md)。规格文档里写了但代码尚未实现的内容统一收在 [§9.4 待实现](#94-规格中有但代码尚未实现待实现)，不会混入「已实现」章节。
+> 本文档以**实际代码**为准（快照时间 2026-11-15，收官批次后：V0.2 第一批 + 收官批次 Wave 1/Wave 2 全部并入），面向首次使用的用户回答三个问题：**哪些功能已实现、每个功能怎么用、有哪些已知限制**。
+> 规格说明见 [ARCHITECTURE.md](ARCHITECTURE.md)、[ARCHITECTURE-V0.2.md](ARCHITECTURE-V0.2.md) 与 [ARCHITECTURE-FINAL.md](ARCHITECTURE-FINAL.md)（收官批次设计摘要：透明渲染 / 环境面板 / 多选 / 吸附 / 游戏分辨率 / Play 增强 / .novameta / 二进制缓存 / 打包 exe）。已确认的问题清单见 [KNOWN-ISSUES.md](KNOWN-ISSUES.md)。规格文档里写了但代码尚未实现的内容统一收在 [§9.4 待实现](#94-规格中有但代码尚未实现待实现)，不会混入「已实现」章节。
 
 ---
 
@@ -24,7 +24,7 @@ cmake --build build --config Debug       :: 编译 Debug
 cmake --build --preset debug
 ```
 
-Release 用 `cmake --build --preset release`。首次配置中 Assimp 编译耗时最长（已裁剪到 OBJ/FBX/glTF/Collada 四个导入器），预计数分钟，属正常现象。
+Release 用 `cmake --build --preset release`。首次配置中 Assimp 编译耗时最长（已裁剪到 OBJ/FBX/glTF/Collada 四个导入器），预计数分钟，属正常现象。**NovaPlayer**（打包播放器）是独立 target：同一解决方案编译即产出 `build\player\Debug\NovaPlayer.exe`，用 File → Build Player... 打包前必须先构建它（打包时会预检并提示，§7.4）。
 
 ### 1.3 运行方式
 
@@ -52,31 +52,33 @@ Release 用 `cmake --build --preset release`。首次配置中 Assimp 编译耗�
 
 ## 2. 界面总览
 
-首帧由 DockBuilder 摆好五面板布局，之后可自由拖动 dock 标签重排（窗口不能拖出主窗口——多视口功能未启用）：
+首帧由 DockBuilder 摆好面板布局（左 Hierarchy / 右 Inspector+Environment 并排 Tab / 底部 Console+Assets+Stats / 中央 Scene），之后可自由拖动 dock 标签重排（窗口不能拖出主窗口——多视口功能未启用）：
 
 ```
 ┌─────────────────────────────────────────────────────┐
 │ 菜单栏：File | Edit | View                            │
 ├────────────┬───────────────────────────┬─────────────┤
-│ Hierarchy  │         Scene（3D 视口）   │  Inspector  │
-│（左 20%）   │                           │ （右 22%）   │
+│ Hierarchy  │         Scene（3D 视口）   │ Inspector   │
+│（左 20%）   │                           │ + Environment│
+│            │                           │ （右 22%）   │
 ├────────────┴───────────────────────────┴─────────────┤
 │ 底部 Tab：Console | Assets | Stats（共 28% 高）        │
 └─────────────────────────────────────────────────────┘
 ```
 
 - **Hierarchy（层级）**：场景对象树。创建/选中/重命名/重父子/删除/复制都从这里发起（§3.1）。
-- **Scene（场景视口）**：3D 画面（离屏 MSAA 4x 渲染到 FBO 再贴到面板上）。编辑器相机操作、点击拾取、gizmo 变换、拖放导入、天空与阴影渲染都在这里（§3.2）。
-- **Inspector（检查器）**：编辑当前选中对象的组件参数（Transform/材质/相机/灯光/脚本）；无选中时编辑场景 Environment（天空）参数（§3.3）。
+- **Scene（场景视口）**：3D 画面（离屏 MSAA 4x 渲染到 FBO 再贴到面板上）。编辑器相机操作、点击拾取、gizmo 变换（含多选/吸附）、拖放导入、天空与阴影渲染都在这里（§3.2）；Play 态顶部还有游戏分辨率工具栏（§4.5）。
+- **Inspector（检查器）**：编辑当前选中对象的组件参数（Transform/材质/相机/灯光/脚本）；多选时批量编辑公共值（§3.3.2）；无选中时编辑 gizmo 吸附参数（§3.3.3）。
+- **Environment（环境）**：dockRight 与 Inspector 并排 Tab 的独立面板，编辑场景环境（天空色/环境光/网格开关/雾色）与天空全组（§3.8）。
 - **Console（控制台）**：引擎日志输出，四色分级、可过滤（§3.4）。
-- **Assets（资源浏览器）**：浏览 `assets/` 目录，加载场景、拖拽资产（§3.5）。
+- **Assets（资源浏览器）**：浏览 `assets/` 目录，加载场景、拖拽资产、贴图右键编辑导入设置（§3.5）。
 - **Stats（统计）**：性能面板（FPS/帧时间/渲染计数器/直方图），**默认关闭，F8 开关**（§3.6）。
 
 **主菜单栏**：
 
-- **File**：New Scene（Ctrl+N）、Open Scene...（Ctrl+O）、Save Scene（Ctrl+S）、Save Scene As...（无快捷键）、**Exit**。新建/打开/保存/另存为四项在 Play 模式下全部禁用（灰显）；Exit 始终可用（Play 中会先退出 Play 还原，再走未保存确认流程，§6.2）。
-- **Edit**：**Undo（Ctrl+Z）/ Redo（Ctrl+Y）**（Edit 态且 gizmo 未拖拽时可用，§5）、Play / Stop（Ctrl+P，同一菜单项随状态切换文案）、Pause（勾选式开关，仅 Play 中可用）。
-- **View**：Reload Assets（清空资产缓存，外部修改模型/贴图文件后点它刷新）；下方列出**六个**面板的显示开关（含 Stats）。
+- **File**：New Scene（Ctrl+N）、Open Scene...（Ctrl+O）、Save Scene（Ctrl+S）、Save Scene As...（无快捷键）、**Build Player...**（打包独立 exe，§7.4）、**Exit**。新建/打开/保存/另存为/打包五项在 Play 模式下全部禁用（灰显）；Exit 始终可用（Play 中会先退出 Play 还原，再走未保存确认流程，§6.2）。
+- **Edit**：**Undo（Ctrl+Z）/ Redo（Ctrl+Y）**（Edit 态且 gizmo 未拖拽时可用，§5）、Play / Stop（Ctrl+P，同一菜单项随状态切换文案）、Pause（勾选式开关，仅 Play 中可用）、**Step（F10）**（仅 Play+Paused 可用，推进一帧，§4.1）。
+- **View**：Reload Assets（清空资产缓存，外部修改模型/贴图文件后点它刷新）；下方列出**七个**面板的显示开关（含 Stats 与 Environment）。
 
 ---
 
@@ -94,9 +96,9 @@ Release 用 `cmake --build --preset release`。首次配置中 Assimp 编译耗�
 
 > 内建网格 `builtin:cube / builtin:sphere / builtin:plane` 也是合法的 Mesh 路径，可在 Inspector 里手写，保存场景时可随序列化往返。
 
-**单击选中**：点击对象行选中（多选时 Inspector 只显示数量，不显示参数）。点行首箭头只展开/折叠子树、不改变选择；**Ctrl+单击为加选/减选（toggle）**；点击空白处取消全部选择。
+**单击选中**：点击对象行选中。点行首箭头只展开/折叠子树、不改变选择；**Ctrl+单击为加选/减选（toggle）**；**点击空白处取消全部选择（Ctrl 按住时点击空白保留选择**，与 SceneView 拾取语义统一）。
 
-**F2 重命名**（仅恰好单选一个对象时生效）：F2 进入编辑，**Enter 或点击别处确认**，**Esc 取消**，留空不生效。注意：该操作在 Play 模式下未被禁用（见 §9.2-2）。
+**F2 重命名**（仅恰好单选一个对象时生效）：F2 进入编辑，**Enter 或点击别处确认**，**Esc 取消**，留空不生效。Play 模式下禁用（与 Inspector 的 Name/Active 一致）。
 
 **拖拽重父子**：按住对象行拖到另一行 = 成为其子级（**保持世界变换**）；拖到空白处 = 脱离父级挂到根。有环保护——不能把父级拖进自己的子树。
 
@@ -124,26 +126,30 @@ Release 用 `cmake --build --preset release`。首次配置中 Assimp 编译耗�
 
 **选中高亮**：所有选中对象显示**橙色描边**（stencil 两遍，沿法线膨胀约模型尺寸 4%），被其他物体遮挡的部分也可见（Unity 风格）。
 
-**Gizmo 变换**（仅 Edit 模式，且**恰好单选一个对象**时才出现——多选无 gizmo，这是最常见的「gizmo 不见了」原因）：
+**Gizmo 变换**（仅 Edit 模式；单选与多选都会出现）：
 
 1. **W** 切换移动 / **E** 切换旋转 / **R** 切换缩放；
 2. **X** 在 **Local / World** 坐标空间之间切换（有父级的对象 Local 模式下写回的是局部 TRS）；
 3. 直接**拖拽箭头/圆环/方块手柄**即可变换，拖拽期间相机与点击选择被抑制；
 4. 修改实时写回 Inspector 的数值框。**拖拽结束瞬间**整体算一步 Undo（§5.3）。
+5. **吸附（snap）**：按住 **Ctrl** 拖拽手柄即临时启用吸附（左右 Ctrl 均可）；勾选 Inspector 无选中时的 Snap Settings → Enable Snap 后吸附**常开**（§3.3.3）。默认步长：平移 0.5m / 旋转 15° / 缩放 0.5，可在 Snap Settings 里自定义。吸附走 ImGuizmo 原生 snap。
+6. **多选 gizmo**：选中 2 个及以上对象时，gizmo 出现在**共同 pivot**（全部选中对象世界 AABB 的并集中心；全部无 MeshRenderer 时为世界位置平均），拖拽以 `delta = 新矩阵 × 逆(初始矩阵)` 整体作用于全部对象——对象间相对位置保持不变；父/子同选时子对象只叠加一次 delta（不会双重叠加）。Local 模式以第一个选中对象的旋转为参考。**一次拖拽整体算一步 Undo**（§3.3.2、§5.3）。注意：多选下的**非均匀缩放**会引入剪切变形（shear，gizmo 写回时丢弃 skew 分量），这是 v1 已知限制（§9.1）。
 
-**天空渲染（V0.2）**：视口先画天空再画场景（Edit/Play 两态一致）。默认 **Gradient 渐变天空**（horizon → zenith 两色渐变）；把 Environment 的 Sky Mode 切到 Cubemap 并填好 Cubemap Path 后，改为采样 cubemap（支持 6 面目录或 equirect 全景文件，加载失败自动回退渐变）。`scene.skyColor` 仍保留为**兜底清屏色**（天空绘制失败时可见），不再决定日常看到的天空颜色（§3.3）。
+**天空渲染（V0.2）**：视口先画天空再画场景（Edit/Play 两态一致）。默认 **Gradient 渐变天空**（horizon → zenith 两色渐变）；把 Environment 面板的 Sky Mode 切到 Cubemap 并填好 Cubemap Path 后，改为采样 cubemap（支持 6 面目录或 equirect 全景文件，加载失败自动回退渐变）。`scene.skyColor` 仍保留为**兜底清屏色**（天空绘制失败时可见），不再决定日常看到的天空颜色（§3.8）。
+
+**透明渲染**：材质 Blend Mode 为 AlphaBlend 的物体进入**透明队列**——所有物体先按 opaque/transparent 分段，透明段按**视空间 AABB 中心深度后→前**排序绘制（画家算法近似，§9.1-13），开启标准 alpha 混合（`GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA`）、**不写深度**（深度照常测试，仍被不透明物体正确遮挡）；透明物体**不进阴影深度 pass**（不投射阴影）。
 
 **阴影（V0.2）**：场景第一个 DirectionalLight 的 **castShadows 默认开启**，场景物体会在网格地面投出实时阴影（PCF 3x3 软化；网格地面同样接收阴影，全影压到约 35% 而非全黑）。阴影正交盒沿光轴覆盖**过原点平面 ±shadowRange**（默认 60m），盒中心跟随渲染相机沿光轴投影（固定范围 + 跟随相机，不做场景包围盒）。**相机走远后，离相机超过 shadowRange 的盒外几何不再受影——这是预期行为，不是 bug**。castShadows 关闭即无阴影；Shadow Map Size 修改当帧生效（懒重建深度贴图）。
 
 **接受内部拖放（从 Assets 面板拖来）**：把模型文件拖到视口任意位置 → 自动导入：射线与 y=0 地面求交点作为落点（无交点则落在相机前方 3m），生成「根对象（文件名）+ 每个子网格一个子对象」的层级，导入完成后**自动选中并聚焦**新物体。贴图文件拖入视口会被拒绝（提示「仅支持将模型文件拖入场景视口」）。
 
-**Play 模式**：视口切换为场景相机画面，编辑器相机输入、拾取、F 聚焦、gizmo 全部停用（§4）。
+**Play 模式**：视口切换为场景相机画面，编辑器相机输入、拾取、F 聚焦、gizmo 全部停用（§4）。顶部出现**游戏分辨率工具栏**（§4.5），画面按目标分辨率渲染并**等比 letterbox 居中**；勾选 Follow Selected 后主相机跟随选中对象（§4.6）。
 
 ### 3.3 Inspector
 
-单选对象时显示完整参数；多选时只显示「N objects selected」。
+单选对象时显示完整参数；多选时进入**批量编辑**（§3.3.2）；无选中时显示 **Snap Settings**（§3.3.3）。
 
-**通用**：顶部 **Name** 文本框与 **Active** 勾选框（Active=false 时对象及其子树不渲染、脚本不更新）。
+**通用**：顶部 **Name** 文本框与 **Active** 勾选框（Active=false 时对象及其子树不渲染、脚本不更新）。Play 模式下 Name/Active 输入禁用。
 
 **Transform**：Position / Rotation / Scale 三个 DragFloat3。**Rotation 用欧拉角（度）编辑**，内部存储四元数（保证序列化往返）。Scale 最小值 0.001。
 
@@ -152,6 +158,7 @@ Release 用 `cmake --build --preset release`。首次配置中 Assimp 编译耗�
 - **Mesh**：网格资产路径，**回车生效**。可填 `builtin:cube / builtin:sphere / builtin:plane` 或项目内相对路径（如 `assets/models/sphere.obj`）。
 - **Albedo**：漫反射颜色（ColorEdit3）。
 - **Roughness / Metallic**：0–1 滑块。
+- **Alpha / Blend Mode（透明参数，V0.2-8）**：Alpha 为 0–1 混合系数；Blend Mode 下拉选择 **Opaque**（默认，走不透明队列）或 **AlphaBlend**（进入透明队列：后→前排序、混合绘制、不写深度、无阴影，§3.2）。注意：alpha < 1 但 Blend Mode 仍为 Opaque 时**不产生混合**（引擎强制按 1 写入，防止 FBO alpha 通道出现幽灵半透明）——想透明必须切 Blend Mode。
 - **Albedo Map Path**：贴图资产路径（项目内相对路径），**回车生效**；清空 = 取消贴图回纯色；路径无效会在 Console 打警告。上方文字实时回显当前绑定的贴图。
 - **Remove Component**：移除该组件（Play 中禁用）。
 
@@ -174,15 +181,26 @@ Remove Component 移除。
 
 **Add Component**：下拉框 = 内置组件 `Camera / DirectionalLight / MeshRenderer` + 所有已注册脚本（当前有 `SpinningCube`、`OrbitCamera`）。选中即挂载。Play 中禁用。**注意：下拉框不会过滤已挂载的同类型组件**（见 §9.2-5）。
 
-**Environment（天空）折叠区（V0.2，仅无选中时显示）**：选中集为空时 Inspector 底部显示 Environment 折叠区（多选时只有「N objects selected」，不显示）：
+#### 3.3.2 多选批量编辑（V0.2-15）
 
-- **Sky Mode**：Gradient / Cubemap 下拉；
-- **Horizon Color / Zenith Color**：渐变天空两色；
-- **Cubemap Path**：cubemap 资产路径（6 面目录或 equirect 文件），**回车生效**；清空 = 回退渐变；路径无效/加载失败在 Console 打警告并回退渐变；
-- **Sky Rotation**：-360–360°（cubemap 绕 +Y 旋转，度）；
-- **Sky Exposure**：0–10（HDR 曝光）。
+选中 2 个及以上对象时，Inspector 显示「N objects selected」+ 批量编辑区：
 
-注意：skyColor / ambientColor / showGrid 仍没有 UI，只能手改 .nova.json（§9.2-9）；本折叠区是 V0.2-5 独立环境面板落地前的临时替身（§9.3-8）。
+- **Active**：全部激活显示勾选；全部非激活显示未勾选；混合状态显示未勾选 + 灰字 "(mixed)"（点击勾选 = 全部激活）。
+- **Transform**：Position / Rotation（欧拉角，度）/ Scale **逐轴**编辑——所有对象该轴值相同时显示公共值，拖拽即把新值写进**全部对象**；值不相同时灰字显示 **"(…)"** 标记，从 0 开始拖动会把绝对值写入全部对象。**一次拖拽整体算一步 Undo**（拖拽中间帧只置脏不推快照）。
+- **Mesh Renderer (Material)**：全部选中对象都有 MeshRenderer 时显示公共材质区（以第一个对象的材质为编辑缓冲，Albedo/Roughness/Metallic/Alpha/Blend Mode 逐字段应用到全部）；仅部分对象有 MeshRenderer 时灰字显示「x/y have Mesh Renderer」。
+- 范围说明：批量编辑只覆盖 Active / Transform / 材质；相机、灯光、脚本字段**不支持**多选批量编辑（选中多对象时不可见，属于设计范围外，见 §9.2-13）。
+- 与 gizmo 的配合：多选 gizmo 在视口整体变换（§3.2），Inspector 逐轴改精确值，两者互补。
+
+#### 3.3.3 无选中时的 Snap Settings（V0.2-12）
+
+选中集为空时 Inspector 显示 **Snap Settings** 折叠区（运行期参数，**不序列化**、不置脏、不入 Undo）：
+
+- **Enable Snap**：勾选后 gizmo 吸附**常开**；
+- **Position**：平移吸附步长（米，逐轴，默认 0.5）；
+- **Rotation (deg)**：旋转吸附步长（度，默认 15）；
+- **Scale**：缩放吸附步长（默认 0.5）。
+
+不勾选 Enable Snap 时，**拖拽中按住 Ctrl** 同样临时吸附（左右 Ctrl 均可，§3.2）。场景环境参数已不在 Inspector——请用独立 **Environment 面板**（§3.8）。
 
 ### 3.4 Console
 
@@ -196,9 +214,10 @@ Remove Component 移除。
 ### 3.5 Asset Browser（Assets）
 
 - 只浏览项目 `assets/` 目录；顶部**面包屑**导航（点击任意一级跳转），列表上方 `[ .. ]` 返回上级。
-- 条目前缀标记类型：`[D]` 目录、`[M]` 模型、`[T]` 贴图、`[S]` 场景、`[F]` 其他文件；悬停显示相对路径。
+- 条目前缀标记类型：`[D]` 目录、`[M]` 模型、`[T]` 贴图、`[S]` 场景、`[F]` 其他文件；悬停显示相对路径。隐藏点开头条目（`.novacache` 等）与贴图的 `.novameta` 伴随文件，不参与浏览。
 - **双击目录**进入；**双击 .nova.json 场景文件**直接加载该场景（Play 中不可，会提示；Edit 态场景未保存时先弹「未保存更改」确认，§6）。
 - **模型 / 贴图文件是拖拽源**：按住拖到 SceneView 即导入/引用（§3.2）。双击模型/贴图文件本身无操作。
+- **贴图右键菜单 → Texture Import Settings...**：打开贴图导入设置模态（§7.3）。
 - 该面板是外部文件拖放的目标区域之一（§3.7）。
 
 ### 3.6 Stats（统计面板，V0.2）
@@ -227,14 +246,37 @@ Remove Component 移除。
 - 模型导入会同时解析其材质与贴图（贴图在项目外时同样自动拷贝进 `assets/textures/`），保证保存场景后可移植。
 - 同一模型重复拖入不重复解析（内存缓存），外部改过模型文件后点 **View → Reload Assets** 手动刷新。
 
+### 3.8 Environment 面板（独立环境面板，V0.2-5）
+
+停靠在 dockRight、与 Inspector 并排 Tab（也可从 View 菜单开关、自由拖动 dock 标签）。**两个折叠区**：
+
+**Environment 折叠区（基础环境）**：
+
+- **Sky Color**：兜底清屏色（天空绘制失败时可见，§3.2）；
+- **Ambient Color**：环境光；
+- **Show Grid**：网格地面开关；
+- **Fog Color**：网格地面远处雾色（与网格线颜色区分）；
+- **Reset Fog to Sky**：一键把雾色重置为天空色（雾色缺省语义 = 随 skyColor 联动，改了天空色后点它即可恢复联动值）。
+
+**Sky 折叠区（天空全组，原 Inspector 替身区迁移）**：
+
+- **Sky Mode**：Gradient / Cubemap 下拉；
+- **Horizon Color / Zenith Color**：渐变天空两色；
+- **Cubemap Path**：cubemap 资产路径（6 面目录或 equirect 文件），**回车生效**；清空 = 回退渐变；路径无效/加载失败在 Console 打警告并回退渐变；
+- **Sky Rotation**：-360–360°（cubemap 绕 +Y 旋转，度）；
+- **Sky Exposure**：0–10（HDR 曝光）。
+
+环境参数全部随场景序列化（`environment` 段，§7.2），修改走与 Inspector 相同的脏标记漏斗（拖拽中间帧只置脏，编辑结束推一步 Undo）。
+
 ---
 
 ## 4. Play 模式
 
-### 4.1 进入 / 退出 / 暂停
+### 4.1 进入 / 退出 / 暂停 / 单步
 
 - **Ctrl+P** 或菜单 Edit → Play 进入；再按一次（菜单变 Stop）**退出**。
 - Play 中可用 **Edit → Pause** 暂停（勾选式）。暂停时 `scene->update()` 被整体跳过——所有脚本的 onUpdate 停摆，画面静止。
+- **Step 单步（F10 / Edit → Step）**：仅 Play **且 Paused** 时可用。按一次推进**一帧**（`scene->update(dt)` 执行一次，dt = Time::deltaTime），画面前进一格后继续暂停。F10 与菜单项等价；Edit 态或未暂停时无效。
 
 ### 4.2 快照与恢复机制
 
@@ -262,7 +304,7 @@ Remove Component 移除。
 - 脚本字段与 Enabled 勾选（如 Play 中调 SpinningCube 的 speed 立即变速）
 - 选中/展开等纯浏览操作、F8 统计面板
 
-**注意**：Hierarchy 的 F2 重命名与 Inspector 顶部的 Name/Active 输入框在 Play 中**未**被禁用（已知问题，见 §9.2-2）。
+**注意**：结构修改守卫已补全——Hierarchy 的 F2 重命名、Inspector 的 Name/Active/Mesh 路径/贴图路径输入框在 Play 态全部禁用（收官批次修复，原为已知问题 §9.2-2）。
 
 ### 4.4 示例脚本
 
@@ -278,6 +320,21 @@ Remove Component 移除。
 - 字段：`radius`（环绕半径，默认 8）、`speed`（角速度 度/秒，默认 30）、`height`（高度，默认 3）。
 - 挂载方式：选中一个**带 Camera 组件的对象**（如 Main Camera）→ Add Component → 选 `OrbitCamera` → Ctrl+P。进入 Play 时 `onStart` 会从相机当前世界位置反推起始角度，保证从摆放处无缝开始环绕。
 - 如果场景里没有相机，可以右键 Hierarchy → Create Camera（首个自动成为 Main Camera）再挂脚本。
+
+### 4.5 游戏分辨率与 Render Scale（V0.2-13）
+
+进入 Play 后 SceneView 顶部出现工具栏（Edit 态不显示）：
+
+- **Resolution 预设**：**Free**（默认，跟随面板尺寸）/ **1920x1080** / **1280x720** / **Custom**（自定义，选中后出现 W/H 输入框，64–8192）。
+- **Render Scale**：0.5–2.0 滑块（步长 0.1）。FBO 实际渲染尺寸 = 目标分辨率 × Render Scale，与 MSAA 正交（可叠加）。
+- 固定分辨率时：渲染相机 aspect 用**目标分辨率**宽高比；画面按面板可用区域**等比缩放（fit）居中显示**，四周留黑（letterbox）。
+- 安全钳制：渲染宽高每维 clamp 到 [16, 4096]（Custom 8192 × Render Scale 2.0 也不会因显存炸裂而崩溃）；FBO 重建失败当帧跳过渲染、下帧自动重试。
+- 注意：Render Scale 2.0 + MSAA 4x 时 FBO 显存占用约 130MB（4096² 上限时），属预期开销。分辨率与 Render Scale 是运行期设置，不随场景保存。
+
+### 4.6 Play 增强（V0.3-10 子集）
+
+- **Follow Selected（跟随选中）**：Play 工具栏勾选后，**主相机**（isMain 优先，§4.3 同规则）每帧渲染前移动到「选中对象世界位置 + 记录偏移」——勾选瞬间记录当前 相机位置 − 选中对象位置 的偏移并保持（朝向不变），此后选中谁跟谁。未勾选/退出 Play 时偏移重置。实现为直接写场景相机 Transform，**退出 Play 由快照自动还原**，不留脏。无选中对象时保持原地。
+- **进入 Play 未保存提示（toast）**：场景有未保存修改时按 Ctrl+P 进入 Play，视口顶部显示 **3 秒**非阻塞提示「Scene has unsaved changes (Play snapshot will restore)」，同时 Console 打警告。提示自动消失，不打断任何输入（退出 Play 时快照照常还原，§4.2/§6.3）。
 
 ---
 
@@ -300,8 +357,8 @@ Remove Component 移除。
 
 **入栈**（仅 Edit 态）：Hierarchy 的创建 / 删除 / 复制 / 重命名 / 重父子；gizmo 变换；Inspector 的全部参数修改（Transform / 材质 / 相机 / 灯光含阴影参数 / 脚本字段）；Add / Remove Component；模型导入。
 
-- 防刷栈：拖拽 / 输入**中间帧只置脏**（不推快照），「编辑结束」（松开鼠标 / 回车 / 勾选等瞬时操作）才推快照——一次拖拽整体 = 一步撤销。
-- **不入栈**：选中集、编辑器相机、面板开关与布局、进入 / 退出 Play。
+- 防刷栈：拖拽 / 输入**中间帧只置脏**（不推快照），「编辑结束」（松开鼠标 / 回车 / 勾选等瞬时操作）才推快照——一次拖拽整体 = 一步撤销（**多选 gizmo 拖拽与多选 Inspector 逐轴拖拽同样整体单步**）。
+- **不入栈**：选中集、编辑器相机、面板开关与布局、进入 / 退出 Play、**运行期设置（Snap Settings、游戏分辨率/Render Scale、Follow Selected 开关）**。
 - **Play 态的 live edit 只置脏不入栈**（退出 Play 时场景由快照还原，栈不动）。
 
 已知限制（极短拖拽不入栈 / 同帧重复快照 / undo 后标题仍带 * / 相机值在快照里）见 §9.3-1~4。
@@ -358,12 +415,13 @@ Remove Component 移除。
 
 ```jsonc
 {
-  "version": 2,                       // 版本号（保存写 2；读取兼容 1/2）
+  "version": 3,                       // 版本号（保存写 3；读取兼容 1/2/3）
   "name": "DemoScene",                // 场景名
   "environment": {                    // 环境参数
     "skyColor": [0.18, 0.22, 0.35],   // 兜底清屏色（天空绘制失败时可见）
     "ambientColor": [0.15, 0.15, 0.18],
-    "showGrid": true,                  // 网格地面开关
+    "showGrid": true,                 // 网格地面开关
+    "fogColor": [0.18, 0.22, 0.35],   // ---- V3：网格雾色（旧文件缺省随 skyColor 联动）----
     // ---- V0.2 天空 6 字段 ----
     "skyMode": "Gradient",            // "Gradient" / "Cubemap"
     "skyHorizonColor": [0.55, 0.62, 0.72],
@@ -398,19 +456,56 @@ Remove Component 移除。
 - **层级用 parent 引 ID 表达**（平铺 + 引用），加载时先建全部对象再按 parent 重建父子关系。
 - **rotation 是四元数 `[x, y, z, w]`**（UI 里编辑的是度，存储是四元数）。
 - **资产路径一律相对项目根**（如 `assets/models/cube.obj`、`assets/textures/checker.png`），换机器整目录拷贝即可移植。
-- MeshRenderer 的材质写在 `material` 对象里：`albedo`（颜色）/ `roughness` / `metallic` / `albedoMap`（贴图相对路径，空串 = 纯色）。
+- MeshRenderer 的材质写在 `material` 对象里：`albedo`（颜色）/ `roughness` / `metallic` / `albedoMap`（贴图相对路径，空串 = 纯色）/ **`alpha`（0–1 混合系数）** / **`blendMode`（"Opaque" / "AlphaBlend"，v3 新增）**。旧文件（v1/v2）无这两字段 → 按默认值兜底（alpha=1 / Opaque）。
 - 脚本组件 = `type` 为脚本注册名 + 公共字段 `enabled` + 脚本自定义字段（如 `"speed": 30`）。
-- **向后兼容**：v1 旧文件（如当前 demo.nova.json）没有天空/阴影字段，加载时**全部按默认值兜底**——渐变天空、空 cubemap、曝光 1；DirectionalLight 的 castShadows=true / shadowBias=0.0005 / shadowRange=60 / shadowMapSize=2048，开箱即用。旧文件不自动升级，直到下次 Ctrl+S（写 v2）。
-- `skyMode` 存字符串；未知字符串 → 警告并回退渐变。version 既非 1 也非 2 时告警但仍尝试加载。
+- **向后兼容**：v1/v2 旧文件没有天空/阴影/雾色/透明字段，加载时**全部按默认值兜底**——渐变天空、空 cubemap、曝光 1、fogColor=skyColor（联动语义）；DirectionalLight 的 castShadows=true / shadowBias=0.0005 / shadowRange=60 / shadowMapSize=2048；材质 alpha=1 / blendMode=Opaque，开箱即用。旧文件不自动升级，直到下次 Ctrl+S（写 v3）。
+- `skyMode` / `blendMode` 存字符串；未知字符串 → 警告并回退（Gradient / Opaque）。version 非 1/2/3 时告警但仍尝试加载。
 - 容错：未知组件类型 → 警告并跳过该组件（不崩溃）；JSON 非法 → 报错且**场景保持不变**；字段类型错 → 回退默认值。
 - **编辑器相机位置随场景保存**：Edit 模式下每帧把相机状态回写到场景字段，Ctrl+S 即持久化；打开场景时恢复视角。
 - Undo/Redo 的内部快照是同一格式的**紧凑单行 JSON**（不落盘，仅内存）。
+
+### 7.3 贴图导入设置（.novameta）与二进制缓存（.novacache）
+
+**中文路径全面支持**：所有资产读取（shader / 模型 / 贴图 / cubemap / 场景 / meta）统一经 **AssetStream**——磁盘走 `std::ifstream` 的 path 重载、解码走 `stbi_load_from_memory`，零编码转换；项目路径、资产路径、保存对话框含中文字符均可正常工作（旧版贴图中文路径加载失败的问题已修复，§9.1-4）。
+
+**贴图导入设置（V0.3-5）**：
+
+- 每张贴图可以有伴随文件 `<贴图名>.<扩展名>.novameta`（JSON：`{"version":1,"type":"sRGB"|"Linear","wrap":"Repeat"|"Clamp","filter":"Bilinear"|"Trilinear","generateMipmaps":bool}`），与贴图同目录。
+- **无 meta 自动生成**：编辑器首次加载贴图时自动写默认 meta（sRGB / Repeat / Trilinear / 生成 mipmap）落盘。meta 损坏/字段非法 → 警告 + 回退默认值，不崩溃、不覆盖。
+- **编辑入口**：Asset Browser 中**右键贴图 → Texture Import Settings...**，弹出模态：
+  - **Color Space**：sRGB / Linear（决定贴图 GPU 内部格式；NormalMap 语义上等同 Linear——注意 UI 不提供 NormalMap 选项，meta 里手写的 NormalMap 经模态 Save 会改写为 Linear，§9.1-16）；
+  - **Wrap Mode**：Repeat / Clamp To Edge；**Filter Mode**：Bilinear / Trilinear；**Generate Mipmaps** 勾选；
+  - **Save** 落盘并**立即清空资产缓存**（贴图按新设置重导，当帧生效）；**Reset to Default** 恢复默认值（不落盘，需再点 Save）；**Close** 放弃修改。
+- meta 参与**二进制缓存键**：改 meta 即缓存失效重导（§7.3 下文）。
+
+**资产二进制缓存（V0.3-7）**：
+
+- 目录 `assets/.novacache/`（首次导入时懒创建；Asset Browser 不显示）。模型与贴图首次导入/解码后按 **FNV-1a 64 内容哈希**落盘二进制缓存（贴图键 = 源字节 + meta 文本，改 meta 即失效），**第二次启动**时直接读缓存跳过 Assimp/解码，启动提速。
+- 格式自带校验（magic "NVBI" + version + payloadSize + 载荷尺寸），**损坏即删即重导**，不会加载到坏数据；**删除整个目录可安全重建**（下次导入自动重写）；目录超过 1GB 打一次警告，防无限膨胀。
+- 贴图缓存只存 mip0（GPU 侧 glGenerateMipmap 重建）；HDR equirect 单独走浮点缓存。
+- 一个已知取舍：模型二进制缓存命中**必须**与内存材质旁表完整对应，否则回退 Assimp 重解析（新进程旁表为空 → 每次启动仍走一次 Assimp——正确性优先，§9.1-14）。
+
+### 7.4 打包独立播放器（Build Player，V0.5-1）
+
+**File → Build Player...**（Play 态禁用；无当前场景路径时提示先保存；场景脏时打包上次保存的版本并警告）：
+
+1. 选择输出目录（Windows 原生目录选择对话框）；
+2. **收集场景引用资源**：场景文件本身、每个 MeshRenderer 的 mesh（跳过 `builtin:` 内置图元）与 material.albedoMap（贴图 + 其 .novameta 伴随文件，.hdr 不生成/不收集 meta）、天空 cubemap（目录 → px/nx/py/ny/pz/nz 六面，文件 → equirect）、`assets/shaders/` 全部 .vert/.frag；
+3. **缺失资源打包即报错**：逐条列出缺失项并失败，不产出半成品 pak；
+4. 输出 `场景名.novapak`（v1 无压缩单文件包）+ 复制 `NovaPlayer.exe` 到同一目录——**发布目录 = exe + pak**，双击即可运行。
+
+**NovaPlayer 运行参数**：
+
+- `--scene <相对路径>`：要播放的场景（pak 内相对路径；默认 `assets/scenes/demo.nova.json`）；
+- `--pak <路径>`：显式指定 .novapak；默认自动挂载 **exe 同目录第一个 \*.novapak**（没找到则走磁盘读取）；
+- `--width / --height`：窗口尺寸（默认 1280x720，1–16384）；
+- **Esc 退出**；播放器项目根 = exe 目录，资产经 pak 内存读取（pak 未命中回退磁盘）。无 ImGui，纯引擎渲染（天空/阴影/网格/脚本与编辑器 Play 同一条 `SceneRenderer::renderScene` 路径）。
 
 ---
 
 ## 8. 快捷键总表
 
-> 全部来自代码（`EditorApplication::handleGlobalShortcuts`、`HierarchyPanel`、`SceneViewPanel`、`EditorCamera`）。输入框聚焦（如重命名中）时全局快捷键被抑制，防止误触；**未保存确认模态期间全部全局快捷键被抑制**（§6.2）。
+> 全部来自代码（`EditorApplication::handleGlobalShortcuts`、`HierarchyPanel`、`SceneViewPanel`、`GizmoController`、`EditorCamera`）。输入框聚焦（如重命名中）时全局快捷键被抑制，防止误触；**未保存确认模态期间全部全局快捷键被抑制**（§6.2）。
 
 | 快捷键 | 作用 | 生效条件 |
 |---|---|---|
@@ -419,6 +514,7 @@ Remove Component 移除。
 | **Ctrl+N** | 新建空场景 | Edit |
 | **Ctrl+O** | 打开场景对话框 | Edit |
 | **F8** | 开关 Stats 统计面板 | 全局（输入框聚焦除外） |
+| **F10** | Step 单步推进一帧 | Play 且 Paused（菜单 Edit → Step 等效） |
 | **Ctrl+Z** | 撤销上一步 | Edit，且 gizmo 未在拖拽 |
 | **Ctrl+Y** | 重做 | Edit，且 gizmo 未在拖拽 |
 | **Ctrl+Shift+Z** | 重做（等价 Ctrl+Y） | Edit，且 gizmo 未在拖拽 |
@@ -427,10 +523,12 @@ Remove Component 移除。
 | **R** | gizmo 切换为缩放 | Edit |
 | **X** | gizmo 切换 Local / World 空间 | Edit |
 | **F** | 聚焦选中对象（无选中聚焦原点） | Edit，鼠标悬停 SceneView |
-| **F2** | 重命名（Enter 确认 / Esc 取消） | Hierarchy 恰好单选 |
+| **F2** | 重命名（Enter 确认 / Esc 取消） | Edit 且 Hierarchy 恰好单选 |
 | **Del** | 删除所有选中对象（含子树） | Edit |
 | **Ctrl+D** | 复制选中对象（副本为兄弟节点） | Edit |
 | **Ctrl+左键** | 加选/减选 | Hierarchy 行 / SceneView 拾取 |
+| **Ctrl+左键（空白）** | 保留选择不取消（两面板语义统一） | Hierarchy 空白 / SceneView 未命中 |
+| **Ctrl 按住拖拽 gizmo** | 临时开启吸附（左右 Ctrl 均可） | Edit，gizmo 拖拽中 |
 | 右键拖拽 | 编辑器相机旋转 | Edit，SceneView |
 | 中键拖拽 | 编辑器相机平移（抓取式） | Edit，SceneView |
 | 滚轮 | 编辑器相机缩放 | Edit，SceneView |
@@ -440,6 +538,8 @@ Remove Component 移除。
 
 未实现的常规快捷键：**Ctrl+Shift+S 另存为**（只能走菜单）。
 
+NovaPlayer 内快捷键：**Esc** 退出（其余无）。
+
 ---
 
 ## 9. 已知限制
@@ -448,33 +548,41 @@ Remove Component 移除。
 
 | # | 问题 | 现状 |
 |---|---|---|
-| 1 | 网格地面雾色硬编码，与场景 skyColor 不联动 | 存在 |
-| 2 | Window 析构未调 glfwTerminate（单窗口无实际影响） | 存在 |
-| 3 | 内置图元（builtin:cube/sphere/plane）不缓存，整场景重建时重传 GPU 网格 | 存在 |
-| 4 | TextureLoader 用 ANSI 路径，**中文路径贴图加载失败** | 存在 |
-| 5 | 「双击 exe 缺 shader/资产（依赖工作目录）」 | **已被代码修复**：main.cpp 用编译期注入的项目根（NOVA_PROJECT_ROOT）自动切换工作目录，双击运行即可用 |
-| 6 | 模型首次导入双解析（网格走缓存 + 材质另解析一遍） | 存在 |
+| 1 | 网格地面雾色硬编码，与场景 skyColor 不联动 | **已修复**：drawGrid 雾色参数化（scene.fogColor），Environment 面板可编辑 + Reset Fog to Sky 一键回落天空色 |
+| 2 | Window 析构未调 glfwTerminate（单窗口无实际影响） | **已修复**：析构补 glfwTerminate 释放 GLFW 进程级资源 |
+| 3 | 内置图元（builtin:cube/sphere/plane）不缓存，整场景重建时重传 GPU 网格 | **已修复**：故意泄漏的函数内 static 缓存（跳过静态析构防 GL 上下文时序问题） |
+| 4 | TextureLoader 用 ANSI 路径，**中文路径贴图加载失败** | **已修复**：全部资产读取收敛 AssetStream（`ifstream` 的 path 重载 + `stbi_load_from_memory`），中文路径全面支持 |
+| 5 | 「双击 exe 缺 shader/资产（依赖工作目录）」 | **已被代码修复**：main.cpp 用编译期注入的项目根（NOVA_PROJECT_ROOT）自动切换工作目录，双击运行即可用（NovaPlayer 进一步以 exe 目录为项目根 + pak 挂载，§7.4） |
+| 6 | 模型首次导入双解析（网格走缓存 + 材质另解析一遍） | **已修复**：`AssetDatabase::importModel` 一次 Assimp 解析同时取回网格+材质+贴图路径；loadModel 兼容转发 |
 | 7 | Duplicate / 移除脚本组件走整场景 JSON 重建（多选复制 O(n²)、脚本运行时状态清零） | 存在 |
-| 8 | Hierarchy F2 重命名在 Play 态未禁用 | 存在 |
+| 8 | Hierarchy F2 重命名在 Play 态未禁用 | **已修复**：F2 仅 Edit 态生效（Inspector 的 Name/Active/Mesh 路径/贴图路径输入在 Play 态同样禁用） |
 | 9 | 脚本类型名反查依赖 MSVC typeid().name() 格式 | 存在 |
-| 10 | 畸形 JSON（对象无 Transform 组件）可能导致解引用空指针 | 存在（Inspector 有判空，SceneView 的 Play 相机路径无判空） |
+| 10 | 畸形 JSON（对象无 Transform 组件）可能导致解引用空指针 | **已修复**：Gizmo 显示、Play 相机选择（pickPlayCamera）、SceneRenderer::collectCamera 三处均有无 Transform 防御（回退/跳过，不崩溃） |
 | 11 | Input 滚轮注册依赖首帧上下文（多窗口脆弱） | 存在（当前单窗口无影响） |
 | 12 | Gizmo 用前景 drawlist，与面板重叠时会画到面板之上 | **已修复**：改用窗口 drawlist（连带修复了悬停判定恒假、手柄无法拖拽的 bug） |
+| 13 | 透明排序用 AABB 中心近似（非逐像素/逐三角形） | 存在（交错透明面可能排序错误，KNOWN-ISSUES Wave 1/2-9） |
+| 14 | 模型二进制缓存命中需材质旁表完整 | 存在（新进程旁表为空 → Player 每次启动仍走一次 Assimp；正确性优先的取舍，KNOWN-ISSUES Wave 1/2-1） |
+| 15 | pak 内无 meta 的贴图在 Player 首载时于 exe 旁生成默认 meta | 存在（只读介质下仅警告不影响功能，KNOWN-ISSUES Wave 1/2-2） |
+| 16 | meta 模态 Save 把手写 "NormalMap" 重写为 "Linear" | 存在（语义等价但往返有损，KNOWN-ISSUES Wave 1/2-5） |
+| 17 | 多选 gizmo 非均匀缩放引入 shear | 存在（v1 已知限制，KNOWN-ISSUES Wave 1/2-10） |
+| 18 | Cubemap 六面 LDR 不消费 meta 的 colorSpace / LDR equirect 的 meta 为 pak 内死重 | 存在（P3，KNOWN-ISSUES Wave 1/2-3/4） |
+| 19 | 二进制缓存读失败误删好缓存 / getTexture 未命中读两遍 / m_materialCache 无 releaseUnused | 存在（效率/健壮性 P3，KNOWN-ISSUES Wave 1/2-6/7/8） |
 
 ### 9.2 阅读代码发现的缺口（KNOWN-ISSUES.md「新增缺口」+ 后续状态）
 
 1. **Ctrl+D 复制是浅拷贝（不含子树）**：`serializeGameObject` 只输出对象自身节点（无 children 数组），有子物体的对象复制后子物体不会跟随。Delete 含子树、Duplicate 不含，两者语义不对称。
-2. **Play 中 Inspector 仅禁用 Add/Remove Component 按钮**：顶部的 Name、Active 输入框、Mesh 路径、Albedo Map 路径在 Play 中仍可编辑（Transform/材质/灯光/相机参数是设计上的 live edit，但改名、改网格属于结构语义变更，未按「Play 禁结构修改」的原则禁用）。Hierarchy 的 F2 同理（即 KNOWN-ISSUES #8）。
+2. ~~Play 中 Inspector 仅禁用 Add/Remove Component 按钮~~ **已修复（收官批次）**：Name、Active、Mesh 路径、Albedo Map 路径输入框在 Play 态全部禁用；Hierarchy F2 同理（KNOWN-ISSUES #8）。
 3. ~~sceneDirty 只写不读~~ **已修复（V0.2-2）**：标题栏 `*` 标记 + New/Open/双击加载/关闭窗口/File→Exit 五处未保存确认（§6）。
 4. ~~Play 中 live edit 会置脏标记，Stop 后标记残留~~ **已修复（V0.2-2）**：进入 Play 记录脏状态，退出 Play 还原（§6.3）。
 5. **Add Component 不检查同类型重复**：可以给同一对象挂两个 Camera / MeshRenderer / 同名脚本（规格注释写了 assert，实际代码没有）。`getComponent` 只返回第一个，Inspector 也只编辑第一个，重复组件会成为「看不见的僵尸组件」。
 6. **脚本类名与内置组件名冲突**：若脚本注册名恰好叫 Camera / Transform / MeshRenderer / DirectionalLight，序列化会按内置组件处理，反序列化时类型错乱。
 7. **外部拖放贴图到 SceneView 在 Play 中未被禁止**：Play 中外部拖模型到视口会被拒绝，但拖贴图仍会拷贝进 `assets/textures/`（内部拖贴图到视口则被拒绝，两条路径行为不一致）。
-8. **Pause 跳过整个 `scene->update()`**（规格写的是「dt=0」，实现是整帧跳过，含销毁队列 flush）；因 Play 禁结构修改，实际无感知差异。
-9. **场景环境参数无编辑器 UI** → **部分修复（V0.2-7）**：天空 6 字段已有 Inspector Environment 区（§3.3）；skyColor / ambientColor / showGrid 仍只能手改 .nova.json 后重新加载。
+8. **Pause 跳过整个 `scene->update()`**（规格写的是「dt=0」，实现是整帧跳过，含销毁队列 flush）；因 Play 禁结构修改，实际无感知差异。收官批次新增 **F10/Edit→Step 单步**（仅 Paused 时），一次推进一帧（§4.1）。
+9. ~~场景环境参数无编辑器 UI~~ **已修复（V0.2-5）**：独立 Environment 面板覆盖 skyColor / ambientColor / showGrid / fogColor + 天空全组（§3.8）；Inspector 的临时替身区已删除。
 10. **Play 中脚本 C++ 运行时成员不随快照恢复**（如 OrbitCamera 的当前环绕角）：这是设计取舍（规格 §7.2 已说明），但 KNOWN-ISSUES.md 未列出，特此记录。
 11. **拾取用世界 AABB 粗测**：大平面（如 10x10m Plane）的包围盒会遮挡其后方物体，点击穿不过去（规格 §6.1 已知，暂不做三角形级精确拾取）。
-12. **Hierarchy 的 Ctrl+单击是 toggle（会减选）**，SceneView 的 Ctrl+单击未命中时保留已有选择——两处 Ctrl 语义略有差异，按上述描述理解即可。
+12. ~~Hierarchy 与 SceneView 的 Ctrl 语义不一致~~ **已修复**：Hierarchy 点击空白处在 Ctrl 按住时保留选择，与 SceneView Ctrl+单击未命中语义统一。
+13. **多选批量编辑范围有限**：批量编辑只覆盖 Active / Transform / 材质（§3.3.2）；相机、灯光、脚本字段在多选时不可见、不可批量编辑——设计范围外，如需批量调脚本字段请逐对象编辑。
 
 ### 9.3 V0.2 第一批审查遗留 P2（来自 KNOWN-ISSUES.md，全部待办 backlog）
 
@@ -487,7 +595,7 @@ Remove Component 移除。
 | 5 | Stats 帧时间不含 swapBuffers | vsync 等待前结算 → vsync 下 FPS 虚高（仅 CPU 侧口径，§3.6） |
 | 6 | Hierarchy Duplicate 失败（nullptr）仍置脏并推快照 | 产生多余 undo 步 |
 | 7 | ShadowCameraParams.lightDirection 赋值后未使用 | 死字段，无功能影响 |
-| 8 | Inspector 无选中时的 Environment 区是 V0.2-5 环境面板的临时替身 | 该面板落地时吸收迁移 |
+| 8 | Inspector 无选中时的 Environment 区是 V0.2-5 环境面板的临时替身 | **已落地（V0.2-5）**：Environment 面板独立（§3.8），Inspector 替身区删除、无选中时改显 Snap Settings |
 
 ### 9.4 规格中有但代码尚未实现（待实现）
 
@@ -495,15 +603,12 @@ Remove Component 移除。
 |---|---|---|
 | 内置组件（MeshRenderer/Camera/Light）的 enabled 勾选 | ARCHITECTURE §6.5 | 代码只有脚本组件有 Enabled 勾选 |
 | Component::enabled 提升到基类 | KNOWN-ISSUES 改进候选 | 同上配套 |
-| 场景环境剩余字段（skyColor/ambientColor/showGrid）编辑器 UI | Scene 已有字段 | 天空 6 字段已有 Environment 区（§3.3）；这三项仍仅 JSON 可改 |
-| 独立环境面板（V0.2-5） | KNOWN-ISSUES V0.2 遗留 P2-8 | 当前 Inspector Environment 区为临时替身，落地时迁移 |
 | ImGui ViewportsEnable（窗口拖出主窗口） | ARCHITECTURE §11-2 | 明确推迟，当前关闭 |
 | 资产 mtime 自动重载 | ARCHITECTURE §6.4 | 推迟，用 View → Reload Assets 手动刷新 |
-| 磁盘二进制资产缓存（.novaasset） | ARCHITECTURE §6.4 | 推迟，当前纯内存缓存 |
 | 三角形级精确拾取 | ARCHITECTURE §6.1 | AABB 拾取有遮挡误判（§9.2-11） |
-| AssetDatabase::loadModel 返回材质信息 | KNOWN-ISSUES 改进候选 | 当前导入双解析（§9.1-6） |
 | GameObject::removeComponent(Component*) 按指针移除 | KNOWN-ISSUES 改进候选 | 当前移除脚本走整场景重建（§9.1-7） |
-| drawGrid 颜色参数化 | KNOWN-ISSUES 改进候选 | 当前雾色硬编码（§9.1-1） |
+| .novapak 流式读取（按需加载 entry，不整包进内存） | ARCHITECTURE-FINAL 裁定 §11 | v1 全量读入内存（面向 <100MB 包体） |
+| Add Component 同类型去重 | KNOWN-ISSUES 新增缺口 5 | 当前可重复挂载同类组件（§9.2-5） |
 
 ---
 
@@ -513,12 +618,12 @@ Remove Component 移除。
 
 | 模块 | 目录 | 一句话职责 |
 |---|---|---|
-| **Core** | `engine/include/NovaEngine/Core` + `engine/src/Core` | Window（GLFW 封装/拖放回调）、Input（键鼠边沿状态）、Time（deltaTime）、Logger（分级日志 + sink）、UUID（64 位随机 ID）、**Stats（帧时间均值/尖峰/120 帧历史/分段计时，V0.2-11）** |
-| **Render** | `.../Render` | Renderer（渲染队列/UBO/全局 GL 状态/**阴影 pass/统计计数器**）、Shader、Mesh/MeshData、Texture、Material、Framebuffer（MSAA 4x）、Light 数据、Primitives 图元工厂、**ShadowMap（深度 FBO + 纹素对齐正交投影，V0.2-6）**、**SkyboxRenderer（渐变/cubemap 全屏三角形，V0.2-7）**、**Cubemap（6 面/equirect 创建，内部 RGB16F）** |
-| **Scene** | `.../Scene` | GameObject（父子层级/组件容器/销毁队列）、Component 基类、Transform（局部/世界+脏标记）、Scene（**+天空 6 字段**）、MeshRenderer、Camera、DirectionalLight（**+阴影 4 字段**） |
-| **Assets** | `.../Assets` | AssetDatabase（相对路径→GPU 资产缓存，**+getCubemap cubemap 缓存**）、ModelLoader（Assimp 导入）、TextureLoader（stb 解码） |
+| **Core** | `engine/include/NovaEngine/Core` + `engine/src/Core` | Window（GLFW 封装/拖放回调/**析构 glfwTerminate**）、Input（键鼠边沿状态）、Time（deltaTime）、Logger（分级日志 + sink）、UUID（64 位随机 ID）、**Stats（帧时间均值/尖峰/120 帧历史/分段计时，V0.2-11）** |
+| **Render** | `.../Render` | Renderer（渲染队列/UBO/全局 GL 状态/**阴影 pass/统计计数器/透明两段队列（opaque 稳定分段 + 透明后→前 + 深度遮罩，V0.2-8）**）、Shader、Mesh/MeshData、Texture（**+TextureWrap/TextureFilter 枚举**）、Material（**+alpha/blendMode**）、Framebuffer（MSAA 4x）、Light 数据、Primitives 图元工厂（**故意泄漏的 static 缓存**）、**ShadowMap（深度 FBO + 纹素对齐正交投影，V0.2-6）**、**SkyboxRenderer（渐变/cubemap 全屏三角形，V0.2-7）**、**Cubemap（6 面/equirect 创建，内部 RGB16F，LDR 面走二进制缓存）** |
+| **Scene** | `.../Scene` | GameObject（父子层级/组件容器/销毁队列）、Component 基类、Transform（局部/世界+脏标记）、Scene（**+天空 6 字段 + fogColor**）、MeshRenderer、Camera、DirectionalLight（**+阴影 4 字段**）、**SceneRenderer（Play/Player 共用渲染序列，V0.5-1）** |
+| **Assets** | `.../Assets` | AssetDatabase（相对路径→GPU 资产缓存，**+importModel 单解析网格/材质/贴图路径、+getCubemap、+二进制缓存接入**）、ModelLoader（Assimp 内存导入）、TextureLoader（stb 内存解码）、**AssetStream（磁盘/pak 统一读取，中文路径安全）**、**TextureMeta（.novameta 读写）**、**BinaryCache（.novacache，FNV-1a 键 + 48B Header 校验）**、**PakArchive（.novapak v1 无压缩打包/挂载）** |
 | **Scripting** | `.../Scripting` | Behaviour 脚本基类、ScriptRegistry（名字→工厂 + NE_REGISTER_SCRIPT 宏） |
-| **Serialization** | `.../Serialization` | SceneSerializer（场景 ↔ .nova.json 往返、ID 重映射、组件工厂分发、**写 version 2 / 读 1+2、v1 默认值兜底**） |
+| **Serialization** | `.../Serialization` | SceneSerializer（场景 ↔ .nova.json 往返、ID 重映射、组件工厂分发、**写 version 3 / 读 1+2+3、旧版本默认值兜底（含 fogColor/alpha/blendMode）**） |
 
 依赖方向严格单向：core ← render/scene ← assets/scripting/serialization；**render 不包含 scene 头**，渲染队列由编辑器遍历场景填充。
 
@@ -527,29 +632,33 @@ Remove Component 移除。
 | 文件 | 职责 |
 |---|---|
 | `main.cpp` | 入口：窗口 → Renderer::init → 切工作目录 → ImGui/字体 → 主循环 |
-| `EditorApplication.h/.cpp` | 应用外壳：主循环、DockBuilder 布局、主菜单、**Play 状态机（快照/恢复）**、全局快捷键（**含 F8 / Undo-Redo**）、外部拖放分发、打开/保存场景、**未保存确认模态（V0.2-2）** |
-| `EditorContext.h/.cpp` | 全局状态：选中集、Edit/Play 状态、场景指针、**脏标记漏斗（markDirtyOnly / markSceneDirty 推快照）**、快照、**Undo-Redo 栈**、面板区域上报 |
+| `EditorApplication.h/.cpp` | 应用外壳：主循环、DockBuilder 布局（**+Environment dockRight Tab**）、主菜单（**+Build Player.../Step**）、**Play 状态机（快照/恢复/未保存 toast）**、全局快捷键（**含 F8 / F10 / Undo-Redo**）、外部拖放分发、打开/保存场景、**打包入口 buildPlayer**、**未保存确认模态（V0.2-2）** |
+| `EditorContext.h/.cpp` | 全局状态：选中集、Edit/Play 状态、场景指针、**脏标记漏斗（markDirtyOnly / markSceneDirty 推快照）**、快照、**Undo-Redo 栈**、面板区域上报、**运行期设置：snapSettings / gameViewSettings / followSelected / stepRequested / playToastUntil** |
 | `UndoRedoManager.h/.cpp` | 快照式 Undo/Redo：64 步 JSON 字符串环形栈，undo/redo/clear/canUndo（V0.2-1） |
 | `EditorCamera.h/.cpp` | 轨道相机：右键旋转/WASD 与中键平移/滚轮缩放/F 聚焦/屏幕射线 |
-| `GizmoController.h/.cpp` | ImGuizmo 封装：W/E/R 操作、Local/World、列主序矩阵直接传递与 decompose 写回、**拖拽结束推 Undo 快照** |
-| `DragDrop.h/.cpp` | payload 常量、文件类型判断、copyIntoAssets、importModelToScene、duplicateGameObject |
+| `GizmoController.h/.cpp` | ImGuizmo 封装：W/E/R 操作、Local/World、列主序矩阵直接传递与 decompose 写回、**多选 pivot + delta 批量变换（V0.2-15）**、**ImGuizmo 原生 snap + Ctrl 临时吸附（V0.2-12）**、**拖拽结束推 Undo 快照（单选/多选统一单步）** |
+| `DragDrop.h/.cpp` | payload 常量、文件类型判断、copyIntoAssets、importModelToScene（**单解析 importModel**）、duplicateGameObject |
+| `Packager.h/.cpp` | **Build Player（V0.5-1）**：场景资源收集（mesh/贴图+meta/cubemap/shaders）、缺失资源逐条报错、.novapak 打包、NovaPlayer.exe 预检与复制 |
 | `Panel.h` | 面板抽象基类 |
-| `panels/SceneViewPanel.cpp` | FBO 渲染 + **天空/阴影组装** + 拾取 + gizmo + 聚焦 + 拖放接受（最复杂的文件，约 340 行） |
-| `panels/HierarchyPanel.cpp` | 层级树、增删改、重命名、重父子、右键菜单、Del/Ctrl+D |
-| `panels/InspectorPanel.cpp` | 组件参数编辑、Add Component、脚本伪反射字段编辑、**无选中时的 Environment 天空区（V0.2-7）** |
+| `panels/SceneViewPanel.cpp` | FBO 渲染 + **天空/阴影组装** + 拾取 + gizmo + 聚焦 + 拖放接受 + **Play 分辨率/Render Scale/letterbox（V0.2-13）** + **Follow Selected（V0.3-10 子集）** + **未保存 toast**（约 500 行，最复杂的面板） |
+| `panels/HierarchyPanel.cpp` | 层级树、增删改、重命名（**F2 仅 Edit**）、重父子、右键菜单、Del/Ctrl+D、**Ctrl 点击空白保留选择** |
+| `panels/InspectorPanel.cpp` | 组件参数编辑（**+材质 Alpha/Blend Mode**）、Add Component、脚本伪反射字段编辑、**多选批量编辑（逐轴公共值/"(…)" 标记/公共材质区，V0.2-15）**、**无选中时 Snap Settings（V0.2-12）** |
+| `panels/EnvironmentPanel.cpp` | **独立环境面板（V0.2-5）**：skyColor/ambient/showGrid/fogColor + Reset Fog to Sky + 天空全组（Sky Mode/渐变两色/cubemap 路径/旋转/曝光） |
 | `panels/ConsolePanel.cpp` | Logger sink、四色过滤、500 条环形缓冲 |
-| `panels/AssetBrowserPanel.cpp` | assets/ 浏览、面包屑、双击加载场景、拖拽源 |
+| `panels/AssetBrowserPanel.cpp` | assets/ 浏览（**隐藏 .novacache/.novameta**）、面包屑、双击加载场景、拖拽源、**贴图右键 → Texture Import Settings 模态（V0.3-5）** |
 | `panels/StatsPanel.cpp` | F8 统计面板：FPS/三段帧时间/渲染计数器/120 帧直方图（V0.2-11） |
 
 ### 10.3 其他目录
 
 | 目录 | 内容 |
 |---|---|
-| `samples/` | 示例脚本 OBJECT 库 NovaScripts：`SpinningCube.h/.cpp`、`OrbitCamera.h/.cpp`（.obj 直接并入 NovaEditor，保证静态注册不被链接器裁剪） |
-| `assets/shaders/` | 12 个 GLSL：blinn_phong / grid / outline / shadow / skybox / equirect_to_cube（各 .vert/.frag；blinn_phong 与 grid 含阴影采样，skybox 单着色器双分支渐变/cubemap） |
+| `player/` | **NovaPlayer（V0.5-1）**：独立播放器 target（NovaEngine + NovaScripts + `src/main.cpp` 约 160 行，无 ImGui）。--scene/--pak/--width/--height 参数、默认挂载 exe 旁 .novapak、Esc 退出 |
+| `samples/` | 示例脚本 OBJECT 库 NovaScripts：`SpinningCube.h/.cpp`、`OrbitCamera.h/.cpp`（.obj 并入 NovaEditor 与 NovaPlayer，保证静态注册不被链接器裁剪） |
+| `assets/shaders/` | 12 个 GLSL：blinn_phong（**+uAlpha 透明**）/ grid / outline / shadow / skybox / equirect_to_cube（各 .vert/.frag；blinn_phong 与 grid 含阴影采样，skybox 单着色器双分支渐变/cubemap） |
 | `assets/models/` | 手写测试 OBJ：cube.obj / sphere.obj / plane.obj |
-| `assets/scenes/` | demo.nova.json（默认示例场景，**文件仍为 v1 格式**：天空/阴影按默认值兜底加载，Ctrl+S 后升级为 v2） |
-| `assets/textures/` | 用户拖入的贴图（导入时自动拷贝至此；demo 未用贴图） |
+| `assets/scenes/` | demo.nova.json（默认示例场景，**文件仍为 v1 格式**：天空/阴影/雾色/透明按默认值兜底加载，Ctrl+S 后升级为 v3） |
+| `assets/textures/` | 用户拖入的贴图（导入时自动拷贝至此；demo 未用贴图；首次加载自动生成 `.novameta` 伴随文件） |
+| `assets/.novacache/` | **二进制资产缓存（V0.3-7）**：运行时自动生成，可整体删除，Asset Browser 不显示 |
 | `cmake/` | Dependencies.cmake（FetchContent 全部依赖）、Common.cmake（nova_configure_target 编译选项） |
 
 ---
