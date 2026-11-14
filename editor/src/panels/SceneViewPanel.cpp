@@ -260,9 +260,12 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
         focusSelected(ctx, camera);
 
     // 接受资产拖放（AssetBrowser → SceneView；落点 = 射线与 y=0 平面交点）
-    if (hovered && ImGui::BeginDragDropTarget()) {
+    // 注意：目标注册不依赖 hovered（与 HierarchyPanel 一致）——拖拽过程中 IsItemHovered
+    // 可能因 gizmo 手柄/重叠窗口误判为 false，导致目标未注册、payload 被 ImGui 丢弃
+    if (ImGui::BeginDragDropTarget()) {
         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(DragDrop::kAssetPayload)) {
             const std::filesystem::path srcPath(std::string(static_cast<const char*>(payload->Data)));
+            Logger::info("视口收到拖放资产: {}", srcPath.string());
             if (ctx.state != EditorContext::EditorState::Edit) {
                 Logger::warn("Play 模式下禁止导入模型");
             } else if (DragDrop::isModelFile(srcPath)) {
