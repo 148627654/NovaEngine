@@ -19,3 +19,6 @@ Thumbs.db
 
 # ImGui runtime state
 imgui.ini
+
+# 资产二进制缓存（V0.3-7；可整体安全删除）
+assets/.novacache/

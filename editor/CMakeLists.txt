@@ -11,6 +11,7 @@ add_executable(NovaEditor
     src/GizmoController.cpp
     src/DragDrop.cpp
     src/UndoRedoManager.cpp
+    src/Packager.cpp
     src/panels/SceneViewPanel.cpp
     src/panels/HierarchyPanel.cpp
     src/panels/InspectorPanel.cpp
@@ -44,12 +45,18 @@ target_compile_definitions(NovaEditor PRIVATE
     IMGUI_DEFINE_MATH_OPERATORS
     # 编译期注入项目根：main.cpp 启动时切工作目录用（双击 exe 时 cwd 是 exe 目录）
     "NOVA_PROJECT_ROOT=\"${CMAKE_SOURCE_DIR}\""
+    # 编译期注入 NovaPlayer.exe 构建产物路径（player target 由引擎线提供；$<CONFIG> 适配 VS 多配置）
+    "NOVA_PLAYER_EXE_PATH=\"${CMAKE_BINARY_DIR}/player/$<CONFIG>/NovaPlayer.exe\""
 )
 
 # NovaEngine PUBLIC 链接 glfw/glad/glm/assimp/json/stb，编辑器和 imgui 源码自动继承其 include 目录
 target_link_libraries(NovaEditor PRIVATE
     NovaEngine
     $<TARGET_OBJECTS:NovaScripts>
+    # Windows 原生对话框：commdlg（打开/保存场景）+ IFileDialog（输出目录选择，shell32/ole32）
+    comdlg32
+    shell32
+    ole32
 )
 
 # VS 调试运行目录 = 项目根：相对路径 assets/... 直接可用

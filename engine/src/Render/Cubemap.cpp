@@ -11,7 +11,9 @@
 #include <NovaEngine/Render/Primitives.h>
 #include <NovaEngine/Render/Shader.h>
 #include <NovaEngine/Assets/AssetStream.h>
+#include <NovaEngine/Assets/BinaryCache.h>
 #include <NovaEngine/Assets/TextureLoader.h>
+#include <NovaEngine/Assets/TextureMeta.h>
 #include <NovaEngine/Core/Logger.h>
 
 #include <stb_image.h>   // 仅声明：STB_IMAGE_IMPLEMENTATION 唯一实现点在 TextureLoader.cpp
@@ -97,13 +99,31 @@ std::shared_ptr<Cubemap> Cubemap::createFromFaces(
                          GL_RGB, GL_FLOAT, data);
             stbi_image_free(data);
         } else {
-            std::vector<uint8_t> pixels;
-            if (!TextureLoader::loadRgba8(facePaths[i], w, h, pixels)) {
-                Logger::error("[Cubemap] 解码 LDR 面失败 {}", facePaths[i].string());
+            // LDR 面：二进制缓存（V0.3-7）。键 = 面文件字节 + meta 文本，与
+            // AssetDatabase::getTexture 同一键空间——面图同时作普通贴图使用时共享解码缓存；
+            // 命中直接用缓存像素（宽高来自缓存），未命中完整解码 + 写缓存。
+            std::vector<uint8_t> faceBytes;
+            if (!AssetStream::readAllBytes(facePaths[i], faceBytes)) {
+                Logger::error("[Cubemap] 读取 LDR 面失败 {}", facePaths[i].string());
                 glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
                 glDeleteTextures(1, &cubemap->m_id);
                 cubemap->m_id = 0;   // 已手动释放：置 0 防析构函数重复删除
                 return nullptr;
+            }
+            bool metaExisted = false;
+            const TextureImportSettings meta = TextureMeta::loadOrCreate(facePaths[i], metaExisted);
+            const std::string cacheKey = BinaryCache::makeKey(faceBytes, TextureMeta::serialize(meta));
+
+            std::vector<uint8_t> pixels;
+            if (!BinaryCache::loadTextureRgba8(cacheKey, w, h, pixels)) {
+                if (!TextureLoader::loadRgba8(facePaths[i], w, h, pixels)) {
+                    Logger::error("[Cubemap] 解码 LDR 面失败 {}", facePaths[i].string());
+                    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+                    glDeleteTextures(1, &cubemap->m_id);
+                    cubemap->m_id = 0;   // 已手动释放：置 0 防析构函数重复删除
+                    return nullptr;
+                }
+                BinaryCache::saveTextureRgba8(cacheKey, w, h, pixels);
             }
             // srgb=true 时用 sRGB 内部格式：采样自动线性化，消费端输出前统一 gamma 校正
             const GLint internal = srgb ? GL_SRGB8_ALPHA8 : GL_RGBA8;
@@ -145,25 +165,37 @@ std::shared_ptr<Cubemap> Cubemap::createFromEquirect(const std::filesystem::path
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     if (hdr) {
-        // HDR：AssetStream 内存读取 + stbi_loadf_from_memory（裁定 1）
+        // HDR：AssetStream 内存读取 + stbi_loadf_from_memory（裁定 1）。
+        // 二进制缓存 RGBFloat（V0.3-7）：key = 源文件字节（.hdr 不消费 .novameta）；
+        // 命中直接用缓存浮点像素，未命中解码 + 写缓存。
         std::vector<uint8_t> bytes;
         if (!AssetStream::readAllBytes(absolutePath, bytes)) {
             Logger::error("[Cubemap] 读取 HDR 失败 {}", absolutePath.string());
             glDeleteTextures(1, &srcTex);
             return nullptr;
         }
-        stbi_set_flip_vertically_on_load(0);   // 与 TextureLoader 一致：不翻转
-        int channels = 0;
-        float* data = stbi_loadf_from_memory(bytes.data(), static_cast<int>(bytes.size()),
-                                             &srcW, &srcH, &channels, 3);
-        if (!data) {
-            Logger::error("[Cubemap] 解码 HDR 失败 {}: {}", absolutePath.string(),
-                          stbi_failure_reason());
-            glDeleteTextures(1, &srcTex);
-            return nullptr;
+        const std::string cacheKey = BinaryCache::makeKey(bytes);
+        std::vector<float> pixels;
+        if (!BinaryCache::loadTextureRgbFloat(cacheKey, srcW, srcH, pixels)) {
+            stbi_set_flip_vertically_on_load(0);   // 与 TextureLoader 一致：不翻转
+            int channels = 0;
+            float* data = stbi_loadf_from_memory(bytes.data(), static_cast<int>(bytes.size()),
+                                                 &srcW, &srcH, &channels, 3);
+            if (!data) {
+                Logger::error("[Cubemap] 解码 HDR 失败 {}: {}", absolutePath.string(),
+                              stbi_failure_reason());
+                glDeleteTextures(1, &srcTex);
+                return nullptr;
+            }
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, srcW, srcH, 0, GL_RGB, GL_FLOAT, data);
+            BinaryCache::saveTextureRgbFloat(
+                cacheKey, srcW, srcH,
+                std::vector<float>(data, data + static_cast<size_t>(srcW) * srcH * 3));
+            stbi_image_free(data);
+        } else {
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, srcW, srcH, 0, GL_RGB, GL_FLOAT,
+                         pixels.data());
         }
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, srcW, srcH, 0, GL_RGB, GL_FLOAT, data);
-        stbi_image_free(data);
     } else {
         std::vector<uint8_t> pixels;
         if (!TextureLoader::loadRgba8(absolutePath, srcW, srcH, pixels)) {

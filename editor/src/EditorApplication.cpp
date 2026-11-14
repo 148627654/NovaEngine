@@ -1,6 +1,7 @@
 #include "EditorApplication.h"
 
 #include "DragDrop.h"
+#include "Packager.h"
 #include "panels/AssetBrowserPanel.h"
 #include "panels/ConsolePanel.h"
 #include "panels/EnvironmentPanel.h"
@@ -35,7 +36,12 @@
 // GLFW 头必须在 glad 之后（glad 的 __gl_h_ 守卫令 GLFW 内嵌的 <GL/gl.h> 变 no-op）。
 #include <windows.h>
 #include <commdlg.h>
-#include <GLFW/glfw3.h>   // updateWindowTitle / run 内窗口关闭拦截用 glfwSetWindowTitle/glfwSetWindowShouldClose
+#include <shlobj.h>       // SHParseDisplayName / SHCreateShellItem（目录选择对话框初始目录）
+#include <shobjidl.h>     // IFileDialog：Common Item Dialog（commdlg 的现代形态，FOS_PICKFOLDERS 选目录）
+#include <objbase.h>      // CoInitializeEx / CoCreateInstance
+#include <GLFW/glfw3.h>       // updateWindowTitle / run 内窗口关闭拦截用 glfwSetWindowTitle/glfwSetWindowShouldClose
+#define GLFW_EXPOSE_NATIVE_WIN32 1  // glfw3native.h 需该宏才声明 glfwGetWin32Window（修复：首编译 C3861）
+#include <GLFW/glfw3native.h> // glfwGetWin32Window：目录选择对话框的 owner 句柄
 
 namespace NovaEditor {
 
@@ -85,6 +91,45 @@ std::filesystem::path showOpenSceneDialog(const std::filesystem::path& initialDi
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     if (!GetOpenFileNameW(&ofn)) return {};
     return std::filesystem::path(std::wstring(buf));
+}
+
+// 输出目录选择对话框（IFileDialog = commdlg 的现代形态；FOS_PICKFOLDERS 只选目录）。
+// 返回空 = 用户取消。COM 按需初始化（IFileDialog 要求 STA 线程）；owner 为主窗口句柄保持模态。
+std::filesystem::path showPickDirectoryDialog(HWND owner, const std::filesystem::path& initialDir) {
+    const HRESULT initHr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    // initHr == RPC_E_CHANGED_MODE 表示本线程已以其他模式初始化 COM，IFileDialog 仍可尝试使用
+    std::filesystem::path result;
+    IFileDialog* dlg = nullptr;
+    if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
+                                   IID_PPV_ARGS(&dlg)))) {
+        DWORD opts = 0;
+        if (SUCCEEDED(dlg->GetOptions(&opts)))
+            dlg->SetOptions(opts | FOS_PICKFOLDERS | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR |
+                            FOS_FORCEFILESYSTEM);
+        dlg->SetTitle(L"选择打包输出目录");
+        // 初始目录（解析失败静默跳过，对话框退回默认位置）
+        PIDLIST_ABSOLUTE pidl = nullptr;
+        if (SUCCEEDED(SHParseDisplayName(initialDir.c_str(), nullptr, &pidl, 0, nullptr))) {
+            IShellItem* psi = nullptr;
+            if (SUCCEEDED(SHCreateShellItem(nullptr, nullptr, pidl, &psi))) dlg->SetFolder(psi);
+            if (psi) psi->Release();
+            CoTaskMemFree(pidl);
+        }
+        if (SUCCEEDED(dlg->Show(owner))) {
+            IShellItem* psi = nullptr;
+            if (SUCCEEDED(dlg->GetResult(&psi))) {
+                PWSTR path = nullptr;
+                if (SUCCEEDED(psi->GetDisplayName(SIGDN_FILESYSPATH, &path))) {
+                    result = std::filesystem::path(std::wstring(path));
+                    CoTaskMemFree(path);
+                }
+                psi->Release();
+            }
+        }
+        dlg->Release();
+    }
+    if (SUCCEEDED(initHr)) CoUninitialize();  // 仅当本函数成功初始化时才反初始化（引用计数配对）
+    return result;
 }
 
 // 鼠标是否落在面板上报区域内（min==max 视为未上报）
@@ -297,6 +342,9 @@ void EditorApplication::showMainMenu() {
             ImGui::Separator();
             if (ImGui::MenuItem("Save Scene", "Ctrl+S", false, editMode)) saveScene();
             if (ImGui::MenuItem("Save Scene As...", nullptr, false, editMode)) saveSceneAs();
+            ImGui::Separator();
+            // V0.5-1：一键打包（Play 态禁用；无当前场景路径时点击后提示先保存）
+            if (ImGui::MenuItem("Build Player...", nullptr, false, editMode)) buildPlayer();
             ImGui::Separator();
             if (ImGui::MenuItem("Exit", nullptr)) requestExit();  // 与窗口关闭同流（判脏弹模态）
             ImGui::EndMenu();
@@ -544,6 +592,32 @@ bool EditorApplication::saveSceneAs() {
     }
     Logger::error("场景保存失败: {}", p.string());
     return false;
+}
+
+void EditorApplication::buildPlayer() {
+    using namespace NovaEngine;
+    if (m_context.state == EditorContext::EditorState::Play) return;  // 菜单已禁用，兜底拦截
+    if (m_context.currentScenePath.empty()) {
+        Logger::warn("当前场景尚未保存，请先保存场景（File → Save Scene As...）再打包");
+        return;
+    }
+    if (m_context.sceneDirty)
+        Logger::warn("场景存在未保存修改，本次将打包上次保存的版本（可先 Ctrl+S 保存最新修改）");
+
+    // 目录选择对话框（默认定位项目根；取消则静默返回）
+    const auto outDir = showPickDirectoryDialog(
+        glfwGetWin32Window(m_window->nativeHandle()), AssetDatabase::projectRoot());
+    if (outDir.empty()) {
+        Logger::info("已取消打包");
+        return;
+    }
+
+    Logger::info("开始打包场景: {} → 输出目录: {}", m_context.currentScenePath.string(),
+                 outDir.string());
+    if (Packager::buildPlayer(m_context.currentScenePath, outDir))
+        Logger::info("Build Player 完成");
+    else
+        Logger::error("Build Player 失败（详见上方错误清单）");
 }
 
 void EditorApplication::showSaveConfirmModal() {

@@ -40,6 +40,7 @@ private:
     std::unordered_map<std::string, std::weak_ptr<Mesh>> m_meshCache;      // key = canonical 绝对路径
     std::unordered_map<std::string, std::weak_ptr<Texture>> m_textureCache;
     std::unordered_map<std::string, std::weak_ptr<Cubemap>> m_cubemapCache;
+    std::unordered_map<std::string, Material> m_materialCache;             // 子网格键 → 材质（importModel 旁表）
     std::filesystem::path m_projectRoot;
 };
 

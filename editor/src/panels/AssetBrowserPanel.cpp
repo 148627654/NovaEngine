@@ -71,6 +71,13 @@ void AssetBrowserPanel::onGui(EditorContext& ctx, EditorCamera&) {
         std::vector<Entry> dirs, files;
         for (fs::directory_iterator it(full, ec), end; !ec && it != end; it.increment(ec)) {
             const fs::directory_entry& de = *it;
+            // V0.3-5：隐藏点开头条目（.novacache 等）与贴图 .novameta 伴随文件
+            const std::string fname = de.path().filename().string();
+            if (!fname.empty() && fname.front() == '.') continue;
+            std::string fl = fname;
+            std::transform(fl.begin(), fl.end(), fl.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (fl.ends_with(".novameta")) continue;
             fs::path rel = fs::relative(de.path(), root, ec);
             if (ec) { ec.clear(); continue; }
             if (de.is_directory(ec)) dirs.push_back({rel, true});
@@ -120,11 +127,111 @@ void AssetBrowserPanel::onGui(EditorContext& ctx, EditorCamera&) {
                     ImGui::EndDragDropSource();
                 }
             }
+
+            // 贴图右键菜单：Texture Import Settings…（V0.3-5 .novameta 编辑入口）
+            if (!e.isDir && DragDrop::isTextureFile(e.rel)) {
+                const std::string ctxId = "asset_ctx_" + e.rel.string();
+                if (ImGui::BeginPopupContextItem(ctxId.c_str())) {
+                    if (ImGui::MenuItem("Texture Import Settings...")) {
+                        // 打开模态前 loadOrCreate 读取当前值（meta 缺失时自动生成默认并落盘）
+                        const fs::path abs = root / e.rel;
+                        bool metaExisted = false;
+                        m_metaEditSettings = NovaEngine::TextureMeta::loadOrCreate(abs, metaExisted);
+                        m_metaEditTexPath = abs;
+                        m_metaEditOpen = true;
+                        if (!metaExisted)
+                            NovaEngine::Logger::info("已为贴图生成默认导入设置: {}",
+                                                     e.rel.string() + ".novameta");
+                    }
+                    ImGui::EndPopup();
+                }
+            }
         };
         for (const auto& e : dirs) drawEntry(e);
         for (const auto& e : files) drawEntry(e);
     }
     ImGui::EndChild();
+
+    // ---- 贴图导入设置模态（V0.3-5：colorSpace/wrap/filter/mipmaps + Save/Reset/Close）----
+    if (m_metaEditOpen) {
+        using CS = NovaEngine::TextureImportSettings::ColorSpace;
+        ImGui::OpenPopup("Texture Import Settings");
+        ImGui::SetNextWindowSize(ImVec2(420.0f, 0.0f), ImGuiCond_Appearing);
+        bool stayOpen = true;
+        if (ImGui::BeginPopupModal("Texture Import Settings", &stayOpen,
+                                   ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDocking)) {
+            // 标题 = 项目内相对路径（跨盘等异常时回退绝对路径）
+            std::error_code rec;
+            const fs::path rel =
+                fs::relative(m_metaEditTexPath, NovaEngine::AssetDatabase::projectRoot(), rec);
+            ImGui::TextUnformatted(
+                rec ? m_metaEditTexPath.string().c_str() : rel.generic_string().c_str());
+            ImGui::Separator();
+
+            const char* csName =
+                m_metaEditSettings.colorSpace == CS::Srgb ? "sRGB" : "Linear";
+            if (ImGui::BeginCombo("Color Space", csName)) {
+                if (ImGui::Selectable("sRGB", m_metaEditSettings.colorSpace == CS::Srgb))
+                    m_metaEditSettings.colorSpace = CS::Srgb;
+                if (ImGui::Selectable("Linear", m_metaEditSettings.colorSpace == CS::Linear))
+                    m_metaEditSettings.colorSpace = CS::Linear;
+                ImGui::EndCombo();
+            }
+
+            const char* wrapName = m_metaEditSettings.wrapMode == NovaEngine::TextureWrap::Repeat
+                                       ? "Repeat"
+                                       : "Clamp To Edge";
+            if (ImGui::BeginCombo("Wrap Mode", wrapName)) {
+                if (ImGui::Selectable("Repeat",
+                                      m_metaEditSettings.wrapMode == NovaEngine::TextureWrap::Repeat))
+                    m_metaEditSettings.wrapMode = NovaEngine::TextureWrap::Repeat;
+                if (ImGui::Selectable("Clamp To Edge",
+                                      m_metaEditSettings.wrapMode ==
+                                          NovaEngine::TextureWrap::ClampToEdge))
+                    m_metaEditSettings.wrapMode = NovaEngine::TextureWrap::ClampToEdge;
+                ImGui::EndCombo();
+            }
+
+            const char* filterName =
+                m_metaEditSettings.filterMode == NovaEngine::TextureFilter::Bilinear
+                    ? "Bilinear"
+                    : "Trilinear";
+            if (ImGui::BeginCombo("Filter Mode", filterName)) {
+                if (ImGui::Selectable(
+                        "Bilinear",
+                        m_metaEditSettings.filterMode == NovaEngine::TextureFilter::Bilinear))
+                    m_metaEditSettings.filterMode = NovaEngine::TextureFilter::Bilinear;
+                if (ImGui::Selectable(
+                        "Trilinear",
+                        m_metaEditSettings.filterMode == NovaEngine::TextureFilter::Trilinear))
+                    m_metaEditSettings.filterMode = NovaEngine::TextureFilter::Trilinear;
+                ImGui::EndCombo();
+            }
+
+            ImGui::Checkbox("Generate Mipmaps", &m_metaEditSettings.generateMipmaps);
+
+            ImGui::Separator();
+            if (ImGui::Button("Save", ImVec2(120, 0))) {
+                if (NovaEngine::TextureMeta::save(m_metaEditTexPath, m_metaEditSettings)) {
+                    NovaEngine::AssetDatabase::instance().clearCache();  // meta 变化 → 缓存失效重导
+                    NovaEngine::Logger::info("贴图导入设置已保存: {}.novameta",
+                                             m_metaEditTexPath.string());
+                    m_metaEditOpen = false;
+                } else {
+                    NovaEngine::Logger::error("贴图导入设置保存失败: {}",
+                                              m_metaEditTexPath.string());
+                }
+            }
+            ImGui::SameLine();
+            // 字段恢复默认（不落盘；确认生效需再点 Save）
+            if (ImGui::Button("Reset to Default", ImVec2(140, 0)))
+                m_metaEditSettings = NovaEngine::TextureImportSettings{};
+            ImGui::SameLine();
+            if (ImGui::Button("Close", ImVec2(80, 0))) m_metaEditOpen = false;
+            ImGui::EndPopup();
+        }
+        if (!stayOpen && m_metaEditOpen) m_metaEditOpen = false;
+    }
 
     ImGui::End();
 }

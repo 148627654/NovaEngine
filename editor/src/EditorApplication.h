@@ -44,6 +44,7 @@ private:
     void openSceneDialog();
     bool saveScene();                         // 返回 false = 保存失败/取消
     bool saveSceneAs();
+    void buildPlayer();                       // File 菜单「Build Player…」（V0.5-1：目录选择 → Packager 打包）
     void showSaveConfirmModal();              // Save / Don't Save / Cancel 三按钮（Save 失败不关模态）
     void processPendingAction();              // 模态决议后执行挂起动作
     void requestExit();                       // 窗口关闭拦截与 File→Exit 统一出口

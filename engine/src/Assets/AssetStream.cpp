@@ -1,10 +1,13 @@
 // AssetStream.cpp —— 资产字节流统一入口（收官批次枢纽，V0.2-14/V0.5-1）
 //
-// 磁盘读取走 std::ifstream 的 path 重载（中文路径安全，零转换代码，裁定 1）；
-// .novapak 挂载层本波（Wave 1）只记录路径并告警，PakArchive 在 Wave 2 落地
-// （签名已冻结不能改：mountPak 返回 void，故失败经日志表达）。
+// 磁盘读取走 std::ifstream 的 path 重载（中文路径安全，裁定 1）；
+// .novapak 挂载后 exists/readAllBytes/readAllText 先查 pak 内存 entry 再查磁盘
+// （pak 未命中回退磁盘：开发期与发布态行为统一；未挂载时与直接读盘逐字节等价）。
+// 签名已冻结（mountPak 返回 void），挂载失败经 Logger::error 表达。
 
 #include <NovaEngine/Assets/AssetStream.h>
+#include <NovaEngine/Assets/AssetDatabase.h>   // projectRoot：绝对路径 → pak 相对键降维
+#include <NovaEngine/Assets/PakArchive.h>
 #include <NovaEngine/Core/Logger.h>
 
 #include <fstream>
@@ -13,9 +16,25 @@ namespace NovaEngine {
 
 namespace {
 
-// pak 挂载状态：Wave 1 只存路径（供 Wave 2 的 PakArchive 延续使用），读取仍全走磁盘
-std::filesystem::path s_pakPath;
-bool s_pakMounted = false;
+// pak 实例与有效状态：进程内唯一挂载点（Player 启动时 mountPak 一次）
+PakArchive s_pak;
+bool s_pakValid = false;
+
+// pak entry 键规范形：绝对路径先相对项目根降维（Player：项目根 = exe 目录），
+// 再 lexically_normal + 正斜杠（与 PakArchive::pack 入库键一致）。
+// 无法降维的绝对路径保持原样（pak 中必然查不到 → 回退磁盘）。
+std::string pakLookupPath(const std::filesystem::path& p) {
+    std::filesystem::path n = p;
+    if (n.is_absolute()) {
+        const std::filesystem::path root = AssetDatabase::projectRoot();
+        if (!root.empty()) {
+            std::error_code ec;
+            const std::filesystem::path rel = std::filesystem::relative(n, root, ec);
+            if (!ec && !rel.empty() && *rel.begin() != "..") n = rel;
+        }
+    }
+    return n.lexically_normal().generic_string();
+}
 
 // 磁盘读取：ifstream 的 path 重载（MSVC 下内部经宽字符转换，中文路径安全）
 bool readDiskFile(const std::filesystem::path& path, std::vector<uint8_t>& out) {
@@ -37,27 +56,28 @@ bool readDiskFile(const std::filesystem::path& path, std::vector<uint8_t>& out) 
 }  // namespace
 
 void AssetStream::mountPak(const std::filesystem::path& pakPath) {
-    // Wave 1：PakArchive 未实现，只记录路径；读取行为不变（仍走磁盘）。
-    // Wave 2 实现后：解析 entry 表，exists/readAllBytes/readAllText 按相对路径查内存 entry。
-    s_pakPath = pakPath;
-    s_pakMounted = true;
-    Logger::info("[AssetStream] 已记录 pak 路径: {}", pakPath.string());
-    Logger::warn("[AssetStream] pak 支持 Wave 2 落地，本波仍走磁盘读取");
+    // PakArchive::open 失败已 Logger::error；此处仅记录挂载结果
+    s_pakValid = s_pak.open(pakPath);
+    if (s_pakValid) {
+        Logger::info("[AssetStream] pak 已挂载: {}", pakPath.string());
+    } else {
+        Logger::error("[AssetStream] pak 挂载失败，回退磁盘读取: {}", pakPath.string());
+    }
 }
 
 bool AssetStream::pakMounted() {
-    return s_pakMounted;
+    return s_pakValid;   // 返回有效性（open 成功才算挂载）
 }
 
 bool AssetStream::exists(const std::filesystem::path& relativePath) {
-    // Wave 1：只查磁盘（pak entry 表 Wave 2 实现）
+    if (s_pakValid && s_pak.contains(pakLookupPath(relativePath))) return true;
     std::error_code ec;
     return std::filesystem::exists(relativePath, ec);
 }
 
 bool AssetStream::readAllBytes(const std::filesystem::path& relativePath,
                                std::vector<uint8_t>& out) {
-    // Wave 1：磁盘读取；pak 挂载后按相对路径查内存 entry 表在 Wave 2 实现
+    if (s_pakValid && s_pak.read(pakLookupPath(relativePath), out)) return true;
     return readDiskFile(relativePath, out);
 }
 

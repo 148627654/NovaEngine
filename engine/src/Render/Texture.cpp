@@ -95,6 +95,17 @@ std::shared_ptr<Texture> Texture::createFromFile(const std::filesystem::path& pa
     return tex;
 }
 
+std::shared_ptr<Texture> Texture::createFromPixels(const uint8_t* rgba8, int width, int height,
+                                                   bool srgb, TextureWrap wrap,
+                                                   TextureFilter filter, bool generateMipmaps) {
+    // 二进制缓存命中路径（V0.3-7）：像素已在内存，跳过文件读取与 stb 解码
+    if (!rgba8 || width <= 0 || height <= 0) return nullptr;
+    auto tex = std::shared_ptr<Texture>(new Texture());
+    uploadRgba8(tex->m_id, tex->m_width, tex->m_height, rgba8, width, height, srgb,
+                wrap, filter, generateMipmaps);
+    return tex;
+}
+
 Texture::~Texture() {
     if (m_id) glDeleteTextures(1, &m_id);
 }

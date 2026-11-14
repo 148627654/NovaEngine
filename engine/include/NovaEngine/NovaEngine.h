@@ -32,8 +32,11 @@
 
 #include <NovaEngine/Assets/AssetDatabase.h>
 #include <NovaEngine/Assets/AssetStream.h>
+#include <NovaEngine/Assets/BinaryCache.h>
 #include <NovaEngine/Assets/ModelLoader.h>
+#include <NovaEngine/Assets/PakArchive.h>
 #include <NovaEngine/Assets/TextureLoader.h>
+#include <NovaEngine/Assets/TextureMeta.h>
 
 #include <NovaEngine/Scripting/Behaviour.h>
 #include <NovaEngine/Scripting/ScriptRegistry.h>

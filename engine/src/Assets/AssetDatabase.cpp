@@ -2,9 +2,18 @@
 //
 // 纯内存缓存：unordered_map<canonical 绝对路径, weak_ptr>。
 // 同文件只导入一次；releaseUnused 回收无引用资产；不监听 mtime（改文件后手动 Reload Assets）。
+//
+// V0.3-7 二进制缓存（assets/.novacache，详见 BinaryCache.cpp）：
+//   getTexture：源字节 + meta 文本 → key；命中直接上传缓存像素，未命中解码 + 写缓存
+//   importModel：key = 源文件字节；命中跳过 Assimp 直接 Mesh::create；未命中解析后逐子网格写缓存
+//   缓存损坏由 BinaryCache 自行删除重导，本文件无需感知。
 
 #include <NovaEngine/Assets/AssetDatabase.h>
+#include <NovaEngine/Assets/AssetStream.h>
+#include <NovaEngine/Assets/BinaryCache.h>
 #include <NovaEngine/Assets/ModelLoader.h>
+#include <NovaEngine/Assets/TextureLoader.h>
+#include <NovaEngine/Assets/TextureMeta.h>
 #include <NovaEngine/Core/Logger.h>
 #include <NovaEngine/Render/Primitives.h>
 
@@ -26,10 +35,9 @@ std::string subMeshKey(const std::string& baseKey, size_t index) {
     return baseKey + "#" + std::to_string(index);
 }
 
-// V0.2-14 旁表缓存：importModel 的材质与贴图路径（键与网格缓存同为 baseKey + "#序号"）。
-// 冻结头 AssetDatabase.h 无 m_materialCache 成员（不可改头），AssetDatabase 为单例，
-// 故实现为文件内 static，语义与成员缓存等价（clearCache 一并清空）。
-std::unordered_map<std::string, Material> s_materialCache;
+// V0.2-14 旁表缓存：importModel 的贴图路径（键与网格缓存同为 baseKey + "#序号"）。
+// 冻结头 AssetDatabase.h 无该表成员（材质表已由 Wave 2 解冻头加入 m_materialCache），
+// AssetDatabase 为单例，故实现为文件内 static，语义与成员缓存等价（clearCache 一并清空）。
 std::unordered_map<std::string, std::filesystem::path> s_albedoPathCache;
 
 // 解析模型引用的贴图路径为项目内相对路径（沿用编辑器 resolveTextureAndPath 的候选逻辑）：
@@ -64,6 +72,28 @@ std::shared_ptr<Mesh> getBuiltinMesh(const std::string& path) {
     if (path == "builtin:sphere") return Primitives::sphere();
     if (path == "builtin:plane") return Primitives::plane();
     return nullptr;
+}
+
+// 6 面天空盒文件名与扩展名（getCubemap 目录探测共用）
+constexpr std::array<const char*, 6> kCubeBaseNames = {"px", "nx", "py", "ny", "pz", "nz"};
+constexpr std::array<const char*, 6> kCubeExtensions = {".png", ".jpg", ".jpeg", ".bmp", ".tga", ".hdr"};
+
+// 相对路径 → 绝对路径解析（修复：Player 裸盘模式模型/贴图加载失败）
+// 常规锚点 = 项目根；但 Player 的项目根 = exe 目录，裸盘开发模式从项目根运行时
+// 资产实际位于 cwd（场景经 cwd 加载）。因此：
+//   pak 已挂载 → 恒用项目根锚点（pak 键按项目根降维；cwd 回退会绕过 pak 直读磁盘）；
+//   磁盘上项目根锚点存在 → 用之（编辑器/常规流程不变）；
+//   否则 cwd 锚点存在 → 用之（裸盘回退）；
+//   都不存在 → 保留项目根锚点（后续 AssetStream 报错路径不变）。
+std::filesystem::path resolveAssetAbs(const std::filesystem::path& relativePath) {
+    const std::filesystem::path projAbs = AssetDatabase::projectRoot() / relativePath;
+    if (AssetStream::pakMounted()) return projAbs;
+    std::error_code ec;
+    if (std::filesystem::exists(projAbs, ec)) return projAbs;
+    std::error_code cwdEc;
+    const std::filesystem::path cwdAbs = std::filesystem::current_path(cwdEc) / relativePath;
+    if (!cwdEc && std::filesystem::exists(cwdAbs, cwdEc)) return cwdAbs;
+    return projAbs;
 }
 
 }  // namespace
@@ -102,10 +132,10 @@ AssetImportResult AssetDatabase::importModel(const std::filesystem::path& relati
         return out;
     }
 
-    const std::filesystem::path abs = m_projectRoot / relativePath;
+    const std::filesystem::path abs = resolveAssetAbs(relativePath);
     const std::string baseKey = cacheKeyFor(abs);
 
-    // 网格：先尝试从既有缓存取回全部子网格（键 = 绝对路径 + "#序号"）
+    // 1. 内存网格缓存：先尝试取回全部子网格（键 = 绝对路径 + "#序号"）
     for (size_t i = 0; i < 1024; ++i) {
         auto it = m_meshCache.find(subMeshKey(baseKey, i));
         if (it == m_meshCache.end()) break;
@@ -121,8 +151,8 @@ AssetImportResult AssetDatabase::importModel(const std::filesystem::path& relati
         // 网格缓存命中：材质/贴图路径从旁表缓存取回
         for (size_t i = 0; i < out.meshes.size(); ++i) {
             const std::string key = subMeshKey(baseKey, i);
-            auto mit = s_materialCache.find(key);
-            out.materials.push_back(mit != s_materialCache.end() ? mit->second : Material{});
+            auto mit = m_materialCache.find(key);
+            out.materials.push_back(mit != m_materialCache.end() ? mit->second : Material{});
             auto pit = s_albedoPathCache.find(key);
             out.albedoMapPaths.push_back(pit != s_albedoPathCache.end()
                                              ? pit->second
@@ -131,8 +161,60 @@ AssetImportResult AssetDatabase::importModel(const std::filesystem::path& relati
         return out;
     }
 
-    // 缓存未命中：Assimp 一次解析（网格 + 材质 + 贴图路径一次拿全，V0.2-14）
-    ModelImportResult parsed = ModelLoader::load(abs);
+    // 2. 二进制缓存（V0.3-7）：key = 源文件字节哈希。源字节经 AssetStream 读取
+    //    （pak 挂载时走内存；磁盘中文路径安全），Assimp 解析复用同一份字节（免二次读盘）。
+    std::vector<uint8_t> srcBytes;
+    if (!AssetStream::readAllBytes(abs, srcBytes)) {
+        Logger::error("AssetDatabase: 读取模型文件失败 {}", relativePath.string());
+        return out;
+    }
+    const std::string binKey = BinaryCache::makeKey(srcBytes);
+
+    std::vector<MeshData> cachedDatas;
+    for (size_t i = 0; i < 1024; ++i) {
+        MeshData data;
+        if (!BinaryCache::loadMeshData(binKey + "#" + std::to_string(i), data)) break;
+        cachedDatas.push_back(std::move(data));
+    }
+
+    // 二进制缓存命中条件（Reviewer P1-2/P2-2）：材质旁表必须与本模型全部子网格键
+    // 一一对应且数量一致。旁表为空（新进程）或缓存被撕裂（子网格缺失/数量不符）时
+    // 不得静默丢材质/丢子网格——一律回退 Assimp 重解析，并在下方逐子网格覆写
+    // saveMeshData 补全缓存。
+    const std::string keyPrefix = baseKey + "#";
+    size_t sideTableCount = 0;
+    for (const auto& kv : m_materialCache)
+        if (kv.first.starts_with(keyPrefix)) ++sideTableCount;
+    bool cacheUsable = !cachedDatas.empty() && sideTableCount == cachedDatas.size();
+    for (size_t i = 0; cacheUsable && i < cachedDatas.size(); ++i) {
+        if (!m_materialCache.contains(subMeshKey(baseKey, i))) cacheUsable = false;
+    }
+
+    if (cacheUsable) {
+        // 命中：跳过 Assimp 直接 Mesh::create；材质/贴图路径旁表已确认完整
+        for (size_t i = 0; i < cachedDatas.size(); ++i) {
+            auto mesh = Mesh::create(cachedDatas[i]);
+            if (!mesh) {
+                Logger::error("AssetDatabase: 上传网格失败 [{}]#{}", relativePath.string(), i);
+                continue;
+            }
+            const std::string key = subMeshKey(baseKey, i);
+            m_meshCache[key] = mesh;
+            out.meshes.push_back(mesh);
+            auto mit = m_materialCache.find(key);
+            out.materials.push_back(mit != m_materialCache.end() ? mit->second : Material{});
+            auto pit = s_albedoPathCache.find(key);
+            out.albedoMapPaths.push_back(pit != s_albedoPathCache.end()
+                                             ? pit->second
+                                             : std::filesystem::path());
+        }
+        return out;
+    }
+
+    // 3. 未命中（或旁表不完整/缓存撕裂）：Assimp 一次解析（网格 + 材质 + 贴图路径一次拿全，
+    //    V0.2-14）+ 逐子网格覆写二进制缓存（补全撕裂缓存）
+    ModelImportResult parsed =
+        ModelLoader::loadFromMemory(srcBytes.data(), srcBytes.size(), abs.extension().string());
     if (parsed.meshes.empty()) return out;  // ModelLoader 已记录错误日志
 
     out.meshes.reserve(parsed.meshes.size());
@@ -149,10 +231,13 @@ AssetImportResult AssetDatabase::importModel(const std::filesystem::path& relati
         m_meshCache[key] = mesh;
         out.meshes.push_back(mesh);
 
+        // 二进制缓存：逐子网格落盘（下次启动免 Assimp）
+        BinaryCache::saveMeshData(binKey + "#" + std::to_string(i), parsed.meshes[i]);
+
         // 旁表缓存：材质 + 贴图路径（相对路径解析失败 → 空路径 = 纯色）
         const Material material =
             i < parsed.materials.size() ? parsed.materials[i] : Material{};
-        s_materialCache[key] = material;
+        m_materialCache[key] = material;
         out.materials.push_back(material);
 
         const std::filesystem::path texRel =
@@ -175,16 +260,47 @@ std::shared_ptr<Mesh> AssetDatabase::getMesh(const std::filesystem::path& relati
 std::shared_ptr<Texture> AssetDatabase::getTexture(const std::filesystem::path& relativePath, bool srgb) {
     if (relativePath.empty()) return nullptr;
 
-    const std::filesystem::path abs = m_projectRoot / relativePath;
+    const std::filesystem::path abs = resolveAssetAbs(relativePath);
     const std::string key = cacheKeyFor(abs);
 
     if (auto it = m_textureCache.find(key); it != m_textureCache.end())
         if (auto tex = it->second.lock())
             return tex;
 
-    auto tex = Texture::createFromFile(abs, srgb);
+    // 源文件字节（AssetStream：pak 挂载自动走内存，未挂载磁盘中文路径安全）
+    std::vector<uint8_t> srcBytes;
+    if (!AssetStream::readAllBytes(abs, srcBytes)) {
+        Logger::error("AssetDatabase: 加载贴图失败（读取）{}", relativePath.string());
+        return nullptr;
+    }
+
+    // .novameta 导入设置（缺失自动生成默认落盘；损坏回退默认 + warn）
+    bool metaExisted = false;
+    const TextureImportSettings settings = TextureMeta::loadOrCreate(abs, metaExisted);
+
+    // 二进制缓存键 = 源字节 + meta 文本（改 meta → 缓存 hash 失效，裁定 13）
+    const std::string binKey = BinaryCache::makeKey(srcBytes, TextureMeta::serialize(settings));
+
+    // sRGB 内部格式仅当 meta 声明 sRGB 且调用方请求 srgb（NormalMap/Linear 一律线性）
+    const bool srgbInternal =
+        (settings.colorSpace == TextureImportSettings::ColorSpace::Srgb) && srgb;
+
+    int w = 0, h = 0;
+    std::vector<uint8_t> pixels;
+    if (!BinaryCache::loadTextureRgba8(binKey, w, h, pixels)) {
+        // 未命中：完整解码 + 写缓存（损坏缓存已被 BinaryCache 删除）
+        if (!TextureLoader::loadRgba8(abs, w, h, pixels)) {
+            Logger::error("AssetDatabase: 加载贴图失败（解码）{}", relativePath.string());
+            return nullptr;
+        }
+        BinaryCache::saveTextureRgba8(binKey, w, h, pixels);
+    }
+
+    // 命中直接用缓存像素（宽高来自缓存）；采样参数按 meta 消费
+    auto tex = Texture::createFromPixels(pixels.data(), w, h, srgbInternal, settings.wrapMode,
+                                         settings.filterMode, settings.generateMipmaps);
     if (!tex) {
-        Logger::error("AssetDatabase: 加载贴图失败 {}", relativePath.string());
+        Logger::error("AssetDatabase: 上传贴图失败 {}", relativePath.string());
         return nullptr;
     }
     m_textureCache[key] = tex;
@@ -194,7 +310,7 @@ std::shared_ptr<Texture> AssetDatabase::getTexture(const std::filesystem::path& 
 std::shared_ptr<Cubemap> AssetDatabase::getCubemap(const std::filesystem::path& relativePath) {
     if (relativePath.empty()) return nullptr;
 
-    const std::filesystem::path abs = m_projectRoot / relativePath;
+    const std::filesystem::path abs = resolveAssetAbs(relativePath);
     const std::string key = cacheKeyFor(abs);
 
     // 缓存命中（weak_ptr 失效时锁失败，走重载）
@@ -202,35 +318,50 @@ std::shared_ptr<Cubemap> AssetDatabase::getCubemap(const std::filesystem::path& 
         if (auto cubemap = it->second.lock())
             return cubemap;
 
-    // 目录 → 6 面图（固定文件名 px/nx/py/ny/pz/nz）；文件 → equirect
+    // 目录 → 6 面图（固定文件名 px/nx/py/ny/pz/nz）；文件 → equirect。
+    // 目录判定：磁盘 is_directory；pak 挂载时目录不落盘 → 按「任一面文件存在」探测。
+    // 探测一律传绝对路径（Reviewer P2-1）：AssetStream 内部对绝对路径相对项目根降维成
+    // pak 键（pak 场景成立），磁盘检查不依赖 CWD——与 resolveAssetAbs 的读取锚点一致。
     std::error_code ec;
     std::shared_ptr<Cubemap> cubemap;
-    if (std::filesystem::is_directory(abs, ec)) {
-        static constexpr std::array<const char*, 6> kBaseNames = {"px", "nx", "py", "ny", "pz", "nz"};
-        static constexpr std::array<const char*, 6> kExtensions = {".png", ".jpg", ".jpeg", ".bmp", ".tga", ".hdr"};
+    bool dirCase = std::filesystem::is_directory(abs, ec);
+    if (!dirCase) {
+        for (const char* base : kCubeBaseNames) {
+            for (const char* ext : kCubeExtensions) {
+                if (AssetStream::exists(abs / (std::string(base) + ext))) {
+                    dirCase = true;
+                    break;
+                }
+            }
+            if (dirCase) break;
+        }
+    }
+
+    if (dirCase) {
         std::array<std::filesystem::path, 6> faces{};
         bool allFound = true;
-        for (size_t i = 0; i < kBaseNames.size(); ++i) {
+        for (size_t i = 0; i < kCubeBaseNames.size(); ++i) {
             bool found = false;
-            for (const char* ext : kExtensions) {
-                const std::filesystem::path candidate =
-                    abs / (std::string(kBaseNames[i]) + ext);
-                if (std::filesystem::exists(candidate, ec)) {
-                    faces[i] = candidate;
+            for (const char* ext : kCubeExtensions) {
+                const std::string faceName = std::string(kCubeBaseNames[i]) + ext;
+                if (AssetStream::exists(abs / faceName)) {
+                    // 绝对路径交给 Cubemap（内部 AssetStream 读取，pak 自动相对化降维）
+                    faces[i] = abs / faceName;
                     found = true;
                     break;
                 }
             }
             if (!found) {
                 Logger::warn("AssetDatabase: 6 面天空盒目录缺少 {}.* 贴图，跳过 {}",
-                             kBaseNames[i], relativePath.string());
+                             kCubeBaseNames[i], relativePath.string());
                 allFound = false;
                 break;
             }
         }
         if (allFound)
             cubemap = Cubemap::createFromFaces(faces, /*srgb=*/true);
-    } else if (std::filesystem::is_regular_file(abs, ec)) {
+    } else if (std::filesystem::is_regular_file(abs, ec) || AssetStream::exists(abs)) {
+        // equirect：equirect HDR 解码走二进制缓存 RGBFloat（Cubemap 内部消费）
         cubemap = Cubemap::createFromEquirect(abs);
     } else {
         Logger::warn("AssetDatabase: 天空盒路径不存在: {}", relativePath.string());
@@ -246,8 +377,8 @@ void AssetDatabase::clearCache() {
     m_meshCache.clear();
     m_textureCache.clear();
     m_cubemapCache.clear();
-    // V0.2-14：旁表缓存一并清空（改文件后 Reload Assets 重取材质/贴图路径）
-    s_materialCache.clear();
+    // 旁表缓存一并清空（改文件后 Reload Assets 重取材质/贴图路径）
+    m_materialCache.clear();
     s_albedoPathCache.clear();
     Logger::info("AssetDatabase: 缓存已清空（Reload Assets）");
 }

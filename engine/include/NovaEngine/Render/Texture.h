@@ -21,6 +21,10 @@ public:
     static std::shared_ptr<Texture> createFromFile(const std::filesystem::path& path, bool srgb,
                                                    TextureWrap wrap, TextureFilter filter,
                                                    bool generateMipmaps);
+    // 已解码 RGBA8 像素直接上传（V0.3-7 二进制缓存命中路径；资产管线内部用，不读盘）
+    static std::shared_ptr<Texture> createFromPixels(const uint8_t* rgba8, int width, int height,
+                                                     bool srgb, TextureWrap wrap,
+                                                     TextureFilter filter, bool generateMipmaps);
     ~Texture();
     Texture(const Texture&) = delete;
     Texture& operator=(const Texture&) = delete;
