@@ -58,3 +58,22 @@ M3–M5 的功能代码已全部实现，待人工交互验收。
 10. 脚本 C++ 运行时成员（如 OrbitCamera 的 m_angle）不随快照恢复（规格 §7.2 已知）
 11. 拾取 AABB 粗测：大平面遮挡后方物体（规格 §6.1 已知）
 12. Hierarchy Ctrl+单击是 toggle（可减选），SceneView Ctrl+单击未命中时保留选择——两处 Ctrl 语义不一致
+
+## 2026-11-15 V0.2 第一批审查（Reviewer）——已修复项
+
+- **P0 阴影数学自洽性**：光相机摆在光源对侧 + 片元比较方向反 → 阴影整体失效、地面自阴影全黑。修复：eye 改光源侧 + 两 frag 比较改 `<`（ShadowMap.h / blinn_phong.frag / grid.frag）
+- **P1 equirect 转换 FBO 缺深度附件** → 6 面互相污染。修复：加 GL_DEPTH_COMPONENT24 renderbuffer（Cubemap.cpp）
+- **P1 equirect 竖直翻转**（天顶采到图像底行）。修复：v 取负（equirect_to_cube.frag）
+- **P2 模态打开时点窗口 X 直接退出**（绕过三选确认）。修复：视作 Cancel（EditorApplication.cpp）
+- **P2 GizmoController 早退路径不推进 m_wasUsing** → 残留 true 造成 phantom 快照。修复：早退路径结算快照 + 推进状态（GizmoController.cpp）
+
+## V0.2 第一批审查遗留 P2（待办 backlog）
+
+1. 同帧按下-拖动-释放的极短拖拽不入 Undo 栈（IsItemDeactivatedAfterEdit 需跨帧；罕见，值已变但撤销覆盖不到）
+2. 同帧多次 markSceneDirty 推重复快照（undo 一次可能"看起来没变"）
+3. undo 回基线后标题仍带 *（无条件置脏；Unity 同行为）
+4. 编辑器相机不入 Undo（按设计）——undo 后同帧 Ctrl+S 会保存快照里的旧相机值，建议后续 undo 后回写当前相机
+5. Stats 帧时间不含 swapBuffers（vsync 等待前结算）→ vsync 下 FPS 虚高（仅 CPU 侧口径）
+6. Hierarchy Duplicate 失败（nullptr）仍置脏并推快照 → 多余 undo 步
+7. ShadowCameraParams.lightDirection 赋值后未使用（死字段）
+8. Inspector 无选中时 Environment 区为 V0.2-5 环境面板的临时替身（该面板落地时吸收迁移）

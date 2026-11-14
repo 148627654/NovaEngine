@@ -33,6 +33,7 @@ private:
     Operation m_operation = Operation::Translate;
     Space m_space = Space::World;
     bool m_using = false;
+    bool m_wasUsing = false;   // 上帧是否拖拽中（true→false 瞬间推 Undo 快照，V0.2-1）
     bool m_over = false;
     glm::mat4 m_view{1.0f};
     glm::mat4 m_projection{1.0f};

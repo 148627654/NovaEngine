@@ -51,16 +51,23 @@ void GizmoController::setCamera(const glm::mat4& view, const glm::mat4& projecti
 }
 
 void GizmoController::update(EditorContext& ctx, const glm::vec2& viewportPos, const glm::vec2& viewportSize) {
+    const bool wasUsing = m_wasUsing;   // 本帧开始时的拖拽状态（用于检测 true→false 瞬间）
     m_using = false;
     m_over = false;
 
     // 仅 Edit 态 + 恰好单选时显示
-    if (ctx.state != EditorContext::EditorState::Edit) return;
-    if (viewportSize.x <= 0.0f || viewportSize.y <= 0.0f) return;
-    NovaEngine::GameObject* go = ctx.activeObject();
-    if (!go || !ctx.scene) return;
-    NovaEngine::Transform* transform = go->transform();
-    if (!transform) return;
+    NovaEngine::GameObject* go = (ctx.state == EditorContext::EditorState::Edit &&
+                                  viewportSize.x > 0.0f && viewportSize.y > 0.0f && ctx.scene)
+                                     ? ctx.activeObject()
+                                     : nullptr;
+    NovaEngine::Transform* transform = go ? go->transform() : nullptr;
+    if (!go || !transform) {
+        // 早退路径也要推进拖拽状态（Reviewer P2-2）：拖拽中对象被删/取消选中时立即结算快照，
+        // 防止 m_wasUsing 残留 true 导致下一帧推 phantom 快照
+        if (wasUsing) ctx.markSceneDirty();
+        m_wasUsing = false;
+        return;
+    }
 
     // 必须用当前 SceneView 窗口的 drawlist（而非前台 drawlist）：
     // 1) gizmo 图元追加在本帧 ImGui::Image 之后，自然覆盖在视口之上；
@@ -107,10 +114,14 @@ void GizmoController::update(EditorContext& ctx, const glm::vec2& viewportPos, c
         transform->setLocalPosition(position);
         transform->setLocalRotation(rotation);
         transform->setLocalScale(scale);
-        ctx.sceneDirty = true;
+        ctx.markDirtyOnly();  // 拖拽中每帧只置脏，不推快照（防刷栈，V0.2-1）
         m_using = true;
     }
     m_over = ImGuizmo::IsOver();
+
+    // 拖拽结束瞬间（IsUsing 由 true→false）推「变更后」快照
+    if (wasUsing && !m_using) ctx.markSceneDirty();
+    m_wasUsing = m_using;
 }
 
 void GizmoController::cycleOperation() {

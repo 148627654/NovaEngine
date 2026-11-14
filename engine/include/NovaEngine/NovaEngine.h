@@ -6,6 +6,7 @@
 #include <NovaEngine/Core/Time.h>
 #include <NovaEngine/Core/Logger.h>
 #include <NovaEngine/Core/UUID.h>
+#include <NovaEngine/Core/Stats.h>
 
 #include <NovaEngine/Render/Renderer.h>
 #include <NovaEngine/Render/Shader.h>
@@ -16,6 +17,9 @@
 #include <NovaEngine/Render/Framebuffer.h>
 #include <NovaEngine/Render/Light.h>
 #include <NovaEngine/Render/Primitives.h>
+#include <NovaEngine/Render/ShadowMap.h>
+#include <NovaEngine/Render/SkyboxRenderer.h>
+#include <NovaEngine/Render/Cubemap.h>
 
 #include <NovaEngine/Scene/GameObject.h>
 #include <NovaEngine/Scene/Component.h>

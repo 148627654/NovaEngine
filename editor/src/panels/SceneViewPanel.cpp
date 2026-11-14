@@ -7,11 +7,15 @@
 
 #include <imgui.h>
 
+#include <NovaEngine/Assets/AssetDatabase.h>
 #include <NovaEngine/Core/Input.h>
 #include <NovaEngine/Core/Logger.h>
+#include <NovaEngine/Core/Stats.h>
 #include <NovaEngine/Core/Time.h>
 #include <NovaEngine/Core/UUID.h>
 #include <NovaEngine/Render/Renderer.h>
+#include <NovaEngine/Render/ShadowMap.h>
+#include <NovaEngine/Render/SkyboxRenderer.h>
 #include <NovaEngine/Scene/Camera.h>
 #include <NovaEngine/Scene/DirectionalLight.h>
 #include <NovaEngine/Scene/MeshRenderer.h>
@@ -22,6 +26,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 
@@ -166,24 +171,53 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
 
     // 灯光：场景第一个 DirectionalLight（方向取自 Transform.forward），无则默认方向
     DirectionalLightData light;
+    DirectionalLight* dirLight = nullptr;
     auto lights = scene->findComponents<DirectionalLight>();
     if (!lights.empty()) {
-        light.direction = lights.front()->transform()->forward();
-        light.color = lights.front()->color;
-        light.intensity = lights.front()->intensity;
+        dirLight = lights.front();
+        light.direction = dirLight->transform()->forward();
+        light.color = dirLight->color;
+        light.intensity = dirLight->intensity;
     }
     light.ambient = scene->ambientColor;
 
-    // 离屏渲染（§3.2/§3.3 顺序）
+    // 阴影参数（V0.2-6）：castShadows 时组装；阴影盒中心 = 相机位置沿光轴投影到过原点平面（跟随相机）
+    ShadowCameraParams shadowParams;
+    std::vector<ShadowItem> shadowItems;
+    const bool shadowEnabled = dirLight && dirLight->castShadows;
+    if (shadowEnabled) {
+        shadowParams.lightDirection = light.direction;
+        shadowParams.mapSize = dirLight->shadowMapSize;
+        shadowParams.bias = dirLight->shadowBias;
+        const glm::vec3 camCenter =
+            renderCam.position - light.direction * glm::dot(renderCam.position, light.direction);
+        shadowParams.lightViewProj = computeLightViewProj(light.direction, camCenter,
+                                                          dirLight->shadowRange,
+                                                          dirLight->shadowMapSize);
+    }
+
+    // 天空 cubemap（V0.2-7）：Cubemap 模式且路径非空时加载；失败/渐变走 nullptr（内部回退渐变）
+    std::shared_ptr<Cubemap> skyCube;
+    if (scene->skyMode == SkyMode::Cubemap && !scene->skyCubemapPath.empty())
+        skyCube = AssetDatabase::instance().getCubemap(scene->skyCubemapPath);
+
+    // 离屏渲染（严格按 ARCHITECTURE-V0.2 顺序：天空 → 单次遍历收集 → 阴影 → grid → 描边）
+    const auto renderT0 = std::chrono::steady_clock::now();  // Stats "render" 段：FBO bind 前取 t0
     m_fbo.bind();
     Renderer::beginFrame(renderCam, light, clearColor);
-    if (scene->showGrid) Renderer::drawGrid();
+    SkyboxRenderer::draw(glm::inverse(renderCam.projection * renderCam.view), renderCam.position,
+                         scene->skyMode, scene->skyHorizonColor, scene->skyZenithColor,
+                         skyCube, scene->skyRotation, scene->skyExposure);
     scene->forEachObject([&](GameObject* go) {
         if (!go->activeInHierarchy()) return;
         auto* mr = go->getComponent<MeshRenderer>();
-        if (mr && mr->mesh)
-            Renderer::submit(mr->mesh, mr->material, go->transform()->worldMatrix());
+        if (!mr || !mr->mesh) return;
+        const glm::mat4 world = go->transform()->worldMatrix();
+        Renderer::submit(mr->mesh, mr->material, world);
+        if (shadowEnabled) shadowItems.push_back(ShadowItem{mr->mesh, world});
     });
+    if (shadowEnabled) Renderer::drawShadowPass(shadowParams, shadowItems);
+    if (scene->showGrid) Renderer::drawGrid();
     const glm::vec3 kOutlineColor(1.0f, 0.55f, 0.1f);  // 选中橙色描边
     for (uint64_t id : ctx.selectedIds) {
         GameObject* go = scene->findGameObject(id);
@@ -195,6 +229,9 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
     Renderer::endFrame();
     m_fbo.resolveMsaa();
     m_fbo.unbind();
+    const auto renderT1 = std::chrono::steady_clock::now();
+    Stats::setSectionMs("render",
+                        std::chrono::duration<float, std::milli>(renderT1 - renderT0).count());
 
     // FBO 纹理相对 ImGui 上下颠倒：UV 必须 (0,1)-(1,0)（§11.8）
     ImGui::Image((ImTextureID)(intptr_t)m_fbo.colorTextureId(), vpSize,
@@ -236,7 +273,7 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
                 if (root) {
                     ctx.setSelected(root->id());
                     focusGameObject(camera, root);  // 自动聚焦新物体（§6.4）
-                    ctx.sceneDirty = true;
+                    ctx.markSceneDirty();
                 }
             } else {
                 Logger::warn("仅支持将模型文件拖入场景视口: {}", srcPath.filename().string());

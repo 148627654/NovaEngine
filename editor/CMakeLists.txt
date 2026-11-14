@@ -10,11 +10,13 @@ add_executable(NovaEditor
     src/EditorCamera.cpp
     src/GizmoController.cpp
     src/DragDrop.cpp
+    src/UndoRedoManager.cpp
     src/panels/SceneViewPanel.cpp
     src/panels/HierarchyPanel.cpp
     src/panels/InspectorPanel.cpp
     src/panels/ConsolePanel.cpp
     src/panels/AssetBrowserPanel.cpp
+    src/panels/StatsPanel.cpp
     # Dear ImGui（docking）核心源码
     ${imgui_SOURCE_DIR}/imgui.cpp
     ${imgui_SOURCE_DIR}/imgui_draw.cpp

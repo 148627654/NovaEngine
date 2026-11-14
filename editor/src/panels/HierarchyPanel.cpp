@@ -94,11 +94,11 @@ void HierarchyPanel::onGui(EditorContext& ctx, EditorCamera&) {
                 if (!dst) {
                     if (src->parent()) {
                         src->setParent(nullptr);  // 空白 = 挂根
-                        ctx.sceneDirty = true;
+                        ctx.markSceneDirty();
                     }
                 } else if (dst != src && !isAncestorOf(dst, src)) {
                     src->setParent(dst);  // 目标行 = setParent（保持世界变换）
-                    ctx.sceneDirty = true;
+                    ctx.markSceneDirty();
                 }
             }
         }
@@ -122,7 +122,7 @@ void HierarchyPanel::drawNode(EditorContext& ctx, NovaEngine::GameObject* go) {
         if (enter || ImGui::IsItemDeactivatedAfterEdit()) {
             if (!m_renameBuffer.empty()) {
                 go->setName(m_renameBuffer);
-                ctx.sceneDirty = true;
+                ctx.markSceneDirty();
             }
             m_renamingId = 0;
         } else if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
@@ -183,29 +183,29 @@ void HierarchyPanel::showContextMenu(EditorContext& ctx, NovaEngine::GameObject*
     if (ImGui::MenuItem("Create Empty", nullptr, false, edit)) {
         GameObject* go = ctx.scene->createGameObject("GameObject", parent);
         ctx.setSelected(go->id());
-        ctx.sceneDirty = true;
+        ctx.markSceneDirty();
     }
     if (ImGui::MenuItem("Create Cube", nullptr, false, edit)) {
         ctx.setSelected(createPrimitive(ctx.scene, "Cube", "builtin:cube", parent)->id());
-        ctx.sceneDirty = true;
+        ctx.markSceneDirty();
     }
     if (ImGui::MenuItem("Create Plane", nullptr, false, edit)) {
         ctx.setSelected(createPrimitive(ctx.scene, "Plane", "builtin:plane", parent)->id());
-        ctx.sceneDirty = true;
+        ctx.markSceneDirty();
     }
     if (ImGui::MenuItem("Create Directional Light", nullptr, false, edit)) {
         GameObject* go = ctx.scene->createGameObject("Directional Light", parent);
         go->addComponent<DirectionalLight>();
         go->transform()->setLocalEulerAngles(glm::vec3(50.0f, -30.0f, 0.0f));  // 经典斜下方向
         ctx.setSelected(go->id());
-        ctx.sceneDirty = true;
+        ctx.markSceneDirty();
     }
     if (ImGui::MenuItem("Create Camera", nullptr, false, edit)) {
         GameObject* go = ctx.scene->createGameObject("Camera", parent);
         auto* cam = go->addComponent<Camera>();
         cam->isMain = ctx.scene->findComponents<Camera>().size() == 1;  // 首个相机默认主相机
         ctx.setSelected(go->id());
-        ctx.sceneDirty = true;
+        ctx.markSceneDirty();
     }
 
     if (onNode) {
@@ -221,26 +221,31 @@ void HierarchyPanel::showContextMenu(EditorContext& ctx, NovaEngine::GameObject*
 void HierarchyPanel::processPending(EditorContext& ctx) {
     if (m_pendingOps.empty()) return;
     std::vector<uint64_t> newSelection;
+    bool dirty = false;
     for (auto& [op, id] : m_pendingOps) {
         NovaEngine::GameObject* go = ctx.scene->findGameObject(id);
         if (!go) continue;
         if (op == PendingOp::Delete) {
             ctx.scene->destroyGameObject(id);  // 入销毁队列，帧末真正删除
-            ctx.sceneDirty = true;
+            dirty = true;
         } else if (op == PendingOp::Duplicate) {
             NovaEngine::GameObject* dup = DragDrop::duplicateGameObject(*ctx.scene, go);
-            if (dup) newSelection.push_back(dup->id());
+            if (dup) {
+                newSelection.push_back(dup->id());
+                dirty = true;
+            }
         }
     }
     m_pendingOps.clear();
+    // 先清销毁队列再推快照：让 Undo/Redo 快照不含待销毁对象（redo 删除才能保持删除态）
+    if (dirty) ctx.scene->flushDestroyQueue();
     if (newSelection.size() == 1) {
         ctx.setSelected(newSelection.front());
-        ctx.sceneDirty = true;
     } else if (newSelection.size() > 1) {
         ctx.clearSelection();
         for (uint64_t id : newSelection) ctx.toggleSelected(id);
-        ctx.sceneDirty = true;
     }
+    if (dirty) ctx.markSceneDirty();
 }
 
 void HierarchyPanel::handleShortcuts(EditorContext& ctx) {
@@ -252,7 +257,8 @@ void HierarchyPanel::handleShortcuts(EditorContext& ctx) {
         for (uint64_t id : ctx.selectedIds)
             ctx.scene->destroyGameObject(id);
         ctx.clearSelection();
-        ctx.sceneDirty = true;
+        ctx.scene->flushDestroyQueue();  // 先清队列再推快照（Undo/Redo 快照不含待销毁对象）
+        ctx.markSceneDirty();
     }
 
     // Ctrl+D 复制选中
@@ -267,7 +273,7 @@ void HierarchyPanel::handleShortcuts(EditorContext& ctx) {
                 if (dup) ctx.toggleSelected(dup->id());  // 选中全部副本
             }
         }
-        ctx.sceneDirty = true;
+        ctx.markSceneDirty();
     }
 }
 

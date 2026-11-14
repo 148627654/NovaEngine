@@ -47,6 +47,7 @@ int main() {
 
     // 3. 渲染器（必须在窗口上下文创建之后）
     Renderer::init();
+    SkyboxRenderer::init();  // V0.2-7：天空渲染（空 VAO + skybox shader；失败仅报错不中断）
 
     // 4. 项目根（与第 2 步的 current_path 一致；VS 调试运行目录同样指向项目根）
     AssetDatabase::setProjectRoot(std::filesystem::current_path());

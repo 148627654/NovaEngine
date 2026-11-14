@@ -141,9 +141,9 @@ void writeGameObjectNode(nlohmann::json& out, GameObject* go) {
 
 }  // namespace
 
-std::string SceneSerializer::serialize(const Scene& scene) {
+std::string SceneSerializer::serialize(const Scene& scene, int indent) {
     nlohmann::json root;
-    root["version"] = 1;
+    root["version"] = 2;   // V0.2-7：+天空 6 字段（读时兼容 1/2）
     root["name"] = scene.name();
 
     {
@@ -151,6 +151,13 @@ std::string SceneSerializer::serialize(const Scene& scene) {
         env["skyColor"] = vec3ToJson(scene.skyColor);
         env["ambientColor"] = vec3ToJson(scene.ambientColor);
         env["showGrid"] = scene.showGrid;
+        // 天空（V0.2-7）：skyMode 存字符串
+        env["skyMode"] = scene.skyMode == SkyMode::Cubemap ? "Cubemap" : "Gradient";
+        env["skyHorizonColor"] = vec3ToJson(scene.skyHorizonColor);
+        env["skyZenithColor"] = vec3ToJson(scene.skyZenithColor);
+        env["skyCubemapPath"] = scene.skyCubemapPath;
+        env["skyRotation"] = scene.skyRotation;
+        env["skyExposure"] = scene.skyExposure;
         root["environment"] = std::move(env);
     }
     {
@@ -171,7 +178,8 @@ std::string SceneSerializer::serialize(const Scene& scene) {
     });
     root["objects"] = std::move(objects);
 
-    return root.dump(4);
+    // indent = -1 时 nlohmann dump 输出紧凑单行（Undo 快照用，省内存）
+    return root.dump(indent);
 }
 
 std::string SceneSerializer::serializeGameObject(GameObject& object) {
@@ -194,8 +202,8 @@ void SceneSerializer::deserialize(Scene& target, const std::string& json) {
         return;
     }
     const int version = safeGet(root, "version", 0);
-    if (version != 1)
-        Logger::warn("场景文件版本为 {}（期望 1），仍尝试加载", version);
+    if (version != 1 && version != 2)
+        Logger::warn("场景文件版本为 {}（期望 1 或 2），仍尝试加载", version);
 
     // 1. 清空 target（保留 Scene 对象身份）：全部对象入销毁队列并立即执行
     {
@@ -290,6 +298,23 @@ void SceneSerializer::deserialize(Scene& target, const std::string& json) {
         target.skyColor = jsonToVec3(env.value("skyColor", nlohmann::json()), glm::vec3(0.18f, 0.22f, 0.35f));
         target.ambientColor = jsonToVec3(env.value("ambientColor", nlohmann::json()), glm::vec3(0.15f, 0.15f, 0.18f));
         target.showGrid = safeGet(env, "showGrid", true);
+
+        // 天空（V0.2-7）：全部字段默认值兜底，旧 JSON 开箱即用
+        const std::string skyModeStr = safeGet(env, "skyMode", std::string("Gradient"));
+        if (skyModeStr == "Cubemap") {
+            target.skyMode = SkyMode::Cubemap;
+        } else {
+            if (skyModeStr != "Gradient")
+                Logger::warn("反序列化：未知天空模式 \"{}\"，回退渐变", skyModeStr);
+            target.skyMode = SkyMode::Gradient;
+        }
+        target.skyHorizonColor =
+            jsonToVec3(env.value("skyHorizonColor", nlohmann::json()), glm::vec3(0.55f, 0.62f, 0.72f));
+        target.skyZenithColor =
+            jsonToVec3(env.value("skyZenithColor", nlohmann::json()), glm::vec3(0.22f, 0.30f, 0.48f));
+        target.skyCubemapPath = safeGet(env, "skyCubemapPath", std::string());
+        target.skyRotation = safeGet(env, "skyRotation", 0.0f);
+        target.skyExposure = safeGet(env, "skyExposure", 1.0f);
 
         const nlohmann::json& cam =
             (root.contains("editorCamera") && root["editorCamera"].is_object()) ? root["editorCamera"] : kEmptyObject;

@@ -14,6 +14,7 @@ public:
 
     void draw() const;                       // bindVertexArray + glDrawElements(GL_TRIANGLES)
     const AABB& aabb() const;                // 拾取与聚焦用
+    uint32_t indexCount() const { return m_indexCount; }   // 统计用（V0.2-11）
 
 private:
     Mesh() = default;

@@ -12,7 +12,7 @@ class Component;
 
 class SceneSerializer {
 public:
-    static std::string serialize(const Scene& scene);                  // → JSON 字符串（Play 快照也用它）
+    static std::string serialize(const Scene& scene, int indent = 4);  // → JSON 字符串（Play 快照也用它；-1=紧凑，Undo 快照用）
     static std::string serializeGameObject(GameObject& object);        // 复制/剪贴板用
     static void deserialize(Scene& target, const std::string& json);   // 清空并按 JSON 重建 target（对象身份不变）
     static bool saveToFile(const Scene& scene, const std::filesystem::path& path);

@@ -6,6 +6,7 @@
 #include "panels/HierarchyPanel.h"
 #include "panels/InspectorPanel.h"
 #include "panels/SceneViewPanel.h"
+#include "panels/StatsPanel.h"
 
 #include <imgui.h>
 #include <imgui_internal.h>   // DockBuilder* API（ImGui 1.90+ 从 imgui.h 移入 internal）
@@ -16,6 +17,7 @@
 
 #include <NovaEngine/NovaEngine.h>
 
+#include <chrono>
 #include <cwchar>
 #include <string>
 
@@ -28,9 +30,11 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 // 顺序要求：glad 先行避免 APIENTRY 重定义；windows.h 必须在 commdlg.h 之前
-//（commdlg.h 会拉入 prsht.h，后者依赖 windows.h 里的 CALLBACK 等类型）
+//（commdlg.h 会拉入 prsht.h，后者依赖 windows.h 里的 CALLBACK 等类型）；
+// GLFW 头必须在 glad 之后（glad 的 __gl_h_ 守卫令 GLFW 内嵌的 <GL/gl.h> 变 no-op）。
 #include <windows.h>
 #include <commdlg.h>
+#include <GLFW/glfw3.h>   // updateWindowTitle / run 内窗口关闭拦截用 glfwSetWindowTitle/glfwSetWindowShouldClose
 
 namespace NovaEditor {
 
@@ -107,7 +111,7 @@ void EditorApplication::init() {
     m_context.scene = m_scene.get();
     applyEditorCameraFromScene();
 
-    // 五面板（§6.5 布局：左 Hierarchy / 右 Inspector / 底 Console+Assets / 中 Scene）
+    // 五面板 + Stats（§6.5 布局：左 Hierarchy / 右 Inspector / 底 Console+Assets+Stats / 中 Scene）
     auto scenePanel = std::make_unique<SceneViewPanel>();
     scenePanel->m_gizmo = &m_gizmo;
     m_panels.push_back(std::move(scenePanel));
@@ -117,6 +121,10 @@ void EditorApplication::init() {
     auto browser = std::make_unique<AssetBrowserPanel>();
     browser->openSceneCallback = [this](const std::filesystem::path& p) { openScene(p); };
     m_panels.push_back(std::move(browser));
+    auto statsPanel = std::make_unique<StatsPanel>();
+    statsPanel->open = false;   // 默认关，F8 开关（V0.2-11）
+    m_statsPanel = statsPanel.get();
+    m_panels.push_back(std::move(statsPanel));
 
     // 默认加载示例场景（不存在则保持空场景）
     const std::filesystem::path demo =
@@ -127,6 +135,8 @@ void EditorApplication::init() {
     } else {
         Logger::info("未找到示例场景 {}，使用空场景", demo.string());
     }
+    // 压 Undo 基线（demo 加载路径内已压，此处兜底统一；clear 语义 = 清空两栈再压基线）
+    m_context.undoRedo.clear(SceneSerializer::serialize(*m_scene, -1));
 
     Logger::info("NovaEditor 初始化完成");
 }
@@ -137,6 +147,7 @@ void EditorApplication::shutdown() {
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
+    SkyboxRenderer::shutdown();  // V0.2-7：与 Renderer 同序清理（GL 上下文仍存活）
     Renderer::shutdown();
     Logger::info("NovaEditor 退出");
 }
@@ -144,13 +155,32 @@ void EditorApplication::shutdown() {
 int EditorApplication::run() {
     using namespace NovaEngine;
     init();
-    while (!m_window->shouldClose()) {
+    while (!m_window->shouldClose() && !m_exitRequested) {
         m_window->pollEvents();  // GLFW 事件 → Input 原始状态 + 拖放回调队列
         Time::beginFrame();
+        Stats::beginFrame();     // 帧首（V0.2-11：独立于 Time 的 steady_clock 计时）
         Input::beginFrame();
         update(Time::deltaTime());
         render();
+        Stats::endFrame();       // 帧末（swapBuffers 前结算入 120 帧环形历史）
         m_window->swapBuffers();
+
+        // 窗口关闭拦截（V0.2-2）：Play 态先退出还原（修复 7.2-4）；判脏且无挂起动作则拦下弹模态
+        if (m_window->shouldClose() && !m_exitRequested) {
+            if (m_context.state == EditorContext::EditorState::Play) exitPlayMode();
+            if (m_context.sceneDirty && m_pendingAction == PendingAction::None) {
+                glfwSetWindowShouldClose(m_window->nativeHandle(), GLFW_FALSE);
+                m_pendingAction = PendingAction::ExitApp;
+                m_showSaveConfirm = true;
+            } else if (m_showSaveConfirm) {
+                // 模态打开时点窗口 X：视作 Cancel（清挂起动作、关模态、不退出；Reviewer P2-1）
+                glfwSetWindowShouldClose(m_window->nativeHandle(), GLFW_FALSE);
+                m_showSaveConfirm = false;
+                m_pendingAction = PendingAction::None;
+            } else {
+                m_exitRequested = true;
+            }
+        }
     }
     shutdown();
     return 0;
@@ -163,14 +193,15 @@ void EditorApplication::update(float dt) {
     ImGui_ImplOpenGL3_NewFrame();
     ImGui::NewFrame();
 
-    // Docking 主区域；首帧用 DockBuilder 摆五面板（§6.5）
+    // Docking 主区域；首帧用 DockBuilder 摆面板
     const ImGuiID dockspaceId = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
     if (m_firstFrame) {
         buildDockLayout(dockspaceId);
         m_firstFrame = false;
     }
 
-    // Play 状态机（§7）
+    // 场景更新段（Stats "update" 分段：scene->update / flushDestroyQueue 前后计时）
+    const auto updateT0 = std::chrono::steady_clock::now();
     if (m_context.state == EditorContext::EditorState::Play) {
         if (!m_context.paused) m_scene->update(dt);
     } else {
@@ -181,6 +212,9 @@ void EditorApplication::update(float dt) {
         m_scene->editorCameraYaw = m_camera.yaw;
         m_scene->editorCameraPitch = m_camera.pitch;
     }
+    const auto updateT1 = std::chrono::steady_clock::now();
+    Stats::setSectionMs("update",
+                        std::chrono::duration<float, std::milli>(updateT1 - updateT0).count());
 
     showMainMenu();
     handleGlobalShortcuts();
@@ -199,6 +233,11 @@ void EditorApplication::update(float dt) {
     std::erase_if(m_context.selectedIds,
                   [this](uint64_t id) { return m_scene->findGameObject(id) == nullptr; });
 
+    // 未保存确认模态（V0.2-2）：Save 失败不关模态；ESC/X 视作 Cancel
+    showSaveConfirmModal();
+
+    updateWindowTitle();  // 每帧：场景名 + 脏标记 *
+
     ImGui::Render();
 }
 
@@ -209,11 +248,17 @@ void EditorApplication::render() {
     glViewport(0, 0, fbWidth, fbHeight);
     glClearColor(0.10f, 0.10f, 0.12f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
+
+    // ImGui 渲染前后计时（Stats "ui" 分段）
+    const auto uiT0 = std::chrono::steady_clock::now();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    const auto uiT1 = std::chrono::steady_clock::now();
+    NovaEngine::Stats::setSectionMs(
+        "ui", std::chrono::duration<float, std::milli>(uiT1 - uiT0).count());
 }
 
 void EditorApplication::buildDockLayout(ImGuiID dockspaceId) {
-    // 首帧 DockBuilder：左 Hierarchy → 右 Inspector → 底部 Tab（Console + Assets）→ 中央 Scene
+    // 首帧 DockBuilder：左 Hierarchy → 右 Inspector → 底部 Tab（Console + Assets + Stats）→ 中央 Scene
     ImGui::DockBuilderRemoveNode(dockspaceId);
     ImGui::DockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags_DockSpace);
     ImGui::DockBuilderSetNodeSize(dockspaceId, ImGui::GetMainViewport()->WorkSize);
@@ -228,6 +273,7 @@ void EditorApplication::buildDockLayout(ImGuiID dockspaceId) {
     ImGui::DockBuilderDockWindow("Inspector", dockRight);
     ImGui::DockBuilderDockWindow("Console", dockBottom);
     ImGui::DockBuilderDockWindow("Assets", dockBottom);
+    ImGui::DockBuilderDockWindow("Stats", dockBottom);
     ImGui::DockBuilderDockWindow("Scene", dockMain);
     ImGui::DockBuilderFinish(dockspaceId);
 }
@@ -243,9 +289,20 @@ void EditorApplication::showMainMenu() {
             ImGui::Separator();
             if (ImGui::MenuItem("Save Scene", "Ctrl+S", false, editMode)) saveScene();
             if (ImGui::MenuItem("Save Scene As...", nullptr, false, editMode)) saveSceneAs();
+            ImGui::Separator();
+            if (ImGui::MenuItem("Exit", nullptr)) requestExit();  // 与窗口关闭同流（判脏弹模态）
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Edit")) {
+            // Undo/Redo（V0.2-1）：Edit 态 + 栈深度允许 + gizmo 未拖拽时可用
+            const bool gizmoFree = !m_gizmo.isUsing();
+            if (ImGui::MenuItem("Undo", "Ctrl+Z", false,
+                                editMode && gizmoFree && m_context.undoRedo.canUndo()))
+                undoScene();
+            if (ImGui::MenuItem("Redo", "Ctrl+Y", false,
+                                editMode && gizmoFree && m_context.undoRedo.canRedo()))
+                redoScene();
+            ImGui::Separator();
             if (ImGui::MenuItem(editMode ? "Play" : "Stop", "Ctrl+P", false, true)) {
                 if (editMode) enterPlayMode();
                 else exitPlayMode();
@@ -268,8 +325,11 @@ void EditorApplication::showMainMenu() {
 void EditorApplication::handleGlobalShortcuts() {
     using namespace NovaEngine;
     if (ImGui::GetIO().WantCaptureKeyboard) return;  // 输入框/重命名时抑制快捷键
+    if (m_showSaveConfirm) return;                   // 未保存确认模态期间抑制全部快捷键
 
     const bool ctrl = Input::isKeyDown(Key::LeftControl) || Input::isKeyDown(Key::RightControl);
+    const bool shift = Input::isKeyDown(Key::LeftShift) || Input::isKeyDown(Key::RightShift);
+
     if (ctrl && Input::isKeyPressed(Key::P)) {
         if (m_context.state == EditorContext::EditorState::Edit) enterPlayMode();
         else exitPlayMode();
@@ -277,6 +337,19 @@ void EditorApplication::handleGlobalShortcuts() {
     if (ctrl && Input::isKeyPressed(Key::S)) saveScene();
     if (ctrl && Input::isKeyPressed(Key::N)) newScene();
     if (ctrl && Input::isKeyPressed(Key::O)) openSceneDialog();
+
+    // F8：Stats 面板开关（V0.2-11）
+    if (Input::isKeyPressed(Key::F8) && m_statsPanel)
+        m_statsPanel->open = !m_statsPanel->open;
+
+    // Undo/Redo（V0.2-1）：仅 Edit 态且 gizmo 未拖拽；Ctrl+Z=undo、Ctrl+Shift+Z/Ctrl+Y=redo
+    if (m_context.state == EditorContext::EditorState::Edit && !m_gizmo.isUsing()) {
+        if (ctrl && Input::isKeyPressed(Key::Z)) {
+            if (shift) redoScene();
+            else undoScene();
+        }
+        if (ctrl && Input::isKeyPressed(Key::Y)) redoScene();
+    }
 
     // gizmo 快捷键（W/E/R 切换操作，X 切换坐标空间）
     if (m_context.state == EditorContext::EditorState::Edit) {
@@ -290,6 +363,7 @@ void EditorApplication::handleGlobalShortcuts() {
 void EditorApplication::handleExternalDrop(const std::vector<std::filesystem::path>& paths) {
     using namespace NovaEngine;
     if (paths.empty()) return;
+    if (m_showSaveConfirm) return;  // 模态期间忽略外部拖放（GLFW 回调不受 ImGui 模态输入拦截，防覆盖挂起动作）
 
     const ImVec2 mouse = ImGui::GetIO().MousePos;
     const bool overViewport = insideRect(mouse, m_context.viewportScreenMin, m_context.viewportScreenMax);
@@ -312,7 +386,7 @@ void EditorApplication::handleExternalDrop(const std::vector<std::filesystem::pa
                 const glm::vec2 mx(m_context.viewportScreenMax.x, m_context.viewportScreenMax.y);
                 const glm::vec3 spawn = m_camera.intersectGround(
                     glm::vec2(mouse.x, mouse.y), mn, mx - mn);
-                if (DragDrop::importModelToScene(*m_scene, p, spawn)) m_context.sceneDirty = true;
+                if (DragDrop::importModelToScene(*m_scene, p, spawn)) m_context.markSceneDirty();
             } else if (DragDrop::isTextureFile(p)) {
                 DragDrop::copyIntoAssets(p);  // 贴图：仅拷贝进 assets/textures/
             } else {
@@ -320,7 +394,7 @@ void EditorApplication::handleExternalDrop(const std::vector<std::filesystem::pa
             }
         } else if (overBrowser) {
             if (DragDrop::isSceneFile(p)) {
-                openScene(p);
+                openScene(p);  // 走未保存确认流（V0.2-2）
             } else if (DragDrop::isModelFile(p) || DragDrop::isTextureFile(p)) {
                 DragDrop::copyIntoAssets(p);  // 仅拷贝进 assets/
             } else {
@@ -337,6 +411,7 @@ void EditorApplication::enterPlayMode() {
     if (m_context.state != EditorContext::EditorState::Edit) return;
 
     m_context.playSnapshot = SceneSerializer::serialize(*m_scene);  // 快照 = JSON 字符串（§7.2）
+    m_context.m_playEntryDirty = m_context.sceneDirty;  // 记录进 Play 前脏状态（修复 7.2-4）
     m_context.state = EditorContext::EditorState::Play;
     m_context.paused = false;
     m_scene->start();  // 深度优先广播 onStart（内置过滤：非激活子树与 disabled Behaviour）
@@ -352,6 +427,7 @@ void EditorApplication::exitPlayMode() {
     m_context.state = EditorContext::EditorState::Edit;
     m_context.paused = false;
     m_context.playSnapshot.clear();
+    m_context.sceneDirty = m_context.m_playEntryDirty;  // 还原进 Play 前脏状态（修复 7.2-4）
     applyEditorCameraFromScene();
     std::erase_if(m_context.selectedIds,
                   [this](uint64_t id) { return m_scene->findGameObject(id) == nullptr; });
@@ -359,14 +435,26 @@ void EditorApplication::exitPlayMode() {
 }
 
 void EditorApplication::newScene() {
-    if (m_context.state != EditorContext::EditorState::Play) {
-        m_scene = std::make_unique<NovaEngine::Scene>("Untitled");
-        m_context.scene = m_scene.get();
-        m_context.currentScenePath.clear();
-        m_context.sceneDirty = false;
-        m_context.clearSelection();
-        applyEditorCameraFromScene();
+    // Play 态禁止（首行 return）；判脏 → 挂起 + 弹未保存确认模态
+    if (m_context.state == EditorContext::EditorState::Play) return;
+    if (m_context.sceneDirty) {
+        m_pendingAction = PendingAction::NewScene;
+        m_showSaveConfirm = true;
+        return;
     }
+    newSceneInternal();
+}
+
+void EditorApplication::newSceneInternal() {
+    using namespace NovaEngine;
+    m_scene = std::make_unique<Scene>("Untitled");
+    m_context.scene = m_scene.get();
+    m_context.currentScenePath.clear();
+    m_context.sceneDirty = false;
+    m_context.clearSelection();
+    applyEditorCameraFromScene();
+    m_context.undoRedo.clear(SceneSerializer::serialize(*m_scene, -1));  // 压新基线
+    Logger::info("新建场景（Undo 栈已重置）");
 }
 
 void EditorApplication::openScene(const std::filesystem::path& p) {
@@ -375,6 +463,17 @@ void EditorApplication::openScene(const std::filesystem::path& p) {
         Logger::warn("Play 模式下不可加载场景");
         return;
     }
+    if (m_context.sceneDirty) {
+        m_pendingAction = PendingAction::OpenScene;
+        m_pendingOpenPath = p;
+        m_showSaveConfirm = true;
+        return;
+    }
+    loadSceneInternal(p);
+}
+
+void EditorApplication::loadSceneInternal(const std::filesystem::path& p) {
+    using namespace NovaEngine;
     if (!SceneSerializer::loadFromFile(*m_scene, p)) {
         Logger::error("打开场景失败: {}", p.string());
         return;
@@ -384,6 +483,7 @@ void EditorApplication::openScene(const std::filesystem::path& p) {
     m_context.sceneDirty = false;
     m_context.clearSelection();
     applyEditorCameraFromScene();  // 编辑器相机位置随场景恢复（§5 editorCamera 段）
+    m_context.undoRedo.clear(SceneSerializer::serialize(*m_scene, -1));  // 压新基线
     Logger::info("场景已打开: {}", p.string());
 }
 
@@ -393,36 +493,129 @@ void EditorApplication::openSceneDialog() {
     if (!p.empty()) openScene(p);
 }
 
-void EditorApplication::saveScene() {
+bool EditorApplication::saveScene() {
     using namespace NovaEngine;
-    if (m_context.state == EditorContext::EditorState::Play) return;  // 保存的是编辑态场景（§7.2）
-    if (m_context.currentScenePath.empty()) {
-        saveSceneAs();
-        return;
-    }
+    if (m_context.state == EditorContext::EditorState::Play) return false;  // 保存的是编辑态场景（§7.2）
+    if (m_context.currentScenePath.empty()) return saveSceneAs();
     if (SceneSerializer::saveToFile(*m_scene, m_context.currentScenePath)) {
         m_context.sceneDirty = false;
         Logger::info("场景已保存: {}", m_context.currentScenePath.string());
-    } else {
-        Logger::error("场景保存失败: {}", m_context.currentScenePath.string());
+        return true;
     }
+    Logger::error("场景保存失败: {}", m_context.currentScenePath.string());
+    return false;
 }
 
-void EditorApplication::saveSceneAs() {
+bool EditorApplication::saveSceneAs() {
     using namespace NovaEngine;
-    if (m_context.state == EditorContext::EditorState::Play) return;
+    if (m_context.state == EditorContext::EditorState::Play) return false;
     const auto p = showSaveSceneDialog(
         AssetDatabase::projectRoot() / "assets" / "scenes",
         m_context.currentScenePath.empty() ? "untitled.nova.json"
                                            : m_context.currentScenePath.filename().string());
-    if (p.empty()) return;
+    if (p.empty()) return false;
     if (SceneSerializer::saveToFile(*m_scene, p)) {
         m_context.currentScenePath = p;
         m_context.sceneDirty = false;
         Logger::info("场景已保存: {}", p.string());
-    } else {
-        Logger::error("场景保存失败: {}", p.string());
+        return true;
     }
+    Logger::error("场景保存失败: {}", p.string());
+    return false;
+}
+
+void EditorApplication::showSaveConfirmModal() {
+    if (!m_showSaveConfirm) return;
+
+    ImGui::OpenPopup("Unsaved Changes");
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing,
+                            ImVec2(0.5f, 0.5f));
+    bool stayOpen = true;
+    if (ImGui::BeginPopupModal("Unsaved Changes", &stayOpen,
+                               ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDocking)) {
+        ImGui::TextUnformatted("场景有未保存的修改。继续前是否保存？");
+        ImGui::Separator();
+        if (ImGui::Button("Save", ImVec2(120, 0))) {
+            if (saveScene()) {  // 保存失败返回 false：不关模态
+                m_showSaveConfirm = false;
+                processPendingAction();
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Don't Save", ImVec2(120, 0))) {
+            m_showSaveConfirm = false;
+            processPendingAction();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+            m_showSaveConfirm = false;
+            m_pendingAction = PendingAction::None;
+            m_pendingOpenPath.clear();
+        }
+        ImGui::EndPopup();
+    }
+    if (!stayOpen && m_showSaveConfirm) {
+        // ESC / 右上角 X 关闭：视作 Cancel（不执行挂起动作）
+        m_showSaveConfirm = false;
+        m_pendingAction = PendingAction::None;
+        m_pendingOpenPath.clear();
+    }
+}
+
+void EditorApplication::processPendingAction() {
+    const PendingAction act = m_pendingAction;
+    const std::filesystem::path openPath = m_pendingOpenPath;
+    m_pendingAction = PendingAction::None;
+    m_pendingOpenPath.clear();
+    switch (act) {
+    case PendingAction::NewScene:  newSceneInternal(); break;
+    case PendingAction::OpenScene: loadSceneInternal(openPath); break;
+    case PendingAction::ExitApp:   m_exitRequested = true; break;
+    case PendingAction::None:      break;
+    }
+}
+
+void EditorApplication::requestExit() {
+    // File→Exit 与窗口关闭同流：Play 先退出还原，判脏弹模态，否则退出
+    if (m_context.state == EditorContext::EditorState::Play) exitPlayMode();
+    if (m_context.sceneDirty && m_pendingAction == PendingAction::None) {
+        m_pendingAction = PendingAction::ExitApp;
+        m_showSaveConfirm = true;
+        return;
+    }
+    m_exitRequested = true;
+}
+
+void EditorApplication::undoScene() {
+    using namespace NovaEngine;
+    const std::string snap = m_context.undoRedo.undo();
+    if (snap.empty()) return;
+    // 恢复 = deserialize 回同一 Scene（对象 ID 不变；选中集仅清理失效 ID）
+    SceneSerializer::deserialize(*m_scene, snap);
+    m_context.sceneDirty = true;
+    std::erase_if(m_context.selectedIds,
+                  [this](uint64_t id) { return m_scene->findGameObject(id) == nullptr; });
+    Logger::info("撤销 Undo（undoDepth={}，redoDepth={}）", m_context.undoRedo.undoDepth(),
+                 m_context.undoRedo.redoDepth());
+}
+
+void EditorApplication::redoScene() {
+    using namespace NovaEngine;
+    const std::string snap = m_context.undoRedo.redo();
+    if (snap.empty()) return;
+    SceneSerializer::deserialize(*m_scene, snap);
+    m_context.sceneDirty = true;
+    std::erase_if(m_context.selectedIds,
+                  [this](uint64_t id) { return m_scene->findGameObject(id) == nullptr; });
+    Logger::info("重做 Redo（undoDepth={}，redoDepth={}）", m_context.undoRedo.undoDepth(),
+                 m_context.undoRedo.redoDepth());
+}
+
+void EditorApplication::updateWindowTitle() {
+    // 每帧：场景名 + (sceneDirty ? " *" : "") + " - NovaEditor"（经 nativeHandle 直调 GLFW）
+    const std::string title =
+        m_scene->name() + (m_context.sceneDirty ? " *" : "") + " - NovaEditor";
+    glfwSetWindowTitle(m_window->nativeHandle(), title.c_str());
 }
 
 void EditorApplication::applyEditorCameraFromScene() {

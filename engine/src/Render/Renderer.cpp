@@ -29,6 +29,22 @@ uint32_t s_cameraUbo = 0;   // CameraBlock（binding 0：mat4 uViewProj + vec4 u
 std::shared_ptr<Shader> s_blinnPhong;
 std::shared_ptr<Shader> s_gridShader;
 std::shared_ptr<Shader> s_outlineShader;
+std::shared_ptr<Shader> s_shadowShader;   // 阴影深度 pass（V0.2-6）；加载失败置 nullptr，不崩溃
+
+// ===== 阴影（V0.2-6）=====
+ShadowMap s_shadowMap;                // 深度贴图（懒创建，mapSize 变化时重建）
+ShadowCameraParams s_shadowParams;    // 本帧阴影参数（drawShadowPass 记录，endFrame/drawGrid 消费）
+bool s_shadowActive = false;          // 本帧是否有可用阴影（beginFrame 重置）
+
+// ===== 帧统计计数器（V0.2-11；beginFrame 清零，endFrame 结算到 s_last*）=====
+uint32_t s_drawCalls = 0;           // 主 pass 绘制次数（队列项 + grid + outline 每次 2 遍）
+uint32_t s_submitted = 0;           // submit() 次数
+uint32_t s_tris = 0;                // 主 pass 累计三角形数（indexCount/3）
+uint32_t s_shadowDrawCalls = 0;     // 阴影 pass 项数（不计入 s_drawCalls）
+uint32_t s_lastDrawCalls = 0;
+uint32_t s_lastSubmittedCount = 0;
+uint32_t s_lastTriangleCount = 0;
+uint32_t s_lastShadowItemCount = 0;
 
 uint32_t s_gridVao = 0;
 uint32_t s_gridVbo = 0;
@@ -92,6 +108,18 @@ void setBlinnPhongUniforms(const std::shared_ptr<Shader>& shader,
         shader->setInt("uUseAlbedoMap", 0);
     }
     shader->setMat4("uModel", model);
+
+    // 阴影 uniform（V0.2-6）：有阴影时绑定深度贴图到 unit 1；无阴影只关开关
+    if (s_shadowActive) {
+        s_shadowMap.bindForReading(1);
+        shader->setInt("uShadowMap", 1);
+        shader->setInt("uShadowEnabled", 1);
+        shader->setMat4("uLightViewProj", s_shadowParams.lightViewProj);
+        shader->setFloat("uShadowBias", s_shadowParams.bias);
+        shader->setFloat("uShadowMapSize", static_cast<float>(s_shadowParams.mapSize));
+    } else {
+        shader->setInt("uShadowEnabled", 0);
+    }
 }
 
 }  // namespace
@@ -112,6 +140,11 @@ void Renderer::init() {
     s_gridShader = Shader::createFromFiles("assets/shaders/grid.vert", "assets/shaders/grid.frag");
     s_outlineShader = Shader::createFromFiles("assets/shaders/outline.vert",
                                               "assets/shaders/outline.frag");
+    // 阴影着色器（V0.2-6）：失败只记一次错误并置空，阴影功能静默降级（不崩溃）
+    s_shadowShader = Shader::createFromFiles("assets/shaders/shadow.vert",
+                                             "assets/shaders/shadow.frag");
+    if (!s_shadowShader)
+        Logger::error("[Renderer] 阴影着色器加载失败，阴影功能不可用（不崩溃）");
 
     // CameraBlock UBO（binding 0：mat4 uViewProj + vec4 uCamPos，std140）
     glGenBuffers(1, &s_cameraUbo);
@@ -140,6 +173,9 @@ void Renderer::shutdown() {
     s_blinnPhong.reset();
     s_gridShader.reset();
     s_outlineShader.reset();
+    s_shadowMap.destroy();
+    s_shadowShader.reset();
+    s_shadowActive = false;
     s_initialized = false;
 }
 
@@ -161,6 +197,13 @@ void Renderer::beginFrame(const RenderCamera& camera, const DirectionalLightData
     glClearColor(clearColor.r, clearColor.g, clearColor.b, clearColor.a);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
+    // 帧统计清零（V0.2-11）：阴影激活标志与全部计数器每帧重置
+    s_shadowActive = false;
+    s_drawCalls = 0;
+    s_submitted = 0;
+    s_tris = 0;
+    s_shadowDrawCalls = 0;
+
     // 每帧填充 CameraBlock UBO
     s_viewProj = camera.projection * camera.view;
     s_camPos = camera.position;
@@ -177,32 +220,86 @@ void Renderer::submit(std::shared_ptr<Mesh> mesh, const Material& material,
                       const glm::mat4& modelMatrix) {
     if (!mesh) return;
     s_queue.push_back(RenderItem{std::move(mesh), material, modelMatrix});
+    ++s_submitted;
+}
+
+void Renderer::drawShadowPass(const ShadowCameraParams& shadow,
+                              const std::vector<ShadowItem>& items) {
+    // 任何 no-op 路径都不得残留上一帧的阴影状态
+    s_shadowActive = false;
+    if (!s_initialized || !s_shadowShader || items.empty() || shadow.mapSize <= 0)
+        return;   // 着色器加载失败 / 空场景 / 非法尺寸：静默跳过（不崩溃）
+
+    // 懒创建：mapSize 变化时重建（Inspector 改分辨率当帧生效）
+    if (s_shadowMap.size() != shadow.mapSize && !s_shadowMap.create(shadow.mapSize))
+        return;   // 创建失败：本帧无阴影
+
+    // 保存当前 FBO 与视口（结束后恢复，调用方通常是编辑器 FBO）
+    GLint prevFbo = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFbo);
+    GLint prevViewport[4] = {0, 0, 0, 0};
+    glGetIntegerv(GL_VIEWPORT, prevViewport);
+
+    s_shadowMap.bindForWriting();
+    glClear(GL_DEPTH_BUFFER_BIT);
+
+    // 深度 pass 状态：正面剔除（GL_FRONT）防 acne——只把背面的深度写入贴图
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_FRONT);
+    glDisable(GL_STENCIL_TEST);
+
+    s_shadowShader->bind();
+    s_shadowShader->setMat4("uLightViewProj", shadow.lightViewProj);
+    for (const ShadowItem& item : items) {
+        if (!item.mesh) continue;
+        s_shadowShader->setMat4("uModel", item.model);
+        item.mesh->draw();   // 复用 Mesh VAO（shadow.vert 顶点属性布局与 Mesh 交错布局一致）
+        ++s_shadowDrawCalls;
+    }
+
+    // 恢复状态与 FBO/视口
+    glCullFace(GL_BACK);
+    glBindFramebuffer(GL_FRAMEBUFFER, static_cast<uint32_t>(prevFbo));
+    glViewport(prevViewport[0], prevViewport[1], prevViewport[2], prevViewport[3]);
+
+    s_shadowParams = shadow;
+    s_shadowActive = true;
 }
 
 void Renderer::endFrame() {
-    if (!s_initialized) { s_queue.clear(); return; }
+    if (s_initialized) {
+        // 按 albedoMap 句柄排序（同一 shader 下减少纹理绑定切换；无贴图排最前）
+        std::stable_sort(s_queue.begin(), s_queue.end(), [](const RenderItem& a, const RenderItem& b) {
+            const uint32_t ta = a.material.albedoMap ? a.material.albedoMap->handle() : 0;
+            const uint32_t tb = b.material.albedoMap ? b.material.albedoMap->handle() : 0;
+            return ta < tb;
+        });
 
-    // 按 albedoMap 句柄排序（同一 shader 下减少纹理绑定切换；无贴图排最前）
-    std::stable_sort(s_queue.begin(), s_queue.end(), [](const RenderItem& a, const RenderItem& b) {
-        const uint32_t ta = a.material.albedoMap ? a.material.albedoMap->handle() : 0;
-        const uint32_t tb = b.material.albedoMap ? b.material.albedoMap->handle() : 0;
-        return ta < tb;
-    });
-
-    if (s_blinnPhong) {
-        s_blinnPhong->bind();
-        // LEQUAL：允许与已写入深度相等的片段重绘。
-        // drawOutline 第一遍已先绘过选中物体（写入深度），endFrame 重绘同深度物体必须用 LEQUAL，
-        // 否则选中物体会以 drawOutline 的默认材质显示、真实材质被深度测试拒绝
-        glDepthFunc(GL_LEQUAL);
-        for (const RenderItem& item : s_queue) {
-            setBlinnPhongUniforms(s_blinnPhong, item.material, item.model);
-            item.mesh->draw();
+        if (s_blinnPhong) {
+            s_blinnPhong->bind();
+            // LEQUAL：允许与已写入深度相等的片段重绘。
+            // drawOutline 第一遍已先绘过选中物体（写入深度），endFrame 重绘同深度物体必须用 LEQUAL，
+            // 否则选中物体会以 drawOutline 的默认材质显示、真实材质被深度测试拒绝
+            glDepthFunc(GL_LEQUAL);
+            for (const RenderItem& item : s_queue) {
+                setBlinnPhongUniforms(s_blinnPhong, item.material, item.model);
+                item.mesh->draw();
+                s_tris += item.mesh->indexCount() / 3;
+                ++s_drawCalls;
+            }
+            glDepthFunc(GL_LESS);
         }
-        glDepthFunc(GL_LESS);
     }
 
     s_queue.clear();
+
+    // 结算上一帧统计（V0.2-11）：4 个 last* 访问器返回的都是上一帧值
+    s_lastDrawCalls = s_drawCalls;
+    s_lastSubmittedCount = s_submitted;
+    s_lastTriangleCount = s_tris;
+    s_lastShadowItemCount = s_shadowDrawCalls;
 }
 
 void Renderer::drawGrid() {
@@ -212,9 +309,24 @@ void Renderer::drawGrid() {
     s_gridShader->setVec3("uCamPos", s_camPos);
     s_gridShader->setVec3("uFogColor", kGridFogColor);
     s_gridShader->setVec3("uLineColor", kGridLineColor);
+    s_gridShader->setVec3("uLightDir", s_light.direction);
+
+    // 地面也接收阴影（V0.2-6）：与 setBlinnPhongUniforms 同一套 uniform 约定
+    if (s_shadowActive) {
+        s_shadowMap.bindForReading(1);
+        s_gridShader->setInt("uShadowMap", 1);
+        s_gridShader->setInt("uShadowEnabled", 1);
+        s_gridShader->setMat4("uLightViewProj", s_shadowParams.lightViewProj);
+        s_gridShader->setFloat("uShadowBias", s_shadowParams.bias);
+        s_gridShader->setFloat("uShadowMapSize", static_cast<float>(s_shadowParams.mapSize));
+    } else {
+        s_gridShader->setInt("uShadowEnabled", 0);
+    }
+
     glBindVertexArray(s_gridVao);
     glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(s_gridVertexCount));
     glBindVertexArray(0);
+    ++s_drawCalls;
 }
 
 void Renderer::drawOutline(std::shared_ptr<Mesh> mesh, const glm::mat4& modelMatrix,
@@ -254,6 +366,15 @@ void Renderer::drawOutline(std::shared_ptr<Mesh> mesh, const glm::mat4& modelMat
     glEnable(GL_CULL_FACE);
     glDisable(GL_STENCIL_TEST);
     glStencilMask(0xFF);
+
+    s_drawCalls += 2;   // 描边两遍各计一次
 }
+
+// ===== 统计访问器（V0.2-11）：返回上一帧结算值 =====
+
+uint32_t Renderer::lastDrawCalls() { return s_lastDrawCalls; }
+uint32_t Renderer::lastSubmittedCount() { return s_lastSubmittedCount; }
+uint32_t Renderer::lastTriangleCount() { return s_lastTriangleCount; }
+uint32_t Renderer::lastShadowItemCount() { return s_lastShadowItemCount; }
 
 }  // namespace NovaEngine

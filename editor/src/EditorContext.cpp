@@ -1,5 +1,7 @@
 #include "EditorContext.h"
 
+#include <NovaEngine/Serialization/SceneSerializer.h>
+
 namespace NovaEditor {
 
 NovaEngine::GameObject* EditorContext::activeObject() {
@@ -26,6 +28,18 @@ void EditorContext::clearSelection() {
 
 bool EditorContext::isSelected(uint64_t id) const {
     return selectedIds.contains(id);
+}
+
+void EditorContext::markDirtyOnly() {
+    sceneDirty = true;  // 拖拽/输入中间帧：只置脏，不推快照（防刷栈）
+}
+
+void EditorContext::markSceneDirty() {
+    sceneDirty = true;
+    // Play 态只置脏不入栈（live edit 结构修改照旧禁用；退出 Play 时 sceneDirty 会还原）
+    if (state != EditorState::Edit || !scene) return;
+    const std::string snap = NovaEngine::SceneSerializer::serialize(*scene, -1);  // 紧凑快照
+    if (!snap.empty()) undoRedo.pushSnapshot(snap);
 }
 
 }  // namespace NovaEditor

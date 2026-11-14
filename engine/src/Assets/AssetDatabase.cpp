@@ -8,6 +8,7 @@
 #include <NovaEngine/Core/Logger.h>
 #include <NovaEngine/Render/Primitives.h>
 
+#include <array>
 #include <string>
 
 namespace NovaEngine {
@@ -120,15 +121,68 @@ std::shared_ptr<Texture> AssetDatabase::getTexture(const std::filesystem::path& 
     return tex;
 }
 
+std::shared_ptr<Cubemap> AssetDatabase::getCubemap(const std::filesystem::path& relativePath) {
+    if (relativePath.empty()) return nullptr;
+
+    const std::filesystem::path abs = m_projectRoot / relativePath;
+    const std::string key = cacheKeyFor(abs);
+
+    // 缓存命中（weak_ptr 失效时锁失败，走重载）
+    if (auto it = m_cubemapCache.find(key); it != m_cubemapCache.end())
+        if (auto cubemap = it->second.lock())
+            return cubemap;
+
+    // 目录 → 6 面图（固定文件名 px/nx/py/ny/pz/nz）；文件 → equirect
+    std::error_code ec;
+    std::shared_ptr<Cubemap> cubemap;
+    if (std::filesystem::is_directory(abs, ec)) {
+        static constexpr std::array<const char*, 6> kBaseNames = {"px", "nx", "py", "ny", "pz", "nz"};
+        static constexpr std::array<const char*, 6> kExtensions = {".png", ".jpg", ".jpeg", ".bmp", ".tga", ".hdr"};
+        std::array<std::filesystem::path, 6> faces{};
+        bool allFound = true;
+        for (size_t i = 0; i < kBaseNames.size(); ++i) {
+            bool found = false;
+            for (const char* ext : kExtensions) {
+                const std::filesystem::path candidate =
+                    abs / (std::string(kBaseNames[i]) + ext);
+                if (std::filesystem::exists(candidate, ec)) {
+                    faces[i] = candidate;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                Logger::warn("AssetDatabase: 6 面天空盒目录缺少 {}.* 贴图，跳过 {}",
+                             kBaseNames[i], relativePath.string());
+                allFound = false;
+                break;
+            }
+        }
+        if (allFound)
+            cubemap = Cubemap::createFromFaces(faces, /*srgb=*/true);
+    } else if (std::filesystem::is_regular_file(abs, ec)) {
+        cubemap = Cubemap::createFromEquirect(abs);
+    } else {
+        Logger::warn("AssetDatabase: 天空盒路径不存在: {}", relativePath.string());
+        return nullptr;
+    }
+
+    if (!cubemap) return nullptr;   // 失败原因已由 Cubemap 内部日志记录
+    m_cubemapCache[key] = cubemap;
+    return cubemap;
+}
+
 void AssetDatabase::clearCache() {
     m_meshCache.clear();
     m_textureCache.clear();
+    m_cubemapCache.clear();
     Logger::info("AssetDatabase: 缓存已清空（Reload Assets）");
 }
 
 void AssetDatabase::releaseUnused() {
     std::erase_if(m_meshCache, [](const auto& kv) { return kv.second.expired(); });
     std::erase_if(m_textureCache, [](const auto& kv) { return kv.second.expired(); });
+    std::erase_if(m_cubemapCache, [](const auto& kv) { return kv.second.expired(); });
 }
 
 }  // namespace NovaEngine
