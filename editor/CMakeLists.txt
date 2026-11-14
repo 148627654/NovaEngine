@@ -39,6 +39,8 @@ target_include_directories(NovaEditor PRIVATE
 target_compile_definitions(NovaEditor PRIVATE
     IMGUI_IMPL_OPENGL_LOADER_GLAD
     IMGUI_DEFINE_MATH_OPERATORS
+    # 编译期注入项目根：main.cpp 启动时切工作目录用（双击 exe 时 cwd 是 exe 目录）
+    "NOVA_PROJECT_ROOT=\"${CMAKE_SOURCE_DIR}\""
 )
 
 # NovaEngine PUBLIC 链接 glfw/glad/glm/assimp/json/stb，编辑器和 imgui 源码自动继承其 include 目录

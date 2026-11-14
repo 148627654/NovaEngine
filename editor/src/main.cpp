@@ -1,7 +1,7 @@
 // main.cpp —— NovaEditor 入口（§3.1 主循环的前置初始化步骤）
 //
 // 初始化顺序（严格照 §3.1）：
-//   Window::create → Renderer::init → AssetDatabase::setProjectRoot
+//   Window::create → current_path(项目根) → Renderer::init → AssetDatabase::setProjectRoot
 //   → ImGui 上下文 + docking + 样式 + 中文字体
 //   → ImGui_ImplGlfw_InitForOpenGL / ImGui_ImplOpenGL3_Init
 //   → EditorApplication.run()（内部 init/主循环/shutdown）
@@ -17,8 +17,19 @@
 #include <filesystem>
 #include <memory>
 
+#include <windows.h>  // SetConsoleOutputCP：控制台切 UTF-8，修复中文日志乱码
+
+// 编译期注入的项目根路径（editor/CMakeLists.txt）；未定义时回退当前目录
+#ifndef NOVA_PROJECT_ROOT
+#define NOVA_PROJECT_ROOT "."
+#endif
+
 int main() {
     using namespace NovaEngine;
+
+    // 程序输出 UTF-8（源码 /utf-8 编译），但中文 Windows 控制台默认 GBK（代码页 936）解码，
+    // 不切换会导致中文日志乱码
+    SetConsoleOutputCP(CP_UTF8);
 
     Logger::info("NovaEditor 启动");
 
@@ -30,14 +41,18 @@ int main() {
     }
     window->setVsync(true);
 
-    // 2. 渲染器（必须在窗口上下文创建之后）
+    // 2. 工作目录切到编译期注入的项目根——必须在 Renderer::init 之前：
+    //    渲染器按相对路径加载 assets/shaders（双击 exe 时 cwd 是 exe 目录会找不到）
+    std::filesystem::current_path(NOVA_PROJECT_ROOT);
+
+    // 3. 渲染器（必须在窗口上下文创建之后）
     Renderer::init();
 
-    // 3. 项目根（当前工作目录；VS 调试运行目录已设为项目根）
+    // 4. 项目根（与第 2 步的 current_path 一致；VS 调试运行目录同样指向项目根）
     AssetDatabase::setProjectRoot(std::filesystem::current_path());
     Logger::info("项目根目录: {}", AssetDatabase::projectRoot().string());
 
-    // 4. ImGui 上下文 + docking + 样式 + 中文字体
+    // 5. ImGui 上下文 + docking + 样式 + 中文字体
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
@@ -56,7 +71,7 @@ int main() {
                                       io.Fonts->GetGlyphRangesChineseFull()))
         Logger::warn("中文字体加载失败（C:/Windows/Fonts/msyh.ttc），回退默认字体");
 
-    // 5. ImGui 后端（GLFW 回调会链式调用 Window 已安装的回调，Input 不受影响）
+    // 6. ImGui 后端（GLFW 回调会链式调用 Window 已安装的回调，Input 不受影响）
     if (!ImGui_ImplGlfw_InitForOpenGL(window->nativeHandle(), true)) {
         Logger::error("ImGui GLFW 后端初始化失败");
         return 1;
@@ -66,7 +81,7 @@ int main() {
         return 1;
     }
 
-    // 6. 应用主循环；run() 结束时内部调用 shutdown() 清理 ImGui 与 Renderer，
+    // 7. 应用主循环；run() 结束时内部调用 shutdown() 清理 ImGui 与 Renderer，
     //    窗口由 EditorApplication 析构最后释放（GL 上下文随窗口销毁）。
     NovaEditor::EditorApplication app(std::move(window));
     return app.run();
