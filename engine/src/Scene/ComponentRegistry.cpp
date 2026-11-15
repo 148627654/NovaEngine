@@ -8,6 +8,7 @@
 #include <NovaEngine/Scene/DirectionalLight.h>
 #include <NovaEngine/Scene/Image.h>
 #include <NovaEngine/Scene/MeshRenderer.h>
+#include <NovaEngine/Scene/PrefabInstance.h>
 #include <NovaEngine/Scene/Rigidbody.h>
 #include <NovaEngine/Scene/Text.h>
 #include <NovaEngine/Scene/Transform.h>
@@ -72,6 +73,7 @@ std::unique_ptr<Component> ComponentRegistry::create(const std::string& typeName
         (void)std::make_unique<SphereCollider>(owner); // V0.3-1（Coder A 波 2 物理）
         (void)std::make_unique<CapsuleCollider>(owner);// V0.3-1（Coder A 波 2 物理）
         (void)std::make_unique<MeshCollider>(owner);   // V0.3-1（Coder A 波 2 物理）
+        (void)std::make_unique<PrefabInstance>(owner); // V0.3-9（Coder B 波 4 Prefab）
     }
 
     auto& map = entries();

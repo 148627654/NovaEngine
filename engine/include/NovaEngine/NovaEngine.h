@@ -41,6 +41,7 @@
 #include <NovaEngine/Scene/Image.h>
 #include <NovaEngine/Scene/Text.h>
 #include <NovaEngine/Scene/Button.h>
+#include <NovaEngine/Scene/PrefabInstance.h>
 
 #include <NovaEngine/Assets/AssetDatabase.h>
 #include <NovaEngine/Assets/AssetStream.h>

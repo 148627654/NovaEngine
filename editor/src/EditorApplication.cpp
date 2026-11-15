@@ -2,6 +2,7 @@
 
 #include "DragDrop.h"
 #include "Packager.h"
+#include "PrefabManager.h"
 #include "panels/AssetBrowserPanel.h"
 #include "panels/BuildSettingsPanel.h"
 #include "panels/ConsolePanel.h"
@@ -22,6 +23,7 @@
 
 #include <chrono>
 #include <cwchar>
+#include <fstream>
 #include <string>
 
 // 文件对话框（Windows 原生）。NOMINMAX / WIN32_LEAN_AND_MEAN 已由 nova_configure_target 定义，
@@ -433,7 +435,10 @@ void EditorApplication::showMainMenu() {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("View")) {
-            if (ImGui::MenuItem("Reload Assets")) AssetDatabase::instance().clearCache();
+            if (ImGui::MenuItem("Reload Assets")) {
+                AssetDatabase::instance().clearCache();
+                PrefabManager::clearCache();   // V0.3-9 波 4：预制体源 JSON 缓存一并清空
+            }
             ImGui::Separator();
             for (auto& panel : m_panels)
                 ImGui::MenuItem(panel->name().c_str(), nullptr, &panel->open);
@@ -759,10 +764,19 @@ void EditorApplication::requestExit() {
 
 void EditorApplication::undoScene() {
     using namespace NovaEngine;
-    const std::string snap = m_context.undoRedo.undo();
-    if (snap.empty()) return;
+    // 文件恢复通道（V0.3-9 波 4）：undoFull 返回 files = 被撤销操作改写的文件 + 改写前内容
+    //（B 线约定：undo 原样写回）；先写回 files 再 deserialize sceneJson
+    const auto result = m_context.undoRedo.undoFull();
+    if (result.sceneJson.empty()) return;
+    for (const auto& fr : result.files) {
+        std::ofstream file(AssetDatabase::projectRoot() / fr.path,
+                           std::ios::binary | std::ios::trunc);
+        if (file) file << fr.content;
+        else Logger::warn("Undo 文件恢复失败（无法写入）: {}", fr.path.string());
+    }
+    PrefabManager::clearCache();   // 资产内容已回写：预制体源缓存失效
     // 恢复 = deserialize 回同一 Scene（对象 ID 不变；选中集仅清理失效 ID）
-    SceneSerializer::deserialize(*m_scene, snap);
+    SceneSerializer::deserialize(*m_scene, result.sceneJson);
     m_context.sceneDirty = true;
     std::erase_if(m_context.selectedIds,
                   [this](uint64_t id) { return m_scene->findGameObject(id) == nullptr; });
@@ -772,9 +786,22 @@ void EditorApplication::undoScene() {
 
 void EditorApplication::redoScene() {
     using namespace NovaEngine;
-    const std::string snap = m_context.undoRedo.redo();
-    if (snap.empty()) return;
-    SceneSerializer::deserialize(*m_scene, snap);
+    // redo 文件方向（B 线约定）：files 同为「改写前内容」——消费方按 sceneJson 重算改写后
+    // 内容写回（.novaprefab 经 PrefabManager::rewriteAssetFromScene 用场景内实例重序列化；
+    // 其它文件原样写回）。先 deserialize 场景（重算依赖场景内实例），再写回文件。
+    const auto result = m_context.undoRedo.redoFull();
+    if (result.sceneJson.empty()) return;
+    SceneSerializer::deserialize(*m_scene, result.sceneJson);
+    for (const auto& fr : result.files) {
+        if (fr.path.extension() == ".novaprefab" &&
+            PrefabManager::rewriteAssetFromScene(m_context, fr.path))
+            continue;
+        std::ofstream file(AssetDatabase::projectRoot() / fr.path,
+                           std::ios::binary | std::ios::trunc);
+        if (file) file << fr.content;
+        else Logger::warn("Redo 文件恢复失败（无法写入）: {}", fr.path.string());
+    }
+    PrefabManager::clearCache();
     m_context.sceneDirty = true;
     std::erase_if(m_context.selectedIds,
                   [this](uint64_t id) { return m_scene->findGameObject(id) == nullptr; });

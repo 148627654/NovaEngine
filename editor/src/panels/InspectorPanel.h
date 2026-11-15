@@ -2,6 +2,8 @@
 #include "../Panel.h"
 
 #include <functional>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <glm/vec3.hpp>
@@ -26,12 +28,21 @@ public:
     void onGui(EditorContext& ctx, EditorCamera& camera) override;
 
 private:
-    void drawTransform(EditorContext& ctx, NovaEngine::GameObject* go);
-    void drawMeshRenderer(EditorContext& ctx, NovaEngine::GameObject* go);
-    void drawCamera(EditorContext& ctx, NovaEngine::GameObject* go);
-    void drawDirectionalLight(EditorContext& ctx, NovaEngine::GameObject* go);
+    // overrides = 该组件的 override 差异键（序列化键名，点分路径）；nullptr = 无预制体上下文
+    void drawTransform(EditorContext& ctx, NovaEngine::GameObject* go,
+                       const std::vector<std::string>* overrides = nullptr);
+    void drawMeshRenderer(EditorContext& ctx, NovaEngine::GameObject* go,
+                          const std::vector<std::string>* overrides = nullptr);
+    void drawCamera(EditorContext& ctx, NovaEngine::GameObject* go,
+                    const std::vector<std::string>* overrides = nullptr);
+    void drawDirectionalLight(EditorContext& ctx, NovaEngine::GameObject* go,
+                              const std::vector<std::string>* overrides = nullptr);
     // 返回是否发生了整场景重建（移除脚本走 JSON 重建，旧指针全部作废）
-    bool drawScripts(EditorContext& ctx, NovaEngine::GameObject* go);
+    bool drawScripts(EditorContext& ctx, NovaEngine::GameObject* go,
+                     const std::unordered_map<std::string, std::vector<std::string>>& overridesByType);
+    // Prefab 区（V0.3-9 波 4）：Open 路径显示 / Apply / Revert All / override 列表（组件+字段粒度）
+    void drawPrefabSection(EditorContext& ctx, NovaEngine::GameObject* go,
+                           const std::unordered_map<std::string, std::vector<std::string>>& overridesByType);
     void drawAddComponent(EditorContext& ctx, NovaEngine::GameObject* go);
 
     // 多选批量编辑（V0.2-15）：selectedIds.size() > 1

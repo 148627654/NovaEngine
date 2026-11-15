@@ -21,7 +21,7 @@ public:
     void onGui(EditorContext& ctx, EditorCamera& camera) override;
 
 private:
-    enum class PendingOp { Duplicate, Delete };
+    enum class PendingOp { Duplicate, Delete, CreatePrefab };
     struct RowRect { glm::vec2 min; glm::vec2 max; uint64_t id; };
 
     void drawNode(EditorContext& ctx, NovaEngine::GameObject* go);

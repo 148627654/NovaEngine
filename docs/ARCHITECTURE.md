@@ -1597,4 +1597,21 @@ static uint32_t renderSceneToOutput(const Scene& scene, const RenderCamera& fall
 **最终验收待补两项**（不阻塞合波，转入 ROADMAP §5.1）：① 双 FBO resize/格式切换分支运行期验证（手动拉伸窗口+切换 pp.enabled）；② LoadScene 端到端脚本触发（DDOL 存活 + 退出 Play 快照恢复）。
 
 **遗留**（详见 KNOWN-ISSUES.md「波 3 遗留 backlog」）：build.novabuild 缺失良性 warn、bloom 单方向降采样近似、resize 在 disabled 时仍建纹理、Release 构建留待波 4。
+
+## 22. 波 4 落地终态 + V0.3 收官（2026-11-15，Prefab 完整化 + 全量回归）
+
+**执行结果**：Debug 全量构建零错误零第一方警告（NovaEditor.exe 重链接）；**Release 全量构建零错误**（Jolt 首次 Release 编译，Release 双 exe 产出）；编辑器守卫 16 条验证通过；双 exe 冒烟通过；v3 旧场景加载参数不变（schema 回归通过）。Reviewer 12 项清单全过，2 P1 + 4 P2 全部修复闭环。
+
+**§14.7 落地终态（Prefab 全链路）**：
+
+- **PrefabSerializer**（冻结五方法，波 3 落地）：serializeSubtree（树形 JSON 无 parent）/instantiateSubtree（ID 重生成+映射累积）/instantiateSubtreeKeepingIds（DDOL 用）/loadAsset（AssetStream）/saveAsset（磁盘直写）。树格式含 "dontDestroyOnLoad" 键（P1-3 修复）。
+- **PrefabInstance**（注册表第 16 项）：prefabPath + instanceToSource（sourceIds [[instId,srcId],...] 按 instId 排序确定性输出）。
+- **override 动态比对**：Inspector FieldLabel 金黄高亮 + `▶ ` 前缀近似加粗（Transform/MeshRenderer/Camera/DirectionalLight/脚本字段直连；其余组件经 Prefab 区 override 列表兜底）。**比对用 componentFullJson**（type + 公共字段 + onSerialize，与 writeComponentsJson 同构）——未改不亮（P2-1 修复）。
+- **Apply**：serializeSubtree → 点分路径差异键 setJsonPath 写回源 → 嵌套展开烘焙（整体替换+remapIds 回源 ID 空间+删嵌套 PrefabInstance+递归）→ saveAsset+clearCache → 刷新全场景同路径实例（override 保留实例值）→ pushSnapshotWithFiles（改写前内容）+ 置脏。**P1-2 修复**：未映射分支按 instId 源树查重 + saveAsset 后 syncNewObjectIds 补映射。**P2-3 修复**：空映射 warn+中止。v1 取舍文档化：源中删除对象不传播。
+- **Revert**：**P1-1 修复**——applyComponentJson 助手（镜像 SerializationInternals 公共字段语义：Transform setLocalPosition/Rotation/Scale、Behaviour enabled 显式写回+onDeserialize；**升级须双处同步，源码注释互指**）→「改位置后 Revert」真实生效；revertComponent/revertAll 递归整树按自身映射溯源。
+- **Undo 文件通道（§17 冻结落地）**：pushSnapshotWithFiles/undoFull/redoFull——pushSnapshot 委托新方法旧语义零变化；undoFull 先写回 files 再 deserialize；redoFull 的 .novaprefab 由 rewriteAssetFromScene 按场景重序列化（FileRestore 单内容的 v1 取舍）；clear 双栈同步（含 baseline 压空文件条目，P2-2）。
+- **接线**：Hierarchy 右键 Create Prefab（assets/prefabs/ 去重）；DragDrop importPrefabToScene（copyIntoAssets 路由 + instantiateSubtree + 挂 PrefabInstance）；SceneViewPanel 拖放分支；AssetBrowser [PF] 前缀+双击提示；EditorApplication undoFull/redoFull 消费 + Reload Assets 清 PrefabManager 缓存；Packager 递归收集 .novaprefab（深度 8 防环）。
+- **合波纪律（§17 增补）**：editor/CMakeLists.txt 显式源清单已补 BuildSettingsPanel.cpp 与 PrefabManager.cpp。
+
+**V0.3 总账**：立项 11 项（骨骼动画 V0.3-13 按用户裁定顺延 V0.5）代码交付全部完成——波 1（PBR+材质库）/波 2（物理+音频+UI+协程+事件）/波 3（后处理+场景管理）/波 4（Prefab）。**最终人工验收清单**（GUI 交互项，不阻塞）：Prefab 全链路（拖入→改值→Apply→同步→嵌套烘焙→Revert→undoFull）、删源不崩、双 FBO resize、LoadScene 端到端、画面总验收（PBR+阴影+天空+Bloom/Tonemap）、物理/音频/UI 各项目测、V0.2 全量回归。详见 ROADMAP §5.1。
 7. 波间热点文件（Scene.cpp/EditorApplication.cpp/SceneViewPanel.cpp/InspectorPanel.cpp）按「骨架先行」纪律执行

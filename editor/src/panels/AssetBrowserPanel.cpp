@@ -131,6 +131,7 @@ void AssetBrowserPanel::onGui(EditorContext& ctx, EditorCamera&) {
                 : DragDrop::isModelFile(e.rel) ? "[M] "
                 : DragDrop::isTextureFile(e.rel) ? "[T] "
                 : DragDrop::isSceneFile(e.rel) ? "[S] "
+                : DragDrop::isPrefabFile(e.rel) ? "[PF] "  // 预制体资产（V0.3-9 波 4）
                 : isMaterialFile(e.rel) ? "[MA] "      // 材质资产（V0.3-6）
                                         : "[F] ";
             const std::string label = prefix + e.rel.filename().string();
@@ -148,6 +149,10 @@ void AssetBrowserPanel::onGui(EditorContext& ctx, EditorCamera&) {
                         } else {
                             NovaEngine::Logger::warn("Play 模式下不可加载场景");
                         }
+                    } else if (DragDrop::isPrefabFile(e.rel)) {
+                        // 双击 .novaprefab（V0.3-9 波 4）：v1 不支持资产级实例编辑场景，仅提示不崩溃
+                        NovaEngine::Logger::info("预制体资产（v1 不支持双击编辑，请拖入场景实例化后经 Inspector 的 Prefab 区 Apply）: {}",
+                                                 e.rel.string());
                     } else if (isMaterialFile(e.rel)) {
                         // 双击 .novamat 打开材质编辑模态（V0.3-6）
                         if (ctx.state == EditorContext::EditorState::Edit) {

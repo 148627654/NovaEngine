@@ -5,6 +5,7 @@
 #include "UIWidgets.h"            // UI 组件编辑（V0.3-3，Coder B 波 2 并行创建；不匹配类型 no-op）
 
 #include "../EditorContext.h"
+#include "../PrefabManager.h"
 
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>   // InputText(std::string*) 包装（ImGui 1.90+ 移除内建重载）
@@ -18,6 +19,7 @@
 #include <NovaEngine/Scene/DirectionalLight.h>
 #include <NovaEngine/Scene/GameObject.h>
 #include <NovaEngine/Scene/MeshRenderer.h>
+#include <NovaEngine/Scene/PrefabInstance.h>
 #include <NovaEngine/Scene/Scene.h>
 #include <NovaEngine/Scene/Transform.h>
 #include <NovaEngine/Scripting/Behaviour.h>
@@ -35,6 +37,38 @@ namespace NovaEditor {
 
 namespace {
 
+// ===== Prefab override 字段标签强调（V0.3-9 波 4）=====
+// 命中差异键（序列化键名）→ 金黄高亮 + "▶ " 前缀。ImGui 未加载粗体字体，
+// 以颜色近似「加粗」（文案注释说明）；RAII 压栈/弹栈，作用于紧随其后的控件标签。
+class FieldLabel {
+public:
+    FieldLabel(const char* uiLabel, const char* serializedKey, const std::vector<std::string>* overrides) {
+        m_override = overrides != nullptr &&
+                     std::find(overrides->begin(), overrides->end(), serializedKey) != overrides->end();
+        if (m_override) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.82f, 0.25f, 1.0f));
+            m_label = "▶ " + std::string(uiLabel);
+        } else {
+            m_label = uiLabel;
+        }
+    }
+    ~FieldLabel() {
+        if (m_override) ImGui::PopStyleColor();
+    }
+    const char* c_str() const { return m_label.c_str(); }
+
+private:
+    bool m_override = false;
+    std::string m_label;
+};
+
+// 按类型取 override 键集合（无 → nullptr）
+const std::vector<std::string>* overridesFor(
+    const std::unordered_map<std::string, std::vector<std::string>>& byType, const char* type) {
+    const auto it = byType.find(type);
+    return it != byType.end() ? &it->second : nullptr;
+}
+
 // 对象 JSON 中的脚本组件类型名（顺序与 getComponents<Behaviour>() 一致，作面板标题用）
 std::vector<std::string> scriptTypeNamesInOrder(NovaEngine::GameObject* go) {
     std::vector<std::string> names;
@@ -51,7 +85,9 @@ std::vector<std::string> scriptTypeNamesInOrder(NovaEngine::GameObject* go) {
 // 脏标记漏斗：拖拽/输入中 markDirtyOnly；编辑结束（IsItemDeactivatedAfterEdit）markSceneDirty。
 // 注意：Checkbox 的激活/失活发生在同一点击帧内（ActiveIdPreviousFrame 不命中），
 // IsItemDeactivatedAfterEdit 恒假——瞬时控件走 instantChange 即时推快照。
-void editScriptFields(EditorContext& ctx, NovaEngine::Behaviour* script) {
+// overrides（V0.3-9 波 4）：override 差异键 → 该字段标签强调（▶ 前缀 + 金黄高亮）
+void editScriptFields(EditorContext& ctx, NovaEngine::Behaviour* script,
+                      const std::vector<std::string>* overrides) {
     nlohmann::json j;
     script->onSerialize(j);
     if (!j.is_object()) return;
@@ -64,16 +100,24 @@ void editScriptFields(EditorContext& ctx, NovaEngine::Behaviour* script) {
         ImGui::PushID(it.key().c_str());
         if (v.is_boolean()) {
             bool b = v.get<bool>();
-            if (ImGui::Checkbox(it.key().c_str(), &b)) { v = b; changed = true; instantChange = true; }
+            if (ImGui::Checkbox(FieldLabel(it.key().c_str(), it.key().c_str(), overrides).c_str(), &b)) {
+                v = b; changed = true; instantChange = true;
+            }
         } else if (v.is_number_float()) {
             float f = v.get<float>();
-            if (ImGui::DragFloat(it.key().c_str(), &f, 0.1f)) { v = f; changed = true; }
+            if (ImGui::DragFloat(FieldLabel(it.key().c_str(), it.key().c_str(), overrides).c_str(), &f, 0.1f)) {
+                v = f; changed = true;
+            }
         } else if (v.is_number_integer()) {
             int n = static_cast<int>(v.get<int64_t>());
-            if (ImGui::DragInt(it.key().c_str(), &n, 1.0f)) { v = static_cast<int64_t>(n); changed = true; }
+            if (ImGui::DragInt(FieldLabel(it.key().c_str(), it.key().c_str(), overrides).c_str(), &n, 1.0f)) {
+                v = static_cast<int64_t>(n); changed = true;
+            }
         } else if (v.is_string()) {
             std::string s = v.get<std::string>();
-            if (ImGui::InputText(it.key().c_str(), &s)) { v = s; changed = true; }
+            if (ImGui::InputText(FieldLabel(it.key().c_str(), it.key().c_str(), overrides).c_str(), &s)) {
+                v = s; changed = true;
+            }
         } else {
             ImGui::TextDisabled("%s (unsupported type)", it.key().c_str());
         }
@@ -187,11 +231,24 @@ void InspectorPanel::onGui(EditorContext& ctx, EditorCamera&) {
     if (!edit) ImGui::EndDisabled();
     ImGui::Separator();
 
-    drawTransform(ctx, go);
+    // Prefab override 集合（V0.3-9 波 4）：选中对象映射到源对象时，逐组件动态比对差异键
+    //（序列化键名）；供各抽屉字段标签强调 + Prefab 区 override 列表/Revert
+    std::unordered_map<std::string, std::vector<std::string>> overridesByType;
+    if (NovaEngine::GameObject* prefabRoot = PrefabManager::findInstanceRoot(go)) {
+        if (auto* inst = prefabRoot->getComponent<NovaEngine::PrefabInstance>()) {
+            if (const nlohmann::json* src = PrefabManager::sourceJson(inst->prefabPath)) {
+                const auto mit = inst->instanceToSource.find(go->id());
+                if (mit != inst->instanceToSource.end())
+                    PrefabManager::collectObjectOverrides(*src, mit->second, go, overridesByType);
+            }
+        }
+    }
+
+    drawTransform(ctx, go, overridesFor(overridesByType, "Transform"));
     ImGui::Separator();
-    drawMeshRenderer(ctx, go);
-    drawCamera(ctx, go);
-    drawDirectionalLight(ctx, go);
+    drawMeshRenderer(ctx, go, overridesFor(overridesByType, "MeshRenderer"));
+    drawCamera(ctx, go, overridesFor(overridesByType, "Camera"));
+    drawDirectionalLight(ctx, go, overridesFor(overridesByType, "DirectionalLight"));
     // V0.3 波 2：物理/音频/UI 组件编辑——widget 头漏斗分发（三个 header-only 头签名一致：
     // drawXxxComponents(ctx, comp, editMode)；各头 dynamic_cast 识别自身组件类型，不匹配 no-op）。
     // 遍历 go 全部组件（getComponents 走 dynamic_cast，含派生类）。
@@ -209,8 +266,10 @@ void InspectorPanel::onGui(EditorContext& ctx, EditorCamera&) {
             if (!alive) break;
         }
     }
+    // Prefab 区（V0.3-9 波 4）：Open 路径显示 / Apply / Revert All / override 列表
+    drawPrefabSection(ctx, go, overridesByType);
     // 移除脚本会重建整个场景（旧指针作废），立即结束本帧其余绘制
-    if (drawScripts(ctx, go)) {
+    if (drawScripts(ctx, go, overridesByType)) {
         ImGui::End();
         return;
     }
@@ -218,34 +277,36 @@ void InspectorPanel::onGui(EditorContext& ctx, EditorCamera&) {
     ImGui::End();
 }
 
-void InspectorPanel::drawTransform(EditorContext& ctx, NovaEngine::GameObject* go) {
+void InspectorPanel::drawTransform(EditorContext& ctx, NovaEngine::GameObject* go,
+                                   const std::vector<std::string>* overrides) {
     NovaEngine::Transform* t = go->transform();
     if (!t) return;
     ImGui::TextUnformatted("Transform");
 
     glm::vec3 pos = t->localPosition();
-    if (ImGui::DragFloat3("Position", glm::value_ptr(pos), 0.05f)) {
+    if (ImGui::DragFloat3(FieldLabel("Position", "position", overrides).c_str(), glm::value_ptr(pos), 0.05f)) {
         t->setLocalPosition(pos);
         ctx.markDirtyOnly();
     }
     if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
 
     glm::vec3 euler = t->localEulerAngles();  // 度（UI 角度用度，存储用四元数）
-    if (ImGui::DragFloat3("Rotation", glm::value_ptr(euler), 0.5f)) {
+    if (ImGui::DragFloat3(FieldLabel("Rotation", "rotation", overrides).c_str(), glm::value_ptr(euler), 0.5f)) {
         t->setLocalEulerAngles(euler);
         ctx.markDirtyOnly();
     }
     if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
 
     glm::vec3 scale = t->localScale();
-    if (ImGui::DragFloat3("Scale", glm::value_ptr(scale), 0.05f, 0.001f, 1000.0f)) {
+    if (ImGui::DragFloat3(FieldLabel("Scale", "scale", overrides).c_str(), glm::value_ptr(scale), 0.05f, 0.001f, 1000.0f)) {
         t->setLocalScale(scale);
         ctx.markDirtyOnly();
     }
     if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
 }
 
-void InspectorPanel::drawMeshRenderer(EditorContext& ctx, NovaEngine::GameObject* go) {
+void InspectorPanel::drawMeshRenderer(EditorContext& ctx, NovaEngine::GameObject* go,
+                                      const std::vector<std::string>* overrides) {
     NovaEngine::MeshRenderer* mr = go->getComponent<NovaEngine::MeshRenderer>();
     if (!mr) return;
     if (!ImGui::CollapsingHeader("Mesh Renderer", ImGuiTreeNodeFlags_DefaultOpen)) return;
@@ -258,7 +319,8 @@ void InspectorPanel::drawMeshRenderer(EditorContext& ctx, NovaEngine::GameObject
     //（点击别处不应用也不置脏，避免「无变更却脏」）。
     std::string meshPath = mr->meshPath;
     if (!edit) ImGui::BeginDisabled();
-    if (ImGui::InputText("Mesh", &meshPath, ImGuiInputTextFlags_EnterReturnsTrue)) {
+    if (ImGui::InputText(FieldLabel("Mesh", "mesh", overrides).c_str(), &meshPath,
+                         ImGuiInputTextFlags_EnterReturnsTrue)) {
         mr->meshPath = meshPath;
         mr->mesh = NovaEngine::AssetDatabase::instance().getMesh(meshPath);
         ctx.markSceneDirty();
@@ -323,7 +385,8 @@ void InspectorPanel::drawMeshRenderer(EditorContext& ctx, NovaEngine::GameObject
     }
 }
 
-void InspectorPanel::drawCamera(EditorContext& ctx, NovaEngine::GameObject* go) {
+void InspectorPanel::drawCamera(EditorContext& ctx, NovaEngine::GameObject* go,
+                                const std::vector<std::string>* overrides) {
     NovaEngine::Camera* cam = go->getComponent<NovaEngine::Camera>();
     if (!cam) return;
     if (!ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen)) return;
@@ -331,15 +394,21 @@ void InspectorPanel::drawCamera(EditorContext& ctx, NovaEngine::GameObject* go) 
     bool remove = false;
     const bool edit = ctx.state == EditorContext::EditorState::Edit;
 
-    if (ImGui::DragFloat("FOV", &cam->fov, 0.5f, 10.0f, 170.0f)) ctx.markDirtyOnly();
+    if (ImGui::DragFloat(FieldLabel("FOV", "fov", overrides).c_str(), &cam->fov, 0.5f, 10.0f, 170.0f))
+        ctx.markDirtyOnly();
     if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
-    if (ImGui::DragFloat("Near Plane", &cam->nearPlane, 0.01f, 0.001f, 10.0f)) ctx.markDirtyOnly();
+    if (ImGui::DragFloat(FieldLabel("Near Plane", "nearPlane", overrides).c_str(), &cam->nearPlane, 0.01f, 0.001f, 10.0f))
+        ctx.markDirtyOnly();
     if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
-    if (ImGui::DragFloat("Far Plane", &cam->farPlane, 1.0f, 10.0f, 10000.0f)) ctx.markDirtyOnly();
+    if (ImGui::DragFloat(FieldLabel("Far Plane", "farPlane", overrides).c_str(), &cam->farPlane, 1.0f, 10.0f, 10000.0f))
+        ctx.markDirtyOnly();
     if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
-    if (ImGui::ColorEdit4("Clear Color", glm::value_ptr(cam->clearColor))) ctx.markDirtyOnly();
+    if (ImGui::ColorEdit4(FieldLabel("Clear Color", "clearColor", overrides).c_str(),
+                          glm::value_ptr(cam->clearColor)))
+        ctx.markDirtyOnly();
     if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
-    if (ImGui::Checkbox("Main Camera", &cam->isMain)) ctx.markSceneDirty();
+    if (ImGui::Checkbox(FieldLabel("Main Camera", "isMain", overrides).c_str(), &cam->isMain))
+        ctx.markSceneDirty();
 
     if (!edit) ImGui::BeginDisabled();
     if (ImGui::Button("Remove Component")) remove = true;
@@ -351,7 +420,8 @@ void InspectorPanel::drawCamera(EditorContext& ctx, NovaEngine::GameObject* go) 
     }
 }
 
-void InspectorPanel::drawDirectionalLight(EditorContext& ctx, NovaEngine::GameObject* go) {
+void InspectorPanel::drawDirectionalLight(EditorContext& ctx, NovaEngine::GameObject* go,
+                                          const std::vector<std::string>* overrides) {
     NovaEngine::DirectionalLight* light = go->getComponent<NovaEngine::DirectionalLight>();
     if (!light) return;
     if (!ImGui::CollapsingHeader("Directional Light", ImGuiTreeNodeFlags_DefaultOpen)) return;
@@ -359,21 +429,24 @@ void InspectorPanel::drawDirectionalLight(EditorContext& ctx, NovaEngine::GameOb
     bool remove = false;
     const bool edit = ctx.state == EditorContext::EditorState::Edit;
 
-    if (ImGui::ColorEdit3("Color", glm::value_ptr(light->color))) ctx.markDirtyOnly();
+    if (ImGui::ColorEdit3(FieldLabel("Color", "color", overrides).c_str(), glm::value_ptr(light->color)))
+        ctx.markDirtyOnly();
     if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
-    if (ImGui::DragFloat("Intensity", &light->intensity, 0.01f, 0.0f, 100.0f)) ctx.markDirtyOnly();
+    if (ImGui::DragFloat(FieldLabel("Intensity", "intensity", overrides).c_str(), &light->intensity, 0.01f, 0.0f, 100.0f))
+        ctx.markDirtyOnly();
     if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
     ImGui::TextDisabled("(direction follows Transform.forward)");
 
     // 阴影参数（V0.2-6）
-    if (ImGui::Checkbox("Cast Shadows", &light->castShadows)) ctx.markSceneDirty();
-    if (ImGui::DragFloat("Shadow Bias", &light->shadowBias, 0.0001f, 0.0f, 0.01f, "%.5f"))
+    if (ImGui::Checkbox(FieldLabel("Cast Shadows", "castShadows", overrides).c_str(), &light->castShadows))
+        ctx.markSceneDirty();
+    if (ImGui::DragFloat(FieldLabel("Shadow Bias", "shadowBias", overrides).c_str(), &light->shadowBias, 0.0001f, 0.0f, 0.01f, "%.5f"))
         ctx.markDirtyOnly();
     if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
-    if (ImGui::DragFloat("Shadow Range", &light->shadowRange, 1.0f, 5.0f, 200.0f))
+    if (ImGui::DragFloat(FieldLabel("Shadow Range", "shadowRange", overrides).c_str(), &light->shadowRange, 1.0f, 5.0f, 200.0f))
         ctx.markDirtyOnly();
     if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
-    if (ImGui::DragInt("Shadow Map Size", &light->shadowMapSize, 512, 512, 4096))
+    if (ImGui::DragInt(FieldLabel("Shadow Map Size", "shadowMapSize", overrides).c_str(), &light->shadowMapSize, 512, 512, 4096))
         ctx.markDirtyOnly();
     if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
 
@@ -387,7 +460,55 @@ void InspectorPanel::drawDirectionalLight(EditorContext& ctx, NovaEngine::GameOb
     }
 }
 
-bool InspectorPanel::drawScripts(EditorContext& ctx, NovaEngine::GameObject* go) {
+void InspectorPanel::drawPrefabSection(
+    EditorContext& ctx, NovaEngine::GameObject* go,
+    const std::unordered_map<std::string, std::vector<std::string>>& overridesByType) {
+    using namespace NovaEngine;
+    // 选中对象自身或祖先链有 PrefabInstance（§14.7：实例内任意对象均可编辑）
+    GameObject* root = PrefabManager::findInstanceRoot(go);
+    if (!root) return;
+    auto* inst = root->getComponent<PrefabInstance>();
+    if (!inst) return;
+    if (!ImGui::CollapsingHeader("Prefab", ImGuiTreeNodeFlags_DefaultOpen)) return;
+    ImGui::PushID("prefab");
+
+    // Open：路径显示（v1 无资产级编辑场景，双轨工作流：场景内编辑 → Apply 写回）
+    ImGui::TextUnformatted(inst->prefabPath.c_str());
+    ImGui::TextDisabled("(instance root: %s)", root->name().c_str());
+
+    const bool edit = ctx.state == EditorContext::EditorState::Edit;
+    if (!edit) ImGui::BeginDisabled();
+    if (ImGui::Button("Apply")) PrefabManager::applyToAsset(ctx, root);
+    ImGui::SameLine();
+    if (ImGui::Button("Revert All")) PrefabManager::revertAll(ctx, go);
+    if (!edit) ImGui::EndDisabled();
+
+    // override 列表（组件 + 字段粒度；▶ 键 = 与源不同，可单字段/整组件 Revert）
+    if (overridesByType.empty()) {
+        ImGui::TextDisabled("(no overrides on this object)");
+    } else {
+        ImGui::Separator();
+        ImGui::TextDisabled("Overrides (▶ = differs from source):");
+        for (const auto& [type, keys] : overridesByType) {
+            ImGui::BulletText("%s", type.c_str());
+            for (const auto& key : keys) {
+                ImGui::Indent();
+                ImGui::TextUnformatted(key.c_str());
+                ImGui::SameLine();
+                if (ImGui::SmallButton(("Revert##" + type + key).c_str()))
+                    PrefabManager::revertComponent(ctx, go, type, {key});
+                ImGui::Unindent();
+            }
+            if (ImGui::SmallButton(("Revert Component##" + type).c_str()))
+                PrefabManager::revertComponent(ctx, go, type);
+        }
+    }
+    ImGui::PopID();
+}
+
+bool InspectorPanel::drawScripts(
+    EditorContext& ctx, NovaEngine::GameObject* go,
+    const std::unordered_map<std::string, std::vector<std::string>>& overridesByType) {
     const bool edit = ctx.state == EditorContext::EditorState::Edit;
     auto scripts = go->getComponents<NovaEngine::Behaviour>();
     if (scripts.empty()) return false;
@@ -396,13 +517,14 @@ bool InspectorPanel::drawScripts(EditorContext& ctx, NovaEngine::GameObject* go)
     bool sceneRebuilt = false;
     for (size_t i = 0; i < scripts.size(); ++i) {
         NovaEngine::Behaviour* script = scripts[i];
+        const std::string typeName = (i < names.size()) ? names[i] : std::string();
         const std::string title =
-            (i < names.size() && !names[i].empty()) ? ("Script (" + names[i] + ")") : "Script";
+            (!typeName.empty()) ? ("Script (" + typeName + ")") : "Script";
         ImGui::PushID(script);
         if (ImGui::CollapsingHeader(title.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
             // enable 勾选（Behaviour 独有；内置组件无 enabled 字段）
             if (ImGui::Checkbox("Enabled", &script->enabled)) ctx.markSceneDirty();
-            editScriptFields(ctx, script);
+            editScriptFields(ctx, script, overridesFor(overridesByType, typeName.c_str()));
             if (!edit) ImGui::BeginDisabled();
             if (ImGui::Button("Remove Component")) {
                 if (removeBehaviourComponent(*ctx.scene, go, script)) {

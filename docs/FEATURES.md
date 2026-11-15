@@ -773,4 +773,39 @@ NovaPlayer 内快捷键：**Esc** 退出（其余无）。
 
 ---
 
+## 14. V0.3 波 4 新增：Prefab 系统 v1（2026-11-15，V0.3 收官波）
+
+### 14.1 创建 Prefab
+
+- Hierarchy 选中对象（可含子树）→ 右键 **Create Prefab** → 生成 `assets/prefabs/<名>.novaprefab`（重名自动 `_1` 递增，日志提示路径）
+- 资产格式：树形 JSON（{version:1, name, root:{id,name,active,components,children[]}}，无 parent 字段，复用场景序列化内部辅助）
+
+### 14.2 实例化
+
+- **拖放**：Explorer 或 Asset Browser 拖 `.novaprefab` 进 SceneView → 落点实例化（ID 重新生成）+ 实例根自动挂 PrefabInstance 组件（记录 prefabPath + 实例ID→源ID 映射）
+- **嵌套**：实例子对象可再挂 PrefabInstance（场景序列化自然嵌套）
+- Asset Browser 中 `.novaprefab` 带 `[PF]` 前缀；双击仅提示（v1 不支持资产级编辑场景）
+
+### 14.3 Inspector Prefab 区
+
+- 选中实例（或其后代）：显示 **Open**（源路径）/ **Apply** / **Revert All**
+- **override 高亮**：改过源值的字段以金黄高亮 + `▶ ` 前缀标记（Transform/MeshRenderer/Camera/DirectionalLight/脚本字段直接高亮；物理/音频/UI/材质内层经 override 列表兜底，组件+字段粒度）
+- **Revert**：单字段 / 整组件 / Revert All（递归整树，嵌套按自身映射溯源；「改位置后 Revert」真实生效）
+- **Apply**：逐字段写回源资产 → 嵌套实例展开烘焙 → 保存 → 场景内全部同路径实例同步（override 字段保留实例值）
+- **Undo 文件通道**：Apply/Revert 均可 Ctrl+Z/Y 撤销（undo 恢复资产改写前内容，redo 按场景重序列化资产）
+
+### 14.4 打包与缺失防御
+
+- Packager 递归收集场景引用的 `.novaprefab`（嵌套 + 网格/贴图引用，深度 8 防环）
+- 删除源资产后打开场景不崩溃（warn + override 比对降级禁用）
+- v1 取舍（文档化）：Apply 时实例新增对象以实例 ID 写入源；源中已删除对象不传播回源
+
+### 14.5 V0.3 收官验证
+
+- Debug + Release 双配置全量构建零错误零第一方警告（Jolt 首次 Release 编译通过；Release 双 exe 产出）
+- 编辑器守卫 16 条（16 个内置组件）验证通过；双 exe 冒烟通过
+- 待人工 GUI 验收：拖放实例化→字段高亮→Apply→其余实例同步→嵌套烘焙→Revert→undoFull 撤销；双 FBO 窗口拉伸；LoadScene 端到端
+
+---
+
 *本文档由文档 Agent 基于 editor/src 与 engine/src 的实际实现撰写。发现文档与代码不符时，以代码为准并欢迎更新本文件。*

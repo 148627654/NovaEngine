@@ -199,3 +199,29 @@ Wave 2 审查无 P0；两条 P1 已修复（见下段「已修复项」）。以
 8. **老集显 8x8 探测纹理可创建但渲染极慢**：不影响正确性（探测仅一次）。
 
 **验证记录**：四 target 全绿零第一方警告；postProcess 开启场景实跑 16F FBO 链（无降级 warn、无 shader 错误、旋转正常）；默认 demo 直通路径实跑正常；编辑器守卫 15 条通过；4 个 post shader 首编译零错误。日志归档 build/smoke/（w3-*.log、demo_post.nova.json 为临时测试场景，不进 assets）。
+
+## V0.3 波 4 审查（2026-11-15，Prefab 完整化 + Undo 文件通道，V0.3 收官）
+
+**总评：需修 → 已修复闭环，可合**。12 项核对清单全部通过（applyToAsset 七步语义/fieldCompare 点分路径/嵌套烘焙 ID 重映射/Undo 栈逐位对齐/Inspector 接线/拖放/打包/守卫 16 项/交叉侵入零越界）。无 P0。
+
+**评审发现（Reviewer）——全部已修复**：
+
+- **P1-1 Transform/Behaviour.enabled 的 Revert 静默失效**：revertComponent 走 onDeserialize，但 Transform/Behaviour 公共字段由 SceneSerializer 公共层读写 → 改位置后 Revert no-op 且 markSceneDirty 造成「看似已还原」。修复：applyComponentJson 助手（镜像公共字段语义：Transform setLocalPosition/Rotation/Scale、Behaviour enabled 显式写回 + onDeserialize 扩展字段）。
+- **P1-2 未映射新对象重复 Apply 重复追加进源**（资产污染）：instanceToSource 从不更新 → 第二次 Apply 再 push_back。修复：未映射分支按 instId 在源树查重（命中并入合并流程）+ saveAsset 后 syncNewObjectIds 补映射。
+- **P2-1 override 比对恒假阳性**：用 onSerialize 输出比对，Transform onSerialize 为空 → 恒判差异（高亮恒亮）。修复：比对/写回改用 componentFullJson（type + 公共字段 + onSerialize，与 writeComponentsJson 同构）——未改不亮、改过才亮。
+- **P2-2 clear 基线只入场景栈**：baseline 未同步压文件栈。修复：clear 同步 push_back({})，逐位对齐不变量成立。
+- **P2-3 applyToAsset 空映射无防御**：空映射整棵子树以实例 ID 追加进源。修复：空映射 warn + 中止。
+- **P2-4（过程性）编辑器二进制缺失**：devops 重建确认链接通过（已覆盖）。
+
+**DevOps 合并期修复（6 处，均 C 线文件）**：DragDrop importPrefabToScene 签名全限定、editor/CMakeLists.txt 补 PrefabManager.cpp（9 个 LNK2019）、PrefabManager.cpp 三处 .string() 误用、erase_if 改 erase-remove、findComponent 前向声明。
+
+**波 4 遗留 backlog**（已文档化，不阻塞）：
+
+1. **Prefab 交互验收项留人工 GUI**：拖放实例化→字段高亮→Apply→其余实例同步→嵌套烘焙→Revert→undoFull 文件恢复、删源资产场景不崩、schema v4 资产往返（自动冒烟不覆盖交互）。
+2. **FileRestore 单内容结构**：redo 方向 .novaprefab 由消费方按场景重序列化（undo 方向文件恢复完全正确）；双向双内容需改冻结头（后续裁定）。
+3. **applyComponentJson 与 SerializationInternals 公共字段语义双处同步**：编辑器 include 路径约束导致的内联同构实现，升级须两边同步（源码注释互指）。
+4. **粗体近似**：override 字段「加粗」为金黄高亮 + `▶ ` 前缀（未加载粗体字体），后续加载粗体字体可升级。
+5. **v1 Apply 取舍**：实例新增对象以实例 ID 写入源；源中删除对象不传播回源。
+6. **波 3 遗留两项**继续有效：双 FBO resize 分支与 LoadScene 端到端留人工验收。
+
+**验证记录**：Debug 全量构建零错误零第一方警告（NovaEditor.exe 重链接）；**Release 全量构建零错误**（Jolt 首次 Release 编译，Release 双 exe 产出）；编辑器冒烟守卫 16 条通过无 PrefabManager 错误；Player 冒烟旋转正常。日志归档 build/smoke/w4f-*.log。

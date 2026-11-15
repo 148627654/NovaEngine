@@ -2,12 +2,14 @@
 
 #include "../DragDrop.h"
 #include "../EditorContext.h"
+#include "../PrefabManager.h"
 
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>   // InputText(std::string*) 包装（ImGui 1.90+ 移除内建重载）
 
 #include <NovaEngine/Assets/AssetDatabase.h>
 #include <NovaEngine/Core/Input.h>
+#include <NovaEngine/Core/Logger.h>
 #include <NovaEngine/Core/UUID.h>
 #include <NovaEngine/Scene/Camera.h>
 #include <NovaEngine/Scene/DirectionalLight.h>
@@ -15,6 +17,9 @@
 #include <NovaEngine/Scene/MeshRenderer.h>
 #include <NovaEngine/Scene/Scene.h>
 #include <NovaEngine/Scene/Transform.h>
+
+#include <filesystem>
+#include <format>
 
 namespace NovaEditor {
 
@@ -217,6 +222,10 @@ void HierarchyPanel::showContextMenu(EditorContext& ctx, NovaEngine::GameObject*
             m_pendingOps.emplace_back(PendingOp::Duplicate, parent->id());
         if (ImGui::MenuItem("Delete", "Del", false, edit))
             m_pendingOps.emplace_back(PendingOp::Delete, parent->id());
+        ImGui::Separator();
+        // Create Prefab（V0.3-9 波 4）：把选中对象子树序列化为 assets/prefabs/<名>.novaprefab
+        if (ImGui::MenuItem("Create Prefab", nullptr, false, edit))
+            m_pendingOps.emplace_back(PendingOp::CreatePrefab, parent->id());
     }
 }
 
@@ -236,6 +245,17 @@ void HierarchyPanel::processPending(EditorContext& ctx) {
                 newSelection.push_back(dup->id());
                 dirty = true;
             }
+        } else if (op == PendingOp::CreatePrefab) {
+            // V0.3-9 波 4：assets/prefabs/<对象名>.novaprefab（重名自动加 "_1" 后缀）
+            const auto root = NovaEngine::AssetDatabase::projectRoot();
+            std::filesystem::path rel = "assets/prefabs" / std::filesystem::path(go->name() + ".novaprefab");
+            std::error_code ec;
+            std::filesystem::create_directories(root / "assets" / "prefabs", ec);
+            for (int i = 1; std::filesystem::exists(root / rel, ec); ++i)
+                rel = "assets/prefabs" / std::filesystem::path(
+                        std::format("{}_{}.novaprefab", go->name(), i));
+            if (!PrefabManager::createPrefabAsset(go, rel).empty())
+                dirty = true;
         }
     }
     m_pendingOps.clear();

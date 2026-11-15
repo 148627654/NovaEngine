@@ -59,7 +59,7 @@
 | 版本 | 主题 | 交付后能做什么 | 预估周期* |
 |---|---|---|---|
 | **V0.2** | 可信赖的编辑器 + 第一眼观感 | 编辑器敢用（撤销/未保存保护）、画面有阴影天空、能做完一个 jam 级 3D 小游戏 | 3–4 周 |
-| **V0.3** | 游戏化核心能力 | 物理/音频/UI/动画/预制体齐备，能做完整 3D 平台跳跃/解谜/步行模拟 | 4–6 周 |
+| **V0.3** | 游戏化核心能力 | 物理/音频/UI/动画/预制体齐备，能做完整 3D 平台跳跃/解谜/步行模拟 | 4–6 周（2026-11-15 达成，动画顺延 V0.5） |
 | **V0.5** | 发布能力与规模内容 | 打包独立 exe、粒子/LOD/地形/2D、脚本热重载，能发布中型 3D 游戏 | 6–8 周 |
 | **V1.0** | 商业独立游戏发布级 | 多场景/存档/完整 Profiler/示例游戏/文档，达到「用它做下一款游戏」的信心线 | 8–12 周 |
 
@@ -115,7 +115,7 @@
 | 6 | ✅ **材质库（.novamat）**（波 1 完成） | 材质资产文件（JSON：PBR 参数+贴图引用）；Asset Browser 创建材质、双击编辑；MeshRenderer 改为「引用材质资产 or 内联」，Inspector 拖放赋值。**痛点**：每个物体内联材质，改一堵墙要改 100 个物体；Unity 材质资产共享是内容生产基本盘 | 已有：SceneSerializer、AssetDatabase、Inspector；改：Schema（material 段加 asset 引用） | M | 创建材质资产改 albedo，所有引用该材质的物体同步变色；场景引用材质资产可保存/加载/跨场景复用；内联材质仍可用（向后兼容）；材质资产缺失时场景加载不崩溃并提示路径 |
 | 7 | **资产二进制缓存** | 首次导入把解码结果（像素、MeshData、材质、meta）序列化到 `assets/.novacache`（内容 hash + 格式版本命名）；命中直接读盘跳过 Assimp/stb。**痛点**：大场景启动重跑 Assimp，启动秒级→十秒级；Unity 的 Library 缓存同理 | 已有：AssetDatabase/ModelLoader/TextureLoader；新增：缓存读写器 | M | 二次启动加载 50 个模型 < 2s；删除缓存后重建正确；源文件修改（hash 变化）后缓存自动失效重导入；缓存损坏回退重导不崩溃；缓存目录可安全删除 |
 | 8 | ✅ **协程**（波 2 完成） | 基于 C++20 coroutine 的最小任务类型 + `Behaviour` 内 StartCoroutine（yield 帧/秒/条件：WaitForSeconds/WaitForEndOfFrame/WaitUntil/WaitForCoroutine）；协程随对象销毁/退出 Play 自动终止。**痛点**：延时/序列逻辑靠 onUpdate 手写计时状态机，代码碎且易错；Unity 协程是脚本核心习惯 | 已有：Behaviour/Component 生命周期、Scene::update | M | StartCoroutine 内 `yield WaitForSeconds(2)` 后执行后续逻辑；对象 destroy 后协程不再执行；退出 Play 无悬挂协程；协程内再 StartCoroutine 不崩；1 万并发协程帧开销 < 2ms |
-| 9 | **Prefab 系统 v1**（波 3 引擎侧前置完成：PrefabSerializer 五方法落地；波 4 编辑器侧完整化） | `.novaprefab` 资产 = 子树 JSON（复用 SceneSerializer）；PrefabInstance 记录（源路径+每对象源 ID）；实例化（拖入场景）、Apply（写回）、Revert、override 标记（Inspector 加粗）；v1 支持嵌套（Apply 时展开写回）。**痛点**：没有 Prefab 无法复用敌人/道具/UI 组件树，内容生产瘫痪；Unity Prefab 是组件化内容工作流心脏 | 已有：SceneSerializer（V0.2-3 深拷贝已修复）、AssetDatabase、undo 栈；改：Hierarchy 右键、Inspector override 显示 | L | 拖 Prefab 进场景生成实例；改实例参数 Apply 后其余实例同步；override 字段加粗、Revert 恢复；删除源资产后场景打开不崩溃（提示缺失）；嵌套 Prefab 可用；Apply/Revert 均可撤销 |
+| 9 | ✅ **Prefab 系统 v1**（波 3 引擎侧 + 波 4 编辑器侧完成） | `.novaprefab` 资产 = 子树 JSON（复用 SceneSerializer）；PrefabInstance 记录（源路径+每对象源 ID）；实例化（拖入场景）、Apply（写回）、Revert、override 标记（Inspector 加粗）；v1 支持嵌套（Apply 时展开写回）。**痛点**：没有 Prefab 无法复用敌人/道具/UI 组件树，内容生产瘫痪；Unity Prefab 是组件化内容工作流心脏 | 已有：SceneSerializer（V0.2-3 深拷贝已修复）、AssetDatabase、undo 栈；改：Hierarchy 右键、Inspector override 显示 | L | 拖 Prefab 进场景生成实例；改实例参数 Apply 后其余实例同步；override 字段加粗、Revert 恢复；删除源资产后场景打开不崩溃（提示缺失）；嵌套 Prefab 可用；Apply/Revert 均可撤销 |
 | 10 | ✅ **Play 模式增强**（收官批次+波 2 完成） | 帧步进 Step（Pause 中逐帧推进物理+脚本）；进入 Play 未保存提醒；Play 中勾选显示碰撞体/触发器线框；Play 相机跟随选中对象（可选）。**痛点**：逐帧调试物理是 Unity 老用户核心依赖；未保存进 Play 误丢编辑态 | 已有：EditorApplication 状态机、SceneViewPanel；改：物理模块联调（V0.3-1） | S | Pause 中按 Step 场景精确前进一帧（物理与脚本各一帧）；Play 中可显示 collider 线框（开关式）；进入 Play 前有未保存更改时提示；Stop 后一切还原 |
 | 11 | ✅ **事件系统**（波 2 完成） | 新增 Events 模块：类型化事件 + subscribe/unsubscribe + 延迟投递（队列式，帧末 flush）；对象销毁自动清理订阅。**痛点**：脚本间通信靠 findScript 硬引用，耦合脆弱；Unity C# event 模式是标准解耦手段 | 新增：Events 模块；改：Behaviour 生命周期钩子 | M | 脚本 A 广播 OnDamage 事件，B/C 均收到；B 销毁后不再收到（无悬挂）；帧内投递不重入崩溃；1 万次/帧 < 1ms；事件对象可携带数据 |
 | 12 | ✅ **游戏状态管理（SceneManager）**（波 3 完成） | 场景索引（Build Settings 列表）、`LoadScene(name)` 运行时加载/卸载、additive 预留、DontDestroyOnLoad 标记（GameObject 标志位）。**痛点**：目前 Play 中不能换场景；游戏=多场景（菜单/关卡/结算），Unity SceneManager 是游戏结构骨架 | 已有：SceneSerializer、Scene；新增：SceneManager 模块 + Build Settings 窗口 | M | Play 中脚本调用 LoadScene 切换到另一场景；DontDestroyOnLoad 对象跨场景存活；加载失败打错误日志不崩溃；Build Settings 配置场景列表并持久化；退出 Play 回到编辑场景 |
@@ -127,6 +127,7 @@
 
 > **波 2 状态（2026-11-15）**：V0.3-1/2/3/8/11 代码已交付闭环——74 源文件全量构建零错误零第一方警告、两 exe 冒烟通过（编辑器守卫 15 条验证、Player 场景加载+旋转正常）。以下物理/音频/UI 交互项为**人工 Play 态验收项**，待实际搭建测试场景目测确认（自动冒烟不覆盖交互手感）。
 > **波 3 状态（2026-11-15）**：V0.3-12/14 代码已交付闭环——四 target 全绿、后处理双路径（16F 开启 / RGBA8 直通）实跑通过、4 个 post shader 首编译零错误。**最终验收待补两项**：① 双 FBO resize/格式切换分支（手动拉伸窗口 + 切换 pp.enabled 复核）；② LoadScene 端到端脚本触发（临时脚本验证 DDOL 存活 + 退出 Play 快照恢复）。
+> **波 4 状态（2026-11-15，V0.3 收官）**：V0.3-9 Prefab 全链路代码闭环——Debug+Release 双配置构建全绿（Jolt 首次 Release 编译通过、Release 双 exe 产出）、守卫 16 条验证、双 exe 冒烟通过、Reviewer 2 P1+4 P2 全部修复。Prefab 交互验收项（拖放实例化/字段高亮/Apply/Revert/undoFull 文件恢复/删源不崩）为 GUI 人工验收范畴，不阻塞合波。
 
 - [ ] 物理：10 个刚体塔堆叠 10 秒不塌穿；球滚斜坡；kinematic 推挤；30/60/144 FPS 三档固定步进行为一致（波 2 代码完成，待人工验收）
 - [ ] 音频：近大远小、多音源混音、循环、快速进出 Play 无爆音（波 2 代码完成，待人工验收；无设备降级路径已代码化）
@@ -134,7 +135,7 @@
 - [ ] 动画：Mixamo 角色 walk/idle 切换、蒙皮无顶点脱离、编辑器 Play 反复进出无泄漏（顺延 V0.5，见 V0.3-13 批注）
 - [ ] **画面总验收**：PBR + 阴影 + 天空盒 + Bloom/Tonemap 同屏，目测达到「Unity 默认观感」可接受档（波 3 代码完成，待人工目测）
 - [ ] 场景管理：Play 中 LoadScene 切换、DDOL 存活、失败不崩、Build Settings 持久化、退出 Play 回编辑场景（波 3 代码完成，LoadScene 端到端待人工验收）
-- [ ] Prefab 四路径：Apply/Revert/嵌套/缺失资产，全部不崩溃且行为符合预期（波 4）
+- [ ] Prefab 四路径：Apply/Revert/嵌套/缺失资产，全部不崩溃且行为符合预期（波 4 代码完成，交互验收待人工）
 - [ ] 材质库：改共享材质一处、百处同步；场景引用材质资产跨场景复用（波 1 完成）
 - [ ] 全量回归 V0.2 验收清单
 

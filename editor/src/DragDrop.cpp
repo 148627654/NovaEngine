@@ -9,8 +9,10 @@
 #include <NovaEngine/Render/Texture.h>
 #include <NovaEngine/Scene/GameObject.h>
 #include <NovaEngine/Scene/MeshRenderer.h>
+#include <NovaEngine/Scene/PrefabInstance.h>
 #include <NovaEngine/Scene/Scene.h>
 #include <NovaEngine/Scene/Transform.h>
+#include <NovaEngine/Serialization/PrefabSerializer.h>
 #include <NovaEngine/Serialization/SceneSerializer.h>
 
 #include <algorithm>
@@ -120,6 +122,11 @@ bool isSceneFile(const std::filesystem::path& p) {
     return tail == ".nova.json";
 }
 
+bool isPrefabFile(const std::filesystem::path& p) {
+    // V0.3-9 波 4：.novaprefab（hasExtension 小写比较）
+    return hasExtension(p, ".novaprefab");
+}
+
 std::filesystem::path copyIntoAssets(const std::filesystem::path& sourcePath) {
     namespace fs = std::filesystem;
     std::error_code ec;
@@ -134,7 +141,10 @@ std::filesystem::path copyIntoAssets(const std::filesystem::path& sourcePath) {
         return rel.lexically_normal();
     }
 
-    const fs::path subDir = isTextureFile(srcAbs) ? "assets/textures" : "assets/models";
+    // V0.3-9 波 4：.novaprefab → assets/prefabs/
+    const fs::path subDir = isTextureFile(srcAbs) ? "assets/textures"
+                          : isPrefabFile(srcAbs)  ? "assets/prefabs"
+                                                  : "assets/models";
     const fs::path destDir = root / subDir;
     fs::create_directories(destDir, ec);
     if (ec) {
@@ -216,6 +226,40 @@ NovaEngine::GameObject* duplicateGameObject(NovaEngine::Scene& scene, NovaEngine
     SceneSerializer::deserialize(scene, doc.dump());
 
     return scene.findGameObject(newId);
+}
+
+NovaEngine::GameObject* importPrefabToScene(NovaEngine::Scene& scene,
+                                            const std::filesystem::path& sourcePath,
+                                            const glm::vec3& spawnPosition) {   // DevOps 修复：签名在 NovaEditor::DragDrop 命名空间内，须与头文件声明一致地全限定（体内 using 对签名无效）
+    using namespace NovaEngine;
+    namespace fs = std::filesystem;
+    if (!isPrefabFile(sourcePath)) {
+        Logger::warn("非预制体文件，忽略导入: {}", sourcePath.string());
+        return nullptr;
+    }
+    std::error_code ec;
+    const fs::path srcAbs = fs::absolute(sourcePath, ec).lexically_normal();
+
+    // 项目外 → 复制进 assets/prefabs/（保证场景可移植）；项目内 → 直接用相对路径
+    const fs::path rel = copyIntoAssets(srcAbs);
+    if (rel.empty()) return nullptr;
+
+    // loadAsset（AssetStream 读取）→ 文档即 {"root":...} 树，与 instantiateSubtree 同构
+    nlohmann::json doc;
+    if (!PrefabSerializer::loadAsset(rel, doc)) return nullptr;
+
+    // 实例化（ID 重新生成）并记录 实例ID→源ID 映射
+    std::unordered_map<uint64_t, uint64_t> map;
+    GameObject* root = PrefabSerializer::instantiateSubtree(scene, doc.dump(), &map, nullptr);
+    if (!root) return nullptr;
+    root->transform()->setLocalPosition(spawnPosition);
+
+    // 实例根挂 PrefabInstance 溯源组件（§14.7：prefabPath + instanceToSource）
+    auto* inst = root->addComponent<PrefabInstance>();
+    inst->prefabPath = rel.string();
+    inst->instanceToSource = std::move(map);
+    Logger::info("导入预制体 {}（{} 个对象）", rel.string(), inst->instanceToSource.size());
+    return root;
 }
 
 }  // namespace NovaEditor::DragDrop

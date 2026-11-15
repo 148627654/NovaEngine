@@ -328,8 +328,19 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
                     focusGameObject(camera, root);  // 自动聚焦新物体（§6.4）
                     ctx.markSceneDirty();
                 }
+            } else if (DragDrop::isPrefabFile(srcPath)) {
+                // 预制体拖入（V0.3-9 波 4）：实例化 + PrefabInstance 溯源组件 + 选中聚焦
+                const ImVec2 m = ImGui::GetIO().MousePos;
+                const glm::vec3 spawn =
+                    camera.intersectGround(glm::vec2(m.x, m.y), vpPosF, vpSizeF);
+                GameObject* root = DragDrop::importPrefabToScene(*scene, srcPath, spawn);
+                if (root) {
+                    ctx.setSelected(root->id());
+                    focusGameObject(camera, root);
+                    ctx.markSceneDirty();
+                }
             } else {
-                Logger::warn("仅支持将模型文件拖入场景视口: {}", srcPath.filename().string());
+                Logger::warn("仅支持将模型/预制体文件拖入场景视口: {}", srcPath.filename().string());
             }
         }
         ImGui::EndDragDropTarget();

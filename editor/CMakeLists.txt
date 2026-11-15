@@ -11,6 +11,7 @@ add_executable(NovaEditor
     src/GizmoController.cpp
     src/DragDrop.cpp
     src/UndoRedoManager.cpp
+    src/PrefabManager.cpp   # DevOps 补入：C 线波 4 新文件，漏入显式源清单 → LNK2019（9 个 PrefabManager 符号）
     src/Packager.cpp
     src/panels/SceneViewPanel.cpp
     src/panels/HierarchyPanel.cpp

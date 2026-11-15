@@ -12,6 +12,7 @@
 #include <array>
 #include <cctype>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -83,7 +84,11 @@ void addTextureWithMeta(std::map<std::string, fs::path>& files, std::vector<std:
 
 // 收集单个场景 JSON 的引用资产（V0.3-12 波 3 抽取：入口场景与 build.novabuild 清单内
 // 全部场景共用同一逻辑）：MeshRenderer 的 mesh（跳过 builtin:）+ material.albedoMap +
-// 天空盒（目录六面 / equirect 单文件）
+// PrefabInstance 的 .novaprefab（V0.3-9 波 4，递归收集嵌套）+ 天空盒
+void collectPrefabRecursive(const std::string& relPath, const fs::path& projectRoot,
+                            std::map<std::string, fs::path>& files,
+                            std::vector<std::string>& missing, int depth);
+
 void collectSceneReferences(const nlohmann::json& root, const fs::path& projectRoot,
                             std::map<std::string, fs::path>& files,
                             std::vector<std::string>& missing) {
@@ -94,25 +99,31 @@ void collectSceneReferences(const nlohmann::json& root, const fs::path& projectR
             if (!obj.contains("components") || !obj["components"].is_array()) continue;
             for (const auto& comp : obj["components"]) {
                 if (!comp.is_object()) continue;
-                if (comp.value("type", std::string()) != "MeshRenderer") continue;
-
-                const std::string mesh = comp.value("mesh", std::string());
-                if (!mesh.empty() && !mesh.starts_with("builtin:")) {
-                    const fs::path meshAbs = resolveInProject(mesh, projectRoot);
-                    if (!fileExists(meshAbs)) {
-                        missing.push_back(mesh);
-                    } else {
-                        const std::string rel = toPakRel(meshAbs, projectRoot);
-                        if (rel.empty()) missing.push_back(mesh);
-                        else files.emplace(rel, meshAbs);
+                const std::string type = comp.value("type", std::string());
+                if (type == "MeshRenderer") {
+                    const std::string mesh = comp.value("mesh", std::string());
+                    if (!mesh.empty() && !mesh.starts_with("builtin:")) {
+                        const fs::path meshAbs = resolveInProject(mesh, projectRoot);
+                        if (!fileExists(meshAbs)) {
+                            missing.push_back(mesh);
+                        } else {
+                            const std::string rel = toPakRel(meshAbs, projectRoot);
+                            if (rel.empty()) missing.push_back(mesh);
+                            else files.emplace(rel, meshAbs);
+                        }
                     }
-                }
 
-                if (comp.contains("material") && comp["material"].is_object()) {
-                    const std::string albedo = comp["material"].value("albedoMap", std::string());
-                    if (!albedo.empty())
-                        addTextureWithMeta(files, missing, resolveInProject(albedo, projectRoot),
-                                           projectRoot);
+                    if (comp.contains("material") && comp["material"].is_object()) {
+                        const std::string albedo = comp["material"].value("albedoMap", std::string());
+                        if (!albedo.empty())
+                            addTextureWithMeta(files, missing, resolveInProject(albedo, projectRoot),
+                                               projectRoot);
+                    }
+                } else if (type == "PrefabInstance") {
+                    // .novaprefab 引用（V0.3-9 波 4）：资产文件 + 其内部引用递归收集
+                    const std::string prefabPath = comp.value("prefabPath", std::string());
+                    if (!prefabPath.empty())
+                        collectPrefabRecursive(prefabPath, projectRoot, files, missing, 0);
                 }
             }
         }
@@ -146,6 +157,71 @@ void collectSceneReferences(const nlohmann::json& root, const fs::path& projectR
             }
         }
     }
+}
+
+// 收集 .novaprefab 资产 + 其内部引用（嵌套预制体 / 网格 / 贴图；树形文档递归遍历）。
+// 深度上限 8 防嵌套环；files.contains 去重（同一资产只收一次）
+void collectPrefabRecursive(const std::string& relPath, const fs::path& projectRoot,
+                            std::map<std::string, fs::path>& files,
+                            std::vector<std::string>& missing, int depth) {
+    if (depth > 8) {
+        NovaEngine::Logger::warn("预制体嵌套过深（>8 层），停止递归收集: {}", relPath);
+        return;
+    }
+    const fs::path abs = resolveInProject(relPath, projectRoot);
+    if (!fileExists(abs)) {
+        missing.push_back(relPath);
+        return;
+    }
+    const std::string rel = toPakRel(abs, projectRoot);
+    if (rel.empty()) {
+        missing.push_back(relPath);
+        return;
+    }
+    if (files.contains(rel)) return;   // 已收集（兼防环）
+    files.emplace(rel, abs);
+
+    nlohmann::json doc;
+    {
+        std::ifstream ifs(abs, std::ios::binary);
+        if (!ifs) return;
+        try { ifs >> doc; } catch (const std::exception&) { return; }
+    }
+    std::function<void(const nlohmann::json&)> walk = [&](const nlohmann::json& node) {
+        if (!node.is_object()) return;
+        if (node.contains("components") && node["components"].is_array()) {
+            for (const auto& c : node["components"]) {
+                if (!c.is_object()) continue;
+                const std::string type = c.value("type", "");
+                if (type == "PrefabInstance") {
+                    const std::string nested = c.value("prefabPath", std::string());
+                    if (!nested.empty())
+                        collectPrefabRecursive(nested, projectRoot, files, missing, depth + 1);
+                } else if (type == "MeshRenderer") {
+                    const std::string mesh = c.value("mesh", std::string());
+                    if (!mesh.empty() && !mesh.starts_with("builtin:")) {
+                        const fs::path mAbs = resolveInProject(mesh, projectRoot);
+                        if (fileExists(mAbs)) {
+                            const std::string mRel = toPakRel(mAbs, projectRoot);
+                            if (!mRel.empty()) files.emplace(mRel, mAbs);
+                        } else {
+                            missing.push_back(mesh);
+                        }
+                    }
+                    if (c.contains("material") && c["material"].is_object()) {
+                        const std::string albedo = c["material"].value("albedoMap", std::string());
+                        if (!albedo.empty())
+                            addTextureWithMeta(files, missing, resolveInProject(albedo, projectRoot),
+                                               projectRoot);
+                    }
+                }
+            }
+        }
+        if (node.contains("children") && node["children"].is_array())
+            for (const auto& ch : node["children"])
+                walk(ch);
+    };
+    walk(doc.contains("root") ? doc["root"] : doc);
 }
 
 }  // namespace
