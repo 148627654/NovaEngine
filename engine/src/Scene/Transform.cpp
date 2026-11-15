@@ -1,4 +1,5 @@
 #include <NovaEngine/Scene/Transform.h>
+#include <NovaEngine/Scene/ComponentRegistry.h>
 #include <NovaEngine/Scene/GameObject.h>
 #include <cmath>
 #include <glm/gtc/matrix_transform.hpp>
@@ -148,3 +149,6 @@ void Transform::markDirty() {
 }
 
 }  // namespace NovaEngine
+
+// 组件静态注册（V0.3 波 0；注册名经 ComponentRegistry 裁剪为 "Transform"）
+NE_REGISTER_COMPONENT(NovaEngine::Transform)

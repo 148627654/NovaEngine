@@ -10,6 +10,7 @@
 #include <NovaEngine/Core/Logger.h>
 #include <NovaEngine/Render/Material.h>
 #include <NovaEngine/Scene/Camera.h>
+#include <NovaEngine/Scene/ComponentRegistry.h>
 #include <NovaEngine/Scene/DirectionalLight.h>
 #include <NovaEngine/Scene/GameObject.h>
 #include <NovaEngine/Scene/MeshRenderer.h>
@@ -21,6 +22,7 @@
 
 #include <glm/gtc/type_ptr.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -388,21 +390,32 @@ void InspectorPanel::drawAddComponent(EditorContext& ctx, NovaEngine::GameObject
     ImGui::Separator();
     if (!edit) ImGui::BeginDisabled();  // Play 态组件增删禁用
 
-    // 内置组件 + ScriptRegistry 注册脚本
-    std::vector<std::string> items = {"Camera", "DirectionalLight", "MeshRenderer"};
-    for (auto& n : NovaEngine::ScriptRegistry::allNames()) items.push_back(n);
+    // 内置组件列表改由 ComponentRegistry 提供（V0.3 波 0）：物理/音频/UI 组件注册后自动出现，
+    // 无需再改面板；脚本列表仍走 ScriptRegistry。两表合并、排序、去重后展示。
+    // Transform 是强制组件（每个对象必有），过滤掉避免重复挂载。
+    std::vector<std::string> items;
+    for (const auto& n : NovaEngine::ComponentRegistry::builtinNames()) {
+        if (n == "Transform") continue;
+        items.push_back(n);
+    }
+    for (const auto& n : NovaEngine::ScriptRegistry::allNames()) items.push_back(n);
+    std::sort(items.begin(), items.end());
+    items.erase(std::unique(items.begin(), items.end()), items.end());  // 同名去重（两表合并兜底）
     std::vector<const char*> cstrs;
     cstrs.reserve(items.size());
     for (auto& s : items) cstrs.push_back(s.c_str());
 
     int selected = -1;
     if (ImGui::Combo("Add Component", &selected, cstrs.data(), static_cast<int>(cstrs.size()))) {
-        if (selected == 0) go->addComponent<NovaEngine::Camera>();
-        else if (selected == 1) go->addComponent<NovaEngine::DirectionalLight>();
-        else if (selected == 2) go->addComponent<NovaEngine::MeshRenderer>();
-        else {
-            // 脚本组件共用 Behaviour 的 typeId（裁定 #4），运行期按 dynamic_cast 区分
-            auto comp = NovaEngine::ScriptRegistry::create(items[selected], go);
+        const std::string& name = items[selected];
+        // 按名字分发：先查内置组件注册表，命中则用注册表 typeId 挂载（onAwake 即时调用）；
+        // 否则走脚本注册表（脚本组件共用 Behaviour 的 typeId，裁定 #4，运行期按 dynamic_cast 区分）。
+        auto builtin = NovaEngine::ComponentRegistry::create(name, go);
+        if (builtin) {
+            go->attachComponent(std::move(builtin),
+                                NovaEngine::ComponentRegistry::typeIdForName(name), true);
+        } else {
+            auto comp = NovaEngine::ScriptRegistry::create(name, go);
             if (comp)
                 go->attachComponent(std::move(comp),
                                     NovaEngine::Component::componentTypeId<NovaEngine::Behaviour>());

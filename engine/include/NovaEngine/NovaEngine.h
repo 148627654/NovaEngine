@@ -23,6 +23,7 @@
 
 #include <NovaEngine/Scene/GameObject.h>
 #include <NovaEngine/Scene/Component.h>
+#include <NovaEngine/Scene/ComponentRegistry.h>
 #include <NovaEngine/Scene/Transform.h>
 #include <NovaEngine/Scene/Scene.h>
 #include <NovaEngine/Scene/SceneRenderer.h>

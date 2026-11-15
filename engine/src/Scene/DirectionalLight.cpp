@@ -1,4 +1,5 @@
 #include <NovaEngine/Scene/DirectionalLight.h>
+#include <NovaEngine/Scene/ComponentRegistry.h>
 #include <nlohmann/json.hpp>
 
 namespace NovaEngine {
@@ -41,3 +42,6 @@ void DirectionalLight::onDeserialize(const nlohmann::json& in) {
 }
 
 }  // namespace NovaEngine
+
+// 组件静态注册（V0.3 波 0；注册名经 ComponentRegistry 裁剪为 "DirectionalLight"）
+NE_REGISTER_COMPONENT(NovaEngine::DirectionalLight)

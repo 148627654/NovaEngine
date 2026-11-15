@@ -1441,3 +1441,112 @@ add_subdirectory(editor)
 - C:/Users/guoyu/Desktop/NovaEngine/engine/include/NovaEngine/Scene/Scene.h
 - C:/Users/guoyu/Desktop/NovaEngine/engine/include/NovaEngine/Serialization/SceneSerializer.h
 - C:/Users/guoyu/Desktop/NovaEngine/editor/src/SceneViewPanel.cpp
+
+---
+
+# V0.3 增补（2026-11-15 冻结，11 项功能 + 4 波实施计划）
+
+## 12. 新第三方依赖（V0.3-1/2）
+
+### 12.1 Jolt Physics v5.7.0
+- 仓库根**无 CMakeLists.txt**（v5 起 Samples 移出）→ 不能 MakeAvailable，用 glad 同款模式：`FetchContent_Populate` + `add_subdirectory(${jolt_SOURCE_DIR}/Build)`；target 名 `Jolt`（alias `Jolt::Jolt`）。
+- **必须覆盖的选项**（违反项目规则/引发崩溃）：`USE_STATIC_MSVC_RUNTIME_LIBRARY OFF`（默认 /MT 违反全项目 /MD 铁律，漏设 LNK2038）、`INTERPROCEDURAL_OPTIMIZATION OFF`、`FLOATING_POINT_EXCEPTIONS_ENABLED OFF`（Debug FP 异常中断）、`ENABLE_ALL_WARNINGS OFF`、`ENABLE_INSTALL OFF`、`ENABLE_OBJECT_STREAM OFF`、`JPH_USE_DX12/VK/MTL OFF`；`DEBUG_RENDERER_IN_DEBUG_AND_RELEASE ON`（碰撞体线框提取）。
+- 公共头隔离：`engine/include/NovaEngine/Physics/*.h` 一律不 include Jolt 头（pimpl Impl 进 .cpp）。
+
+### 12.2 miniaudio 0.11.26
+- 有正式 tag（pin 0.11.26）；单头文件无 CMakeLists → stb 同款：Populate + `add_library(miniaudio INTERFACE)` + include dirs。
+- `#define MINIAUDIO_IMPLEMENTATION` 唯一定义于 `engine/src/Audio/AudioEngine.cpp`（stb_image 纪律）；wav/mp3/flac/ogg 解码内置；设备线程为引擎唯一合法非主线程。
+
+### 12.3 Dependencies.cmake 增补
+```cmake
+FetchContent_Declare(jolt GIT_REPOSITORY https://github.com/jrouwe/JoltPhysics.git GIT_TAG v5.7.0 GIT_SHALLOW TRUE)
+FetchContent_GetProperties(jolt)
+if(NOT jolt_POPULATED) FetchContent_Populate(jolt) endif()
+set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "" FORCE)
+set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
+set(FLOATING_POINT_EXCEPTIONS_ENABLED OFF CACHE BOOL "" FORCE)
+set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
+set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+set(ENABLE_OBJECT_STREAM OFF CACHE BOOL "" FORCE)
+set(JPH_USE_DX12 OFF CACHE BOOL "" FORCE)
+set(JPH_USE_VK OFF CACHE BOOL "" FORCE)
+set(JPH_USE_MTL OFF CACHE BOOL "" FORCE)
+add_subdirectory(${jolt_SOURCE_DIR}/Build ${jolt_BINARY_DIR})
+
+FetchContent_Declare(miniaudio GIT_REPOSITORY https://github.com/mackron/miniaudio.git GIT_TAG 0.11.26 GIT_SHALLOW TRUE)
+FetchContent_GetProperties(miniaudio)
+if(NOT miniaudio_POPULATED) FetchContent_Populate(miniaudio) endif()
+add_library(miniaudio INTERFACE)
+target_include_directories(miniaudio INTERFACE ${miniaudio_SOURCE_DIR})
+```
+`engine/CMakeLists.txt`：`target_link_libraries(NovaEngine PUBLIC ... Jolt miniaudio)`。
+
+## 13. 模块增量与组件注册表（波 0 改造）
+
+新模块：Core/Events.h、Scripting/Coroutine.h、Physics/（PhysicsTypes/PhysicsWorld）、Audio/（AudioEngine/AudioClip）、UI/（UIRenderer/FontAtlas）、Render/PostProcess.h、Assets/MaterialAsset.h、Scene/ComponentRegistry.h、Scene/SceneManager.h、Scene/（Rigidbody/Collider×4/AudioListener/AudioSource/Canvas/Image/Text/Button/PrefabInstance）、Serialization/PrefabSerializer.h。全部无环；UI 模块零 ImGui 依赖。
+
+**ComponentRegistry**（波 0 第 1 天，一次解决四波组件注册冲突）：
+```cpp
+class ComponentRegistry {
+public:
+    using Factory = std::function<std::unique_ptr<Component>(GameObject*)>;
+    static void registerBuiltin(const std::string& typeName, Factory factory);  // 幂等
+    static std::unique_ptr<Component> create(const std::string& typeName, GameObject* owner);
+    static bool exists(const std::string& typeName);
+    static std::vector<std::string> builtinNames();   // Inspector Add Component 下拉
+};
+#define NE_REGISTER_COMPONENT(ClassName) /* 逗号表达式 registerBuiltin(#ClassName, factory) */
+```
+SceneSerializer 组件分发改查 ComponentRegistry（脚本仍走 ScriptRegistry）；Transform/MeshRenderer/Camera/DirectionalLight 迁移注册。
+
+## 14. 逐项功能设计（详见各波次任务书，此处为冻结契约摘要）
+
+- **14.1 物理（Jolt，波 2）**：PhysicsWorld 为 **Scene 级服务**（Scene 持 unique_ptr，前向声明）；固定步进 60Hz 累加器最多 3 步/帧，`Scene::update` 第一步（flush 后、广播前）；Rigidbody{mass,useGravity,isKinematic,damping×2,addForce/addImpulse/velocity}；Collider 基类{isTrigger,center} + Box/Sphere/Capsule/MeshCollider；仅 Collider=static body；触发器回调=事件系统 TriggerEvent；动态刚体直改 Transform 会被物理覆盖（文档化）；Play 快照经 deserialize 天然还原；Renderer::drawLines + debug_line shader + 「Show Colliders」开关。
+- **14.2 音频（miniaudio，波 2）**：AudioEngine 引擎级单例（编辑器启动即 init，Play 只 stopAll）；AudioClip 全量解码 PCM f32（AssetStream/pak 兼容）；AudioListener 挂主相机；AudioSource{clipPath,volume,loop,spatialBlend,minDistance,maxDistance,playOnAwake} 位置每帧跟随。
+- **14.3 运行时 UI（波 2）**：Canvas{uiScale} 根组件；Image{sprite,color,slice9,anchor,offset,size}；Text{text,fontSize,color,fontPath,anchor,offset}（stb_truetype 按需烘焙，默认 msyh.ttc）；Button（含 Image 字段+onClick/hovered/pressedThisFrame）；UIRenderer 单动态 VBO 批处理（每 Canvas 1 draw call）+ processInput（letterbox 坐标换算）；渲染顺序：HDR→post→UI→显示；Edit 预览与 Play 同路径，无 Canvas 零开销。
+- **14.4 PBR（波 1）**：**blinn_phong.frag 整体重写**（不新建 shader——drawOutline/透明/网格共用路径）；Cook-Torrance GGX + Fresnel-Schlick；Material 扩展 normalMap/metallicMap/roughnessMap/emissionMap(+paths)、emissionColor/emissionIntensity、materialAsset 双轨（前向声明）；texture unit：0 albedo/1 shadow/2 normal/3 metallic/4 roughness/5 emission；uGamma 开关（无后处理=1/2.2，HDR 模式=0，grid/skybox 同步）；法线贴图强制 meta 线性加载；旧 JSON 数值字段原样保留。
+- **14.5 材质库（波 1）**：.novamat JSON（与场景 material 段同构）；MaterialAsset{load/save/material/path}；AssetDatabase::getMaterialAsset/reloadMaterialAsset；MeshRenderer 双轨（materialAssetPath 非空=整块引用）；AssetBrowser 创建/双击编辑模态；Inspector 拖放赋值+Detach。
+- **14.6 协程（波 2）**：/std:c++20 即启用（无 /await，CMake 零改动）；最小 Coroutine 任务类型（promise resumeMode：NextFrame/AfterSeconds/EndOfFrame/AfterCoroutine/Condition）；Behaviour::startCoroutine/stopAllCoroutines（std::list 保地址稳定）；帧内顺序见 §15；done 协程帧末统一 destroy。
+- **14.7 Prefab（波 4）**：.novaprefab 树形 JSON{root{...children[]}}；PrefabSerializer{serializeSubtree/instantiateSubtree(outInstanceToSource)/instantiateSubtreeKeepingIds/loadAsset/saveAsset}；PrefabInstance 组件{prefabPath,instanceToSource}（场景内实例照常全量写字段）；override=动态比对源值加粗；Revert=字段回源；Apply=逐字段合并+嵌套烘焙+刷新全部实例；UndoRedoManager 加文件恢复通道 pushSnapshotWithFiles/undoFull/redoFull（旧方法保留）。
+- **14.8 事件（波 2）**：Events{subscribe/publish(同步)/post(延迟)/unsubscribe/flushDeferred}；type_index key；publish 拷贝快照防重入；flush swap 模式；Behaviour::subscribeEvent 析构自动清理。
+- **14.9 场景管理（波 3）**：SceneManager{init/registerScene/buildList/loadScene(入队帧末)/flushPendingLoad/activeScene/setActiveScene/dontDestroyOnLoad}；Build Settings 列表=assets/build.novabuild JSON；LoadScene=DDOL 子树 serializeSubtree(保留 ID)→原地 deserialize→挂回→stopAll→start→post 事件；exitPlayMode 快照恢复照常；GameObject 加 dontDestroyOnLoad 标志（序列化字段）；BuildSettingsPanel 第 8 面板；Packager 读清单收全部场景。
+- **14.10 后处理（波 3）**：PostProcess{init/resize/hdrSupported/apply}；PostProcessSettings{enabled,bloomThreshold,bloomIntensity,bloomLevels,exposure} 进 Scene 环境字段 + EnvironmentPanel 折叠区；Framebuffer::create 加 hdrColor 参数（RGBA16F + resolve）；SceneRenderer::renderSceneToOutput（HDR FBO→resolve→brightpass→blur ping-pong×3→combine(ACES+gamma)→输出 LDR→UI）；pp.enabled=false 时 RGBA8 直通（A/B 干净对比）；8bit 降级不崩溃；shader：post.vert + post_brightpass/blur/combine.frag。
+- **Play 帧内顺序（§15 定案）**：pollEvents→Scene::update{flush→物理step→onUpdate 广播→协程 advance(false)→Events flush→协程 advance(true)}→SceneManager::flushPendingLoad→AudioEngine::setListener→renderSceneToOutput→显示。Edit 态仅 flushDestroyQueue。
+- **Schema（§16）**：version 3→4 一次 bump（写 4 读 1/2/3/4）；material 段新字段、12 个新组件类型名（ComponentRegistry 分发）、dontDestroyOnLoad、environment.postProcess、PrefabInstance 字段；旧文件默认值兜底。.novamat/.novaprefab/.novabuild 为新资产类型（各自 version:1）。
+
+## 17. 冻结头变更总清单（随波冻结）
+
+1. Render/Material.h：PBR 贴图槽+emission+materialAsset 双轨（波 1）
+2. Render/Framebuffer.h：create +hdrColor（波 3）
+3. Render/Renderer.h：drawLines（波 2）
+4. Scene/Scene.h：m_physics（unique_ptr 前向声明）+postProcess 字段+physics()（波 2/3）
+5. Scene/GameObject.h：attachComponent 两参重载+dontDestroyOnLoad（波 0/3）
+6. Scripting/Behaviour.h：startCoroutine/stopAllCoroutines/advanceCoroutines+subscribeEvent+私有成员（波 2）
+7. Scene/SceneRenderer.h：renderSceneToOutput+OutlineItem（波 3）
+8. editor UndoRedoManager.h：pushSnapshotWithFiles/undoFull/redoFull（波 4）
+9. Assets/AssetDatabase.h：+getAudioClip/getMaterialAsset/reloadMaterialAsset（波 1/2）
+10. 新增头：Events/Coroutine/Physics×2/Audio×2/UI×3/PostProcess/MaterialAsset/SceneManager/PrefabSerializer/PrefabInstance/ComponentRegistry + 组件头×12；NovaEngine.h 伞头同步
+
+**GLSL**：改 blinn_phong.frag（重写）、grid/skybox（+uGamma）；增 ui.vert/.frag、post×4、debug_line×2。**CMake**：Dependencies.cmake +jolt/miniaudio；engine 链接 Jolt miniaudio；协程零改动。
+
+## 18. 分波实施计划
+
+| 波 | 内容 | 线 |
+|---|---|---|
+| 波 0（1 天） | ComponentRegistry+分发迁移+attachComponent 重载+SerializationInternals 抽取；验收=全量回归 | A 引擎 + C Inspector 下拉 |
+| 波 1（~1 周） | PBR（M）→ 材质库（M，严格先后） | A=frag 重写+uniform；B=序列化双轨；C=Inspector+AssetBrowser |
+| 波 2（~1.5 周） | 物理（L）/UI（L）/音频+协程+事件（M×3），三线并行；冲突化解=架构师第 1 天布 Scene.cpp/Behaviour.h 骨架 | A=物理；B=UI；C=音频→协程→事件 |
+| 波 3（~1 周） | 后处理（L）+场景管理（M） | A=PostProcess+renderSceneToOutput；C=SceneManager+BuildSettings；B=DDOL 标志 |
+| 波 4（~1 周） | Prefab（L）+全量回归+schema v4 终验+Release | B=PrefabSerializer；C=PrefabManager+override UI+Undo 文件通道 |
+
+依赖序：PBR 先于后处理；材质库紧随 PBR；触发器用事件系统（波 2 内先事件后物理联调）；Prefab 依赖波 0 注册表。
+
+## 19. 风险
+
+1. Jolt 无根 CMakeLists：Populate+add_subdirectory(Build)；USE_STATIC_MSVC_RUNTIME_LIBRARY OFF 漏设=LNK2038；首次构建 +2~3 分钟
+2. 协程：/std:c++20 足够；final_suspend=suspend_always+手动 destroy；WaitForCoroutine 依赖 list 地址稳定（不可换 vector）
+3. 后处理浮点 FBO：老集显降级 8bit 是验收项；MSAA RGBA16F blit 需 GL4.5（满足）
+4. LoadScene 一律延迟到 flushPendingLoad（防广播中迭代器失效）
+5. UI 零 ImGui 依赖：评审 grep engine/include/NovaEngine/UI 校验
+6. 动态刚体直改 Transform 被覆盖（文档化）；miniaudio 单实现点
+7. 波间热点文件（Scene.cpp/EditorApplication.cpp/SceneViewPanel.cpp/InspectorPanel.cpp）按「骨架先行」纪律执行

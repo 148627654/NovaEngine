@@ -42,7 +42,7 @@ public:
         attachComponent(std::move(comp), typeId);
         return ptr;
     }
-    // 反序列化用：由调用方给出 typeId，callAwake=false 时延迟 onAwake 到字段就绪后
+    // 反序列化用：由调用方给出 typeId（ComponentRegistry::typeIdForName），callAwake=false 时延迟 onAwake 到字段就绪后
     void attachComponent(std::unique_ptr<Component> comp, uint32_t typeId, bool callAwake = true);
 
     template<typename T>

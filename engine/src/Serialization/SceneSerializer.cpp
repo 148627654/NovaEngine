@@ -1,5 +1,6 @@
 #include <NovaEngine/Serialization/SceneSerializer.h>
 #include <NovaEngine/Assets/AssetStream.h>
+#include <NovaEngine/Scene/ComponentRegistry.h>
 #include <NovaEngine/Scene/Scene.h>
 #include <NovaEngine/Scene/GameObject.h>
 #include <NovaEngine/Scene/Transform.h>
@@ -81,20 +82,6 @@ std::string componentTypeName(const Component* comp) {
     if (!ScriptRegistry::exists(name))
         Logger::warn("序列化：脚本组件 \"{}\" 未在 ScriptRegistry 注册，反序列化时将被跳过", name);
     return name;
-}
-
-uint32_t componentTypeIdForName(const std::string& name) {
-    if (name == "Transform")
-        return Component::componentTypeId<Transform>();
-    if (name == "MeshRenderer")
-        return Component::componentTypeId<MeshRenderer>();
-    if (name == "Camera")
-        return Component::componentTypeId<Camera>();
-    if (name == "DirectionalLight")
-        return Component::componentTypeId<DirectionalLight>();
-    // 脚本组件：工厂返回基类 Behaviour 指针，无法按具体类型分配 typeId，
-    // 统一使用 Behaviour 的 typeId（getComponents 走 dynamic_cast，不受影响）
-    return Component::componentTypeId<Behaviour>();
 }
 
 // 字段类型不符（如 "id" 是字符串）时回退默认值，保证畸形文件不崩溃
@@ -252,7 +239,9 @@ void SceneSerializer::deserialize(Scene& target, const std::string& json) {
 
             const std::string typeName = safeGet(cj, "type", std::string());
             Component* raw = comp.get();
-            rec.go->attachComponent(std::move(comp), componentTypeIdForName(typeName), /*callAwake=*/false);
+            // typeId 查 ComponentRegistry；脚本组件不在注册表 → 0（getComponents 走 dynamic_cast，不受影响）
+            rec.go->attachComponent(std::move(comp), ComponentRegistry::typeIdForName(typeName),
+                                    /*callAwake=*/false);
 
             // Transform 公共字段（schema 中由序列化器写，这里也由序列化器读）
             if (auto* t = dynamic_cast<Transform*>(raw)) {
@@ -427,21 +416,15 @@ void SceneSerializer::remapGameObjectIds(nlohmann::json& objectJson) {
 }
 
 std::unique_ptr<Component> SceneSerializer::createComponentFromJson(GameObject* owner, const nlohmann::json& j) {
-    // 内置组件按 "type" 名字分发：Transform/MeshRenderer/Camera/DirectionalLight；其余走 ScriptRegistry
+    // 组件分发唯一入口：内置组件查 ComponentRegistry（各组件 .cpp 用 NE_REGISTER_COMPONENT 自注册），
+    // 未知再走 ScriptRegistry；两者皆未知 warn 并跳过（不崩溃）
     if (!j.is_object()) {
         Logger::warn("反序列化：组件节点不是 JSON 对象，已跳过");
         return nullptr;
     }
     const std::string type = safeGet(j, "type", std::string());
-    if (type == "Transform")
-        return std::make_unique<Transform>(owner);
-    if (type == "MeshRenderer")
-        return std::make_unique<MeshRenderer>(owner);
-    if (type == "Camera")
-        return std::make_unique<Camera>(owner);
-    if (type == "DirectionalLight")
-        return std::make_unique<DirectionalLight>(owner);
-
+    if (auto builtin = ComponentRegistry::create(type, owner))
+        return builtin;
     if (auto script = ScriptRegistry::create(type, owner))
         return script;
     Logger::warn("反序列化：未知组件类型 \"{}\"，已跳过该组件（不崩溃）", type);
