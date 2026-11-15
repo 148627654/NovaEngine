@@ -1,5 +1,6 @@
 #include <NovaEngine/Serialization/SceneSerializer.h>
 #include <NovaEngine/Assets/AssetStream.h>
+#include <NovaEngine/Physics/PhysicsWorld.h>   // beginTeardown（批量销毁旗标，deserialize 清空前调用）
 #include <NovaEngine/Scene/ComponentRegistry.h>
 #include <NovaEngine/Scene/Scene.h>
 #include <NovaEngine/Scene/GameObject.h>
@@ -103,6 +104,11 @@ void SceneSerializer::deserialize(Scene& target, const std::string& json) {
 
     // 1. 清空 target（保留 Scene 对象身份）：全部对象入销毁队列并立即执行
     {
+        // 批量销毁旗标（2026-11-15 物理验收修复）：exitPlayMode 的原地重建会析构全部
+        // 旧 GameObject——先置位，防组件析构期 unregister 重建/重挂（对已析构 GO 的 UAF）；
+        // 下次 Play 的 syncFromTransforms 复位并全量重建（Edit 态本不步进物理，无功能损失）
+        if (target.physics())
+            target.physics()->beginTeardown();
         std::vector<uint64_t> doomed;
         target.forEachObject([&doomed](GameObject* go) { doomed.push_back(go->id()); });
         for (uint64_t id : doomed)

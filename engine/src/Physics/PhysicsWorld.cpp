@@ -264,6 +264,7 @@ struct PhysicsWorld::Impl {
     JoltInitGuard joltInitGuard;
     Scene& scene;
     bool synced = false;      // syncFromTransforms 后为 true（Play 态）；step 以此为门
+    bool tearingDown = false; // 批量销毁期：注册/注销入口直返（防析构期重建 UAF），syncFromTransforms 复位
     float accumulator = 0.0f;
     glm::vec3 gravity{0.0f, -9.81f, 0.0f};
 
@@ -663,14 +664,16 @@ void PhysicsWorld::Impl::rehostOrStatic(Collider* c) {
 }
 
 void PhysicsWorld::Impl::registerRigidbody(Rigidbody* rb) {
-    if (rb == nullptr || bodyByRb.contains(rb))
-        return;
+    if (rb == nullptr || bodyByRb.contains(rb) || tearingDown)
+        return;   // 批量销毁期不重建（syncFromTransforms 会全量重建）
     // 子树内因「无宿主刚体」而创建的 static body 拆除（collider 随本 body 重建挂接）
     destroyStaticBodiesInSubtree(rb->gameObject());
     createBodyFor(rb);
 }
 
 void PhysicsWorld::Impl::unregisterRigidbody(Rigidbody* rb) {
+    if (tearingDown)
+        return;   // 批量销毁期：残留 body 由 teardownAll 统一销毁
     auto it = bodyByRb.find(rb);
     if (it == bodyByRb.end())
         return;
@@ -689,8 +692,8 @@ void PhysicsWorld::Impl::unregisterRigidbody(Rigidbody* rb) {
 }
 
 void PhysicsWorld::Impl::registerCollider(Collider* c) {
-    if (c == nullptr || registeredColliders.contains(c))
-        return;
+    if (c == nullptr || registeredColliders.contains(c) || tearingDown)
+        return;   // 批量销毁期不重挂（syncFromTransforms 会全量重建）
     registeredColliders.insert(c);
     rehostOrStatic(c);
 }
@@ -698,6 +701,8 @@ void PhysicsWorld::Impl::registerCollider(Collider* c) {
 void PhysicsWorld::Impl::unregisterCollider(Collider* c) {
     if (c == nullptr)
         return;
+    if (tearingDown)
+        return;   // 批量销毁期：残留 body 由 teardownAll 统一销毁
     registeredColliders.erase(c);
     auto it = hostByCollider.find(c);
     if (it == hostByCollider.end())
@@ -838,6 +843,8 @@ PhysicsWorld::PhysicsWorld(Scene& scene) : m_impl(std::make_unique<Impl>(scene))
 
 PhysicsWorld::~PhysicsWorld() = default;
 
+void PhysicsWorld::beginTeardown() { m_impl->tearingDown = true; }
+
 void PhysicsWorld::step(float dt) {
     Impl& impl = *m_impl;
     if (!impl.synced)
@@ -879,6 +886,7 @@ void PhysicsWorld::syncFromTransforms() {
     Impl& impl = *m_impl;
     impl.teardownAll();
     impl.accumulator = 0.0f;
+    impl.tearingDown = false;   // 批量销毁期结束：全量重建恢复注册
     // 1) 全部 Rigidbody body（dynamic/kinematic；内部收集子树 collider）
     for (Rigidbody* rb : impl.scene.findComponents<Rigidbody>())
         impl.createBodyFor(rb);

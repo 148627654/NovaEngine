@@ -248,3 +248,9 @@ Wave 2 审查无 P0；两条 P1 已修复（见下段「已修复项」）。以
 
 - **验证**：Player 跑 PhysicsTest——step 日志 velY 递增、transformY 逐帧跟随、落地 y=0.50（板顶 0 + 半高 0.5）后 velY=0 进入休眠；**GPU 读回 outLdrFbo 采样 (640,566) = R103 G67 B56（橙色方块落在板上）**。另加两层长期诊断：JoltAssert 断言转发引擎日志（不回断点，无人值守可收集）、syncFromTransforms body 统计。
 - **教训**：① 波 2 物理「代码交付」仅日志冒烟——三层集成缺陷均无日志报错、必须像素/读回级验证才暴露，渲染与物理验收须「真跑真看」；② Jolt 生命周期四步（CreateBody→AddBody(激活)→RemoveBody→DestroyBody）不可省任何一步；③ 宽相位表是「构造期快照」，配置必须先于其构造。物理验收清单（ROADMAP §5.1）其余项待人工。
+
+**波 4 后修复（2026-11-15，用户报障「退出 Play 时 abort() has been called」——析构期重建 UAF）**：
+
+- **根因**：场景批量销毁（~Scene / deserialize 原地重建）时，组件析构的 unregister 路径仍执行「重建/重挂」——正在析构的 Collider 被重新注册进 hostByCollider/staticBodyByGo，随后对已释放的 GameObject 再次 rebuildStaticBody → 对悬挂 GO 的 UAF（编辑器 abort / Player 关闭挂死两种表象）。diag 文件日志实证：同一 Ground 指针被重建 3 次、第 3 次挂在 getComponents。
+- **修复**：PhysicsWorld::beginTeardown() 批量销毁旗标——~Scene 与 SceneSerializer::deserialize 清空前置位，register/unregister 四入口在旗标期直返（不再重建/重挂）；残留 body 由 ~Impl 的 teardownAll 统一销毁；syncFromTransforms 复位并全量重建（Edit 态本不步进物理，无功能损失；LoadScene 路径的 start() 亦触发复位）。
+- **验证**：Player 带物理场景优雅关闭——进程干净退出（0 残留、0 断言），teardownAll→监听清理→Jolt 成员析构→UnregisterTypes 全链路走完；退出 Play 编辑器路径待用户复验。

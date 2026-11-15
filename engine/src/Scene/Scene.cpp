@@ -23,7 +23,14 @@ Scene::Scene(const std::string& name)
     : m_name(name), m_physics(std::make_unique<PhysicsWorld>(*this)) {}
 
 // 析构定义在 .cpp：unique_ptr<PhysicsWorld> 需要 Impl 完整类型（PhysicsWorld.h 为 pimpl）
-Scene::~Scene() = default;
+Scene::~Scene() {
+    // 批量销毁旗标（2026-11-15 物理验收修复）：先于 GameObject 析构置位——
+    // 组件析构期的 unregister 不再重建/重挂（防对已析构 GO 的 UAF），残留 body 由
+    // PhysicsWorld 析构的 teardownAll 统一销毁
+    if (m_physics)
+        m_physics->beginTeardown();
+    m_rootObjects.clear();   // 显式清空：GameObject 析构先于 m_physics（原 =default 亦此序）
+}
 
 PhysicsWorld* Scene::physics() const {
     return m_physics.get();

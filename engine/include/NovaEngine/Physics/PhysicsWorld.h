@@ -22,6 +22,10 @@ public:
 
     void step(float dt);                          // 固定步进累加器，每帧最多 3 步防死亡螺旋；由 Scene::update 调用
     void syncFromTransforms();                    // 进入 Play 时：全部 body 重置到当前 Transform（由 Scene::start 调用）
+    // 批量销毁旗标（2026-11-15 物理验收修复）：~Scene 与 deserialize 清空前调用——
+    // 组件析构期的 unregister 不再「重建/重挂」（避免对已析构 GO 的 UAF），
+    // 残留 body 由 teardownAll 统一销毁；syncFromTransforms 复位（下一次 Play 全量重建）。
+    void beginTeardown();
     bool raycast(const glm::vec3& origin, const glm::vec3& direction,
                  float maxDistance, RaycastHit& outHit);
     void setGravity(const glm::vec3& g);
