@@ -1,0 +1,57 @@
+{
+    "name": "SmallCube",
+    "root": {
+        "active": true,
+        "children": [],
+        "components": [
+            {
+                "position": [
+                    1.5,
+                    0.0,
+                    0.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    0.4000000059604645,
+                    0.4000000059604645,
+                    0.4000000059604645
+                ],
+                "type": "Transform"
+            },
+            {
+                "material": {
+                    "albedo": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "albedoMap": "",
+                    "alpha": 1.0,
+                    "blendMode": "Opaque",
+                    "emissionColor": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "emissionIntensity": 1.0,
+                    "emissionMap": "",
+                    "metallic": 0.10000000149011612,
+                    "metallicMap": "",
+                    "normalMap": "",
+                    "roughness": 0.4000000059604645,
+                    "roughnessMap": ""
+                },
+                "mesh": "assets/models/cube.obj",
+                "type": "MeshRenderer"
+            }
+        ],
+        "id": 9988776655443322110,
+        "name": "SmallCube"
+    },
+    "version": 1
+}

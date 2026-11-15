@@ -172,8 +172,10 @@ void AssetBrowserPanel::onGui(EditorContext& ctx, EditorCamera&) {
                 }
             }
 
-            // 模型/贴图文件为拖拽源（payload = 绝对路径 UTF-8 字符串，含结尾 \0）
-            if (!e.isDir && (DragDrop::isModelFile(e.rel) || DragDrop::isTextureFile(e.rel))) {
+            // 模型/贴图/预制体文件为拖拽源（payload = 绝对路径 UTF-8 字符串，含结尾 \0）
+            // V0.3-9 波 4 修复：.novaprefab 漏在此条件外导致拖拽源不启动（接收端早已支持）
+            if (!e.isDir && (DragDrop::isModelFile(e.rel) || DragDrop::isTextureFile(e.rel) ||
+                             DragDrop::isPrefabFile(e.rel))) {
                 if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
                     const std::string abs = (root / e.rel).string();
                     ImGui::SetDragDropPayload(DragDrop::kAssetPayload, abs.c_str(), abs.size() + 1);

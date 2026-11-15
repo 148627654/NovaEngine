@@ -231,3 +231,9 @@ Wave 2 审查无 P0；两条 P1 已修复（见下段「已修复项」）。以
 - **根因**：波 3 重线后 Edit 路径改走 renderSceneToOutput → 内部 collectCamera 优先场景 Main Camera（忽略编辑器相机）；demo 的 Main Camera 为恒等旋转（forward=+Z，背对原点）→ Scene View 只有天空，网格/cube 全部不可见。此前冒烟只验日志未验画面，故未发现（教训：渲染回归必须像素级验证）。
 - **修复**：renderSceneToOutput 增 `bool useSceneCamera = true` 尾参——Edit 传 false 强制用编辑器相机（场景相机不得劫持 Scene View 取景）；Play/Player 默认 true 不变。demo.nova.json Main Camera 旋转改 180° 偏航（0,1,0,0）朝向原点（修复前 Play 同样只有天空）。
 - **验证**：编辑器窗口截图像素采样——修复前场景区 100% 天空蓝零亮像素；修复后地面亮灰+天空+视口中心橙色描边 cube 齐全。
+
+**波 4 后修复（2026-11-15，用户报障「.novaprefab 拖不进场景」）**：
+
+- **根因**：AssetBrowserPanel 拖拽源条件只含模型/贴图文件，`.novaprefab` 漏在条件外 → 按住 [PF] 条目拖拽根本不启动。接收端（SceneViewPanel 的 kAssetPayload → importPrefabToScene）与拖放链路波 4 已全部就位，仅缺源头一处注册。
+- **修复**：拖拽源条件补 `DragDrop::isPrefabFile(e.rel)`（AssetBrowserPanel.cpp）。教训：GUI 验收清单「拖放实例化」正是为捕获这类交互缺口而设——自动冒烟验不到拖拽源是否注册。
+- **验证**：Debug 重编译通过；拖放交互待用户 GUI 复验。
