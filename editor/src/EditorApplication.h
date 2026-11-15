@@ -15,6 +15,7 @@ class Scene;
 
 namespace NovaEditor {
 
+class BuildSettingsPanel;
 class StatsPanel;
 
 // 应用外壳（§2.9 + §3.1）：主循环编排 / docking 布局 / Play 状态切换 / 外部拖放分发 / 文件菜单 /
@@ -62,6 +63,7 @@ private:
     EditorCamera m_camera;
     std::vector<std::unique_ptr<Panel>> m_panels;
     StatsPanel* m_statsPanel = nullptr;       // F8 开关；View 菜单经 m_panels 循环自动包含
+    BuildSettingsPanel* m_buildSettingsPanel = nullptr;  // File → Build Settings… 打开（V0.3-12 波 3）
     GizmoController m_gizmo;
     std::vector<std::filesystem::path> m_pendingDrops;  // GLFW 拖放回调写入，update 末尾消费
     bool m_firstFrame = true;

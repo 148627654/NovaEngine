@@ -171,3 +171,31 @@ Wave 2 审查无 P0；两条 P1 已修复（见下段「已修复项」）。以
 8. **Release 构建未验证**：本波仅 Debug 全量构建+冒烟；Release（含 Jolt 首编）随波 4 全量回归执行。
 
 **验证记录**：74 第一方源文件强制重编译零错误零第一方警告；NovaEditor 冒烟（demo v3 打开、守卫 15 条验证通过、真实拖放 sphere.obj 导入成功）；NovaPlayer 冒烟（场景加载 + SpinningCube 旋转正常）；音频本机有设备 init 成功（无设备降级路径代码化，未实测）。日志归档 build/smoke/。
+
+## V0.3 波 3 审查（2026-11-15，后处理/场景管理/DDOL/PrefabSerializer 三线合并）
+
+**总评：需修 → 已修复闭环，可合**。12 项核对清单全部通过（renderSceneToOutput 管线顺序/setGammaMode 粘性/SerializationInternals 零回归抽取/双 FBO 重线/交叉侵入零越界）。无 P0。
+
+**评审发现（Reviewer）——全部已修复**：
+
+- **P1-1 天空 uGamma 未同步 HDR**（SkyboxRenderer.cpp:64 硬编码 1/2.2）：HDR 模式双重 gamma 发白。修复：Renderer 增 linearOutput() getter，天空绘制时运行时读取（skybox.frag 直通分支原有）。
+- **P1-2 apply 降级黑屏**（PostProcess.cpp:211-216）：enabled=true 但 shader 加载失败 → 直接 return 黑屏；16F 探测失败 → 完整链在坏 FBO 上未定义输出。修复：早退统一判定 `!enabled || s_disabled || !s_initialized || !hdrSupported()` → 纯 blit 直通（永不黑屏契约成立）。
+- **P1-3 DDOL 标志树格式丢失**（PrefabSerializer.cpp）：SceneManager 用树格式迁移 DDOL，dontDestroyOnLoad 键不落盘 → 只存活一次切换。修复：writePrefabNode 追加仅 true 写的键、instantiateNode safeGet 缺省 false 读回（与平铺格式同键名）。
+- **P2-1** BuildSettingsPanel 每帧 rescan 覆盖手动排序 → 合并式 rescan（首开+显式按钮触发，既有顺序/勾选保留）。
+- **P2-2** bloomLevels UI 上限 6 vs 引擎 clamp 1-3 → UI 改 3。
+- **P2-3** blitPassthrough 恢复 READ FBO 为 0 而非入口值 → 保存/恢复 prevReadFbo。
+
+**DevOps 修复**：BuildSettingsPanel.cpp C4100 未引用参数（参数名注释化，一行）。
+
+**波 3 遗留 backlog**（已文档化，不阻塞）：
+
+1. **双 FBO resize/格式切换分支未经运行期验证**：代码路径已实现（尺寸或 hdr 模式变化全删重建），5s 冒烟未触发窗口 resize——**最终验收手动拉伸窗口 + 切换 pp.enabled 复核**。
+2. **LoadScene 端到端未验证**：demo 无脚本触发切换；init/shutdown 冒烟无崩溃——**最终验收挂临时脚本验证 DDOL 存活 + 退出 Play 快照恢复**。
+3. **SceneManager 首次使用 assets/build.novabuild 缺失 warn**（良性，三处冒烟一致出现）。
+4. **bloom 链单方向降采样级**（stride-2）：依赖前级各向同性，高频细节略少于每级双向；视觉差异小（设计裁定，注释存档）。
+5. **PostProcess::resize 在 pp.enabled=false 时仍创建 bloom 纹理**（半分辨率 ×4 张 16F，内存可忽略）。
+6. **combine 单 uBloom 输入**：多级 bloom 经链式降采样折叠进末级（冻结 shader 契约下的设计裁定）。
+7. **Player 运行期改 pp.enabled 触发 FBO 销毁重建**：Player 无设置 UI 正常不变；编辑器由 SceneViewPanel 双 FBO 管理。
+8. **老集显 8x8 探测纹理可创建但渲染极慢**：不影响正确性（探测仅一次）。
+
+**验证记录**：四 target 全绿零第一方警告；postProcess 开启场景实跑 16F FBO 链（无降级 warn、无 shader 错误、旋转正常）；默认 demo 直通路径实跑正常；编辑器守卫 15 条通过；4 个 post shader 首编译零错误。日志归档 build/smoke/（w3-*.log、demo_post.nova.json 为临时测试场景，不进 assets）。

@@ -26,6 +26,10 @@ public:
     void setActiveSelf(bool active);
     bool activeInHierarchy() const;     // 自身 && 所有祖先 activeSelf
 
+    // DontDestroyOnLoad（V0.3-12，波 3 冻结）：LoadScene 时该根子树跨场景迁移存活
+    bool dontDestroyOnLoad() const;
+    void setDontDestroyOnLoad(bool value);
+
     // 层级
     GameObject* parent() const;
     void setParent(GameObject* newParent, bool keepWorldTransform = true);
@@ -84,6 +88,7 @@ private:
     uint64_t m_id = 0;
     std::string m_name;
     bool m_activeSelf = true;
+    bool m_dontDestroyOnLoad = false;   // V0.3-12：序列化 "dontDestroyOnLoad"（缺省 false）
     GameObject* m_parent = nullptr;
     std::vector<std::unique_ptr<GameObject>> m_children;
     std::vector<std::unique_ptr<Component>> m_components;

@@ -34,8 +34,12 @@ private:
     // Follow Selected：把主相机 Transform 设到 选中对象世界位置 + 记录偏移（朝向不变）
     void applyFollowSelected(EditorContext& ctx);
 
-    NovaEngine::Framebuffer m_fbo;
+    // V0.3-14 波 3 重线：hdrFbo 承载场景渲染（pp.enabled && hdrSupported → RGBA16F，
+    // 否则 RGBA8 直通）；outFbo 为 LDR 输出（RGBA8，管线内部绘制后处理/UI 的目标）
+    NovaEngine::Framebuffer m_hdrFbo;
+    NovaEngine::Framebuffer m_outFbo;
     bool m_fboCreated = false;
+    bool m_fboHdrMode = false;         // 上次创建时的 hdr 模式（变化 → 全删重建）
     bool m_pickArmed = false;          // 左键按下待释放判定（位移阈值 3px）
     glm::vec2 m_pickPressPos{0.0f};
     // Follow Selected 状态（V0.3-10 子集）：开关/选中变化/退出 Play 时重置偏移

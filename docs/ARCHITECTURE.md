@@ -1567,4 +1567,34 @@ SceneSerializer 组件分发改查 ComponentRegistry（脚本仍走 ScriptRegist
 **UI 模块零 ImGui 依赖**已复核（grep 仅注释命中）；NovaPlayer 直接继承 UI 模块 → 打包独立性成立。
 
 **遗留**（详见 KNOWN-ISSUES.md「波 2 遗留 backlog」）：跨 Behaviour 协程等待悬垂（设计取舍）、编辑器 UI 输入一帧滞后、Text.fontPath v1 不生效、物理近似裁定 5 项、Release 构建留待波 4 全量回归。
+
+## 21. 波 3 落地终态（2026-11-15，后处理/场景管理/DDOL/PrefabSerializer 合并验收通过）
+
+**执行结果**：四 target 全量构建零错误零第一方警告；postProcess 开启场景实跑 16F FBO 链（无降级 warn）、默认直通路径实跑通过；4 个 post shader 首编译零错误；编辑器守卫 15 条通过。Reviewer 12 项清单全过，3 P1 + 3 P2 全部修复闭环。
+
+**§14.10 增补（renderSceneToOutput 最终冻结签名，三轮裁定定稿）**：
+
+```cpp
+static uint32_t renderSceneToOutput(const Scene& scene, const RenderCamera& fallbackCamera,
+                                    Framebuffer& hdrFbo, Framebuffer& outLdrFbo,
+                                    const PostProcessSettings& pp,
+                                    const std::vector<OutlineItem>* outlines = nullptr,
+                                    const std::function<void()>& afterSceneDraw = {});   // 引用形态，空默认
+```
+
+管线内顺序：hdrFbo 绑定 → 天空 → 阴影 → grid → opaque → transparent → outlines → **afterSceneDraw**（Show Colliders 线框注入点，hdrFbo 内、resolve 前；`if (afterSceneDraw)` 判定）→ resolveMsaa → [pp.enabled && hdrSupported：PostProcess::apply 到 outLdrFbo；否则 blit 直通] → **UIRenderer::render 画进 outLdrFbo**（§14.3 迁移目标达成：原 SceneViewPanel 两处直接 UI render 已删）→ 返回 outLdrFbo 纹理。
+
+**uGamma 统一传递（§14.4 增补）**：Renderer 新增 `static setGammaMode(bool)` + `static linearOutput()` getter；s_linearOutput 粘性由两个公开入口每帧覆盖（renderScene 入口重置 false=旧路径零变化；renderSceneToOutput 按 pp.enabled && hdrSupported 设置）；**blinn_phong/grid/skybox 三处全部经 linearOutput() 驱动**（HDR 线性输出 uGamma=0 直通分支 / 旧路径 1/2.2），无硬编码旁路（评审 P1-1 修复）。
+
+**§14.10 增补（PostProcess 永不黑屏契约）**：apply 早退统一判定 `!enabled || s_disabled || !s_initialized || !hdrSupported()` → blitPassthrough 纯 blit（不依赖 shader 与 bloom FBO 完整性）；blitPassthrough 保存/恢复入口 READ FBO（评审 P1-2/P2-3 修复）。bloom 链 = brightpass（阈值软膝+2x2 降采样）→ L0 9-tap 高斯 H/V ping-pong → stride-2 降采样级 ×2 → combine（scene+bloom×intensity → Narkowicz ACES → exposure → gamma）；bloomLevels 1..3 选链末级（单 uBloom 契约下多级经链式降采样折叠，设计裁定）。
+
+**§14.9 增补（已批准补全）**：SceneManager::saveBuildSettings（BuildSettingsPanel 持久化）；编辑器侧 SceneManager::init/shutdown（setProjectRoot 后 / shutdown 序）。BuildSettingsPanel 合并式 rescan（首开+显式按钮触发；既有顺序/勾选保留、新文件按名追加）——手动排序持久（评审 P2-1 修复）。**合波纪律**：编辑器新增源文件必须同步改 editor/CMakeLists.txt 显式源清单（BuildSettingsPanel.cpp LNK2019 教训）。
+
+**§14.7 增补（树格式 DDOL 键）**：PrefabSerializer 树形 JSON 节点追加「仅 true 写」的 `"dontDestroyOnLoad"` 键（与场景平铺格式同键名同语义）；instantiateNode 以 safeGet 缺省 false 读回——DDOL 经树格式迁移多次 LoadScene 持续存活（评审 P1-3 修复）。
+
+**§16 增补**：environment.postProcess{enabled,bloomThreshold,bloomIntensity,bloomLevels,exposure} 与对象节点 "dontDestroyOnLoad" 已落地序列化（读写全默认兜底，旧 JSON 往返无损，version 4 不变）。
+
+**最终验收待补两项**（不阻塞合波，转入 ROADMAP §5.1）：① 双 FBO resize/格式切换分支运行期验证（手动拉伸窗口+切换 pp.enabled）；② LoadScene 端到端脚本触发（DDOL 存活 + 退出 Play 快照恢复）。
+
+**遗留**（详见 KNOWN-ISSUES.md「波 3 遗留 backlog」）：build.novabuild 缺失良性 warn、bloom 单方向降采样近似、resize 在 disabled 时仍建纹理、Release 构建留待波 4。
 7. 波间热点文件（Scene.cpp/EditorApplication.cpp/SceneViewPanel.cpp/InspectorPanel.cpp）按「骨架先行」纪律执行

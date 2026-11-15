@@ -733,4 +733,44 @@ NovaPlayer 内快捷键：**Esc** 退出（其余无）。
 
 ---
 
+## 13. V0.3 波 3 新增：后处理（Bloom+ACES）/ 场景管理 / Prefab 引擎侧前置（2026-11-15）
+
+### 13.1 后处理管线（Bloom + ACES Tonemapping）
+
+- **开关与参数**：Environment 面板 →「Post Processing」折叠区：enabled / bloomThreshold(1.0) / bloomIntensity(0.5) / bloomLevels(1-3) / exposure(1.0)，随场景序列化（environment.postProcess 段）
+- **管线**：`SceneRenderer::renderSceneToOutput`（编辑器与 Player 共用）——HDR 场景 FBO(MSAA4x RGBA16F) → 3D → 描边 → 注入点（Show Colliders 线框）→ resolve → [Bloom：brightpass 阈值提取 → 9-tap 高斯 ping-pong ×3 级 → 合成] → Narkowicz ACES + gamma → 输出 LDR FBO → **游戏 UI 画在 LDR FBO 内**（不受 Bloom 影响，Unity 语义）→ 显示
+- **直通**：pp.enabled=false 时 hdrFbo 用 RGBA8 + blit 直通——与旧画面逐像素一致
+- **永不黑屏三级保障**：post shader 加载失败 / RGBA16F 探测失败 / 未初始化 → 一律纯 blit 直通（不依赖 shader）；编辑器 Environment 面板有 hdrSupported 降级提示
+- **HDR 正确性**：HDR 模式下场景/天空/网格全部线性输出（uGamma=0 直通分支），gamma 只在最后 combine 统一做一次（无双重校正）
+- 编辑器 Play/Edit 双路径同链；Player 同链（最终帧 blit 回默认帧缓冲）
+- **待人工验收**：手动拉伸窗口/切换 pp.enabled 复核双 FBO resize 分支；emission>1 物体 Bloom 目测；8bit 降级路径
+
+### 13.2 场景管理（SceneManager + Build Settings + DDOL）
+
+- **Build Settings**：File → Build Settings…（第 8 面板）——扫描 assets/scenes/*.nova.json，勾选 + Up/Down 排序 + Save 写 `assets/build.novabuild`（合并式扫描：保留既有勾选与顺序，新文件按名追加）
+- **脚本 API**：`SceneManager::loadScene("场景名")`（帧末执行，Play 中调用安全）；`dontDestroyOnLoad(go)`；`Events::subscribe<SceneLoaded>` 收切换事件
+- **LoadScene 帧末流程**：收集 DDOL 子树（保留原 ID）→ 原地重建场景（外部 Scene* 不失效）→ 挂回 DDOL → 停全部音频 → start → post(SceneLoaded)
+- **DDOL**：GameObject 的 Inspector「Dont Destroy On Load」勾选（Play 态禁用）；非根对象勾选时以该对象为子树根迁移（父级不迁移）；多次 LoadScene 持续存活
+- **Player**：启动读 build.novabuild 注册场景列表（无则 --scene 单场景）；`--scene` 开发模式回退 `assets/scenes/<name>.nova.json`
+- **Packager**：读 build.novabuild 收集全部场景 + 引用资产 + 清单本身进 pak
+- 查无场景/清单缺失损坏：Logger::error + 不崩溃
+- **待人工验收**：LoadScene 端到端（挂临时脚本触发切换，验证 DDOL 存活 + 退出 Play 快照恢复）
+
+### 13.3 Prefab 引擎侧前置（波 3，编辑器侧波 4）
+
+- `PrefabSerializer`：serializeSubtree（树形 JSON）/ instantiateSubtree（ID 重生成 + 实例→源映射）/ instantiateSubtreeKeepingIds（DDOL 迁移用）/ loadAsset/saveAsset（AssetStream，pak 兼容）
+- 树形格式含 dontDestroyOnLoad 键（与场景平铺格式一致）；序列化内部辅助与场景序列化共享（SerializationInternals.h）
+- 波 4 将补：PrefabInstance 组件、拖入实例化、Apply/Revert/override 加粗、Undo 文件通道
+
+### 13.4 架构变化速览
+
+- **渲染链**：SceneViewPanel 与 Player 统一走 renderSceneToOutput（原两处直接 UIRenderer::render 调用已删除，UI pass 在管线内部）
+- **uGamma 统一**：Renderer::setGammaMode/linearOutput 驱动 blinn_phong/grid/skybox 三处（HDR 线性输出 vs 旧路径 1/2.2），无硬编码旁路
+- **Framebuffer**：create 增 hdrColor 参数（RGBA16F 附件+resolve，默认 RGBA8 旧行为不变）
+- **新面板**：Build Settings（第 8 面板）；Environment 面板增 Post Processing 折叠区；Inspector 增 DDOL 勾选
+- **CMake 纪律**：编辑器新增源文件必须同步改 editor/CMakeLists.txt 显式源清单
+- 构建冒烟：四 target 全绿零第一方警告；16F 开启/直通双路径实跑通过；4 个 post shader 首编译零错误
+
+---
+
 *本文档由文档 Agent 基于 editor/src 与 engine/src 的实际实现撰写。发现文档与代码不符时，以代码为准并欢迎更新本文件。*

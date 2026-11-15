@@ -5,6 +5,7 @@
 
 #include <NovaEngine/Render/SkyboxRenderer.h>
 #include <NovaEngine/Render/Cubemap.h>
+#include <NovaEngine/Render/Renderer.h>   // V0.3-14：linearOutput() 同步 HDR gamma 模式
 #include <NovaEngine/Render/Shader.h>
 #include <NovaEngine/Core/Logger.h>
 
@@ -60,8 +61,9 @@ void SkyboxRenderer::draw(const glm::mat4& invViewProj, const glm::vec3& camPos,
     s_shader->setVec3("uZenithColor", zenithColor);
     s_shader->setFloat("uSkyExposure", exposure);                    // HDR 曝光（Scene::skyExposure）
     s_shader->setFloat("uSkyRotation", glm::radians(rotationDeg));   // 度 → 弧度（C++ 侧转换）
-    // V0.3-4：与 blinn_phong 同款 gamma 指数（无后处理 = 1/2.2；HDR 模式 = 0 触发直通分支，非 pow 指数 0；波 3 后处理接管）
-    s_shader->setFloat("uGamma", 1.0f / 2.2f);
+    // V0.3-4/14：与 blinn_phong 同款 gamma 指数（无后处理 = 1/2.2；HDR 模式 = 0 触发直通分支，
+    // 非 pow 指数 0；评审 P1-1：与场景 pass 同步取 Renderer::linearOutput()，防天空双重 gamma 发白）
+    s_shader->setFloat("uGamma", Renderer::linearOutput() ? 0.0f : 1.0f / 2.2f);
     if (useCubemap) {
         cubemap->bind(1);
         s_shader->setInt("uSkyCubemap", 1);

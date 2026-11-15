@@ -21,12 +21,14 @@
 #include <NovaEngine/Render/ShadowMap.h>
 #include <NovaEngine/Render/SkyboxRenderer.h>
 #include <NovaEngine/Render/Cubemap.h>
+#include <NovaEngine/Render/PostProcess.h>
 
 #include <NovaEngine/Scene/GameObject.h>
 #include <NovaEngine/Scene/Component.h>
 #include <NovaEngine/Scene/ComponentRegistry.h>
 #include <NovaEngine/Scene/Transform.h>
 #include <NovaEngine/Scene/Scene.h>
+#include <NovaEngine/Scene/SceneManager.h>
 #include <NovaEngine/Scene/SceneRenderer.h>
 #include <NovaEngine/Scene/MeshRenderer.h>
 #include <NovaEngine/Scene/Camera.h>
@@ -62,4 +64,5 @@
 #include <NovaEngine/UI/FontAtlas.h>
 #include <NovaEngine/UI/UIRenderer.h>
 
+#include <NovaEngine/Serialization/PrefabSerializer.h>
 #include <NovaEngine/Serialization/SceneSerializer.h>

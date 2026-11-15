@@ -61,6 +61,9 @@ glm::mat4 s_view{1.0f};      // 当前帧 view 矩阵（V0.2-8：透明队列 vi
 glm::vec3 s_camPos{0.0f};
 DirectionalLightData s_light;
 
+// V0.3-14：后处理链 HDR 模式开关（uGamma=0 触发 shader 直通分支；由 SceneRenderer 每帧设置）
+bool s_linearOutput = false;
+
 // 网格地面配色：雾色已参数化（drawGrid(fogColor) 由 Scene::fogColor 传入，V0.2-5）
 const glm::vec3 kGridLineColor(0.55f, 0.55f, 0.60f);
 
@@ -157,10 +160,10 @@ void setBlinnPhongUniforms(const std::shared_ptr<Shader>& shader,
     shader->setVec3("uEmissionColor", material.emissionColor);
     shader->setFloat("uEmissionIntensity", material.emissionIntensity);
 
-    // ===== V0.3-4 输出 gamma 指数 =====
+    // ===== V0.3-4/14 输出 gamma 指数 =====
     // 无后处理 = 1/2.2（V0.2 现行为）；HDR 模式 = 0（触发 shader 直通分支，非 pow 指数 0；
-    // 波 3 后处理接管，届时此处改为由 PostProcess 状态驱动）
-    shader->setFloat("uGamma", 1.0f / 2.2f);
+    // 波 3 后处理接管：SceneRenderer 经 setGammaMode 每帧设置，combine pass 内统一 gamma）
+    shader->setFloat("uGamma", s_linearOutput ? 0.0f : 1.0f / 2.2f);
 
     shader->setMat4("uModel", model);
 
@@ -241,6 +244,14 @@ void Renderer::shutdown() {
     if (s_debugLineVbo) { glDeleteBuffers(1, &s_debugLineVbo); s_debugLineVbo = 0; }
     s_shadowActive = false;
     s_initialized = false;
+}
+
+void Renderer::setGammaMode(bool linearOutput) {
+    s_linearOutput = linearOutput;   // 粘性：由 SceneRenderer 每帧设置（beginFrame 不重置）
+}
+
+bool Renderer::linearOutput() {
+    return s_linearOutput;
 }
 
 void Renderer::beginFrame(const RenderCamera& camera, const DirectionalLightData& light,
@@ -407,8 +418,8 @@ void Renderer::drawGrid(const glm::vec3& fogColor) {
     s_gridShader->setVec3("uFogColor", fogColor);   // V0.2-5：雾色参数化（Scene::fogColor）
     s_gridShader->setVec3("uLineColor", kGridLineColor);
     s_gridShader->setVec3("uLightDir", s_light.direction);
-    // V0.3-4：与 blinn_phong 同款 gamma 指数（无后处理 = 1/2.2；HDR 模式 = 0 触发直通分支，非 pow 指数 0；波 3 后处理接管）
-    s_gridShader->setFloat("uGamma", 1.0f / 2.2f);
+    // V0.3-4/14：与 blinn_phong 同款 gamma 指数（无后处理 = 1/2.2；HDR 模式 = 0 触发直通分支；波 3 后处理接管）
+    s_gridShader->setFloat("uGamma", s_linearOutput ? 0.0f : 1.0f / 2.2f);
 
     // 地面也接收阴影（V0.2-6）：与 setBlinnPhongUniforms 同一套 uniform 约定
     if (s_shadowActive) {

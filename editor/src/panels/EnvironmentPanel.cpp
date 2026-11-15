@@ -42,6 +42,29 @@ void EnvironmentPanel::onGui(EditorContext& ctx, EditorCamera&) {
         ImGui::PopID();
     }
 
+    // 后处理（V0.3-14 波 3）：enabled/bloomThreshold/bloomIntensity/bloomLevels/exposure
+    // → scene->postProcess（序列化 environment.postProcess 段）；脏标记漏斗与既有约定一致
+    if (ImGui::CollapsingHeader("Post Processing", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::PushID("pp");
+        NovaEngine::PostProcessSettings& pp = scene->postProcess;
+        if (ImGui::Checkbox("Enabled", &pp.enabled)) ctx.markSceneDirty();
+        if (ImGui::DragFloat("Bloom Threshold", &pp.bloomThreshold, 0.01f, 0.0f, 10.0f))
+            ctx.markDirtyOnly();
+        if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
+        if (ImGui::DragFloat("Bloom Intensity", &pp.bloomIntensity, 0.01f, 0.0f, 5.0f))
+            ctx.markDirtyOnly();
+        if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
+        // P2-2 修复：上限 3 与引擎钳制一致（PostProcess 内部 clamp 1-3）
+        if (ImGui::DragInt("Bloom Levels", &pp.bloomLevels, 1.0f, 1, 3)) ctx.markDirtyOnly();
+        if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
+        if (ImGui::DragFloat("Exposure", &pp.exposure, 0.01f, 0.01f, 10.0f)) ctx.markDirtyOnly();
+        if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
+        // 8bit 降级提示（§14.10：老集显无 RGB16F → 后处理运行期失效，不崩溃）
+        if (!NovaEngine::PostProcess::hdrSupported())
+            ImGui::TextDisabled("(HDR not supported on this GPU: post-processing disabled at runtime)");
+        ImGui::PopID();
+    }
+
     // 天空全组（V0.2-7）：模式 / 渐变两色 / cubemap 路径 / 旋转 / 曝光
     if (ImGui::CollapsingHeader("Sky", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::PushID("sky");

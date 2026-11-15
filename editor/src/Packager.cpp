@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <NovaEngine/Assets/AssetDatabase.h>
+#include <NovaEngine/Assets/AssetStream.h>
 #include <NovaEngine/Assets/PakArchive.h>
 #include <NovaEngine/Assets/TextureMeta.h>
 #include <NovaEngine/Core/Logger.h>
@@ -80,6 +81,73 @@ void addTextureWithMeta(std::map<std::string, fs::path>& files, std::vector<std:
     files.emplace(metaRel, metaAbs);
 }
 
+// 收集单个场景 JSON 的引用资产（V0.3-12 波 3 抽取：入口场景与 build.novabuild 清单内
+// 全部场景共用同一逻辑）：MeshRenderer 的 mesh（跳过 builtin:）+ material.albedoMap +
+// 天空盒（目录六面 / equirect 单文件）
+void collectSceneReferences(const nlohmann::json& root, const fs::path& projectRoot,
+                            std::map<std::string, fs::path>& files,
+                            std::vector<std::string>& missing) {
+    std::error_code ec;
+    if (root.contains("objects") && root["objects"].is_array()) {
+        for (const auto& obj : root["objects"]) {
+            if (!obj.is_object()) continue;
+            if (!obj.contains("components") || !obj["components"].is_array()) continue;
+            for (const auto& comp : obj["components"]) {
+                if (!comp.is_object()) continue;
+                if (comp.value("type", std::string()) != "MeshRenderer") continue;
+
+                const std::string mesh = comp.value("mesh", std::string());
+                if (!mesh.empty() && !mesh.starts_with("builtin:")) {
+                    const fs::path meshAbs = resolveInProject(mesh, projectRoot);
+                    if (!fileExists(meshAbs)) {
+                        missing.push_back(mesh);
+                    } else {
+                        const std::string rel = toPakRel(meshAbs, projectRoot);
+                        if (rel.empty()) missing.push_back(mesh);
+                        else files.emplace(rel, meshAbs);
+                    }
+                }
+
+                if (comp.contains("material") && comp["material"].is_object()) {
+                    const std::string albedo = comp["material"].value("albedoMap", std::string());
+                    if (!albedo.empty())
+                        addTextureWithMeta(files, missing, resolveInProject(albedo, projectRoot),
+                                           projectRoot);
+                }
+            }
+        }
+    }
+
+    // 天空盒（environment.skyCubemapPath）：目录 → px/nx/py/ny/pz/nz 六面
+    //（扩展名探测顺序与 AssetDatabase::getCubemap 一致）；文件 → equirect 单文件
+    if (root.contains("environment") && root["environment"].is_object()) {
+        const std::string sky = root["environment"].value("skyCubemapPath", std::string());
+        if (!sky.empty()) {
+            const fs::path skyAbs = resolveInProject(sky, projectRoot);
+            if (fs::is_directory(skyAbs, ec)) {
+                static constexpr std::array<const char*, 6> kFaces = {"px", "nx", "py",
+                                                                      "ny", "pz", "nz"};
+                static constexpr std::array<const char*, 6> kExts = {".png", ".jpg", ".jpeg",
+                                                                     ".bmp", ".tga", ".hdr"};
+                for (const char* face : kFaces) {
+                    bool found = false;
+                    for (const char* ext : kExts) {
+                        const fs::path cand = skyAbs / (std::string(face) + ext);
+                        if (fileExists(cand)) {
+                            addTextureWithMeta(files, missing, cand, projectRoot);
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) missing.push_back(sky + "/" + face + ".*");
+                }
+            } else {
+                addTextureWithMeta(files, missing, skyAbs, projectRoot);
+            }
+        }
+    }
+}
+
 }  // namespace
 
 bool Packager::buildPlayer(const fs::path& sceneJsonPath, const fs::path& outputDir) {
@@ -130,67 +198,49 @@ bool Packager::buildPlayer(const fs::path& sceneJsonPath, const fs::path& output
     // 3.1 场景文件本身
     files.emplace(sceneRel, sceneAbs);
 
-    // 3.2 每个 MeshRenderer：mesh 路径（跳过 "builtin:" 内置图元）+ material.albedoMap
-    if (root.contains("objects") && root["objects"].is_array()) {
-        for (const auto& obj : root["objects"]) {
-            if (!obj.is_object()) continue;
-            if (!obj.contains("components") || !obj["components"].is_array()) continue;
-            for (const auto& comp : obj["components"]) {
-                if (!comp.is_object()) continue;
-                if (comp.value("type", std::string()) != "MeshRenderer") continue;
+    // 3.2/3.3 入口场景引用资产（mesh/albedoMap/天空盒；抽取为共用助手，V0.3-12 波 3）
+    collectSceneReferences(root, projectRoot, files, missing);
 
-                const std::string mesh = comp.value("mesh", std::string());
-                if (!mesh.empty() && !mesh.starts_with("builtin:")) {
-                    const fs::path meshAbs = resolveInProject(mesh, projectRoot);
-                    if (!fileExists(meshAbs)) {
-                        missing.push_back(mesh);
-                    } else {
-                        const std::string rel = toPakRel(meshAbs, projectRoot);
-                        if (rel.empty()) missing.push_back(mesh);
-                        else files.emplace(rel, meshAbs);
-                    }
-                }
-
-                if (comp.contains("material") && comp["material"].is_object()) {
-                    const std::string albedo = comp["material"].value("albedoMap", std::string());
-                    if (!albedo.empty())
-                        addTextureWithMeta(files, missing, resolveInProject(albedo, projectRoot),
-                                           projectRoot);
-                }
-            }
-        }
-    }
-
-    // 3.3 天空盒（environment.skyCubemapPath）：目录 → px/nx/py/ny/pz/nz 六面
-    //（扩展名探测顺序与 AssetDatabase::getCubemap 一致）；文件 → equirect 单文件
-    if (root.contains("environment") && root["environment"].is_object()) {
-        const std::string sky = root["environment"].value("skyCubemapPath", std::string());
-        if (!sky.empty()) {
-            const fs::path skyAbs = resolveInProject(sky, projectRoot);
-            if (fs::is_directory(skyAbs, ec)) {
-                static constexpr std::array<const char*, 6> kFaces = {"px", "nx", "py",
-                                                                      "ny", "pz", "nz"};
-                static constexpr std::array<const char*, 6> kExts = {".png", ".jpg", ".jpeg",
-                                                                     ".bmp", ".tga", ".hdr"};
-                for (const char* face : kFaces) {
-                    bool found = false;
-                    for (const char* ext : kExts) {
-                        const fs::path cand = skyAbs / (std::string(face) + ext);
-                        if (fileExists(cand)) {
-                            addTextureWithMeta(files, missing, cand, projectRoot);
-                            found = true;
-                            break;
+    // 3.4 Build Settings 场景集合（V0.3-12 波 3）：读 assets/build.novabuild，把清单内全部
+    // 场景文件、其引用资产与 novabuild 本身一并进 pak（Player 内 SceneManager::loadScene
+    // 依赖）。清单缺失/损坏 → 仅打包入口场景（旧行为，warn 提示）
+    {
+        std::string buildText;
+        if (AssetStream::readAllText("assets/build.novabuild", buildText)) {
+            try {
+                const nlohmann::json build = nlohmann::json::parse(buildText);
+                if (build.is_object() && build.contains("scenes") && build["scenes"].is_array()) {
+                    for (const auto& s : build["scenes"]) {
+                        if (!s.is_object()) continue;
+                        const std::string pathStr = s.value("path", std::string());
+                        if (pathStr.empty()) continue;
+                        const fs::path abs = resolveInProject(pathStr, projectRoot);
+                        if (!fileExists(abs)) { missing.push_back(pathStr); continue; }
+                        const std::string rel = toPakRel(abs, projectRoot);
+                        if (rel.empty()) { missing.push_back(pathStr); continue; }
+                        if (files.contains(rel)) continue;   // 与入口场景重复 → 跳过
+                        files.emplace(rel, abs);
+                        nlohmann::json sceneRoot;
+                        std::ifstream ifs(abs, std::ios::binary);
+                        if (ifs) {
+                            try { ifs >> sceneRoot; }
+                            catch (const std::exception&) { sceneRoot = nlohmann::json(); }
                         }
+                        if (sceneRoot.is_object())
+                            collectSceneReferences(sceneRoot, projectRoot, files, missing);
                     }
-                    if (!found) missing.push_back(sky + "/" + face + ".*");
+                    // novabuild 本身进 pak（Player 启动时 SceneManager::init 读盘）
+                    files.emplace("assets/build.novabuild", projectRoot / "assets" / "build.novabuild");
+                    Logger::info("Build Settings 场景集合已并入打包清单（{} 个场景）",
+                                 build["scenes"].size());
                 }
-            } else {
-                addTextureWithMeta(files, missing, skyAbs, projectRoot);
+            } catch (const std::exception& e) {
+                Logger::warn("build.novabuild 解析失败，仅打包入口场景: {}", e.what());
             }
         }
     }
 
-    // 3.4 assets/shaders/ 全目录（*.vert / *.frag；运行时 Renderer/Skybox/Cubemap 初始化必需）
+    // 3.5 assets/shaders/ 全目录（*.vert / *.frag；运行时 Renderer/Skybox/Cubemap 初始化必需）
     const fs::path shaderDir = projectRoot / "assets" / "shaders";
     if (!fs::is_directory(shaderDir, ec)) {
         Logger::error("打包失败：着色器目录不存在: {}", shaderDir.string());

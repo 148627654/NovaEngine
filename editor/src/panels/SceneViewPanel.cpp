@@ -7,24 +7,20 @@
 
 #include <imgui.h>
 
-#include <NovaEngine/Assets/AssetDatabase.h>
-#include <NovaEngine/Assets/MaterialAsset.h>   // 双轨材质解析：materialAsset->material()（完整类型）
 #include <NovaEngine/Core/Input.h>
 #include <NovaEngine/Core/Logger.h>
 #include <NovaEngine/Core/Stats.h>
 #include <NovaEngine/Core/Time.h>
 #include <NovaEngine/Core/UUID.h>
 #include <NovaEngine/Physics/PhysicsWorld.h>   // debugDraw（Show Colliders 线段收集，V0.3-1）
+#include <NovaEngine/Render/PostProcess.h>     // PostProcessSettings 完整类型 + hdrSupported（V0.3-14 波 3）
 #include <NovaEngine/Render/Renderer.h>
-#include <NovaEngine/Render/ShadowMap.h>
-#include <NovaEngine/Render/SkyboxRenderer.h>
 #include <NovaEngine/Scene/Camera.h>
-#include <NovaEngine/Scene/DirectionalLight.h>
 #include <NovaEngine/Scene/MeshRenderer.h>
 #include <NovaEngine/Scene/Scene.h>
 #include <NovaEngine/Scene/SceneRenderer.h>
 #include <NovaEngine/Scene/Transform.h>
-#include <NovaEngine/UI/UIRenderer.h>         // 运行时 UI 渲染/输入（V0.3-3 编辑器接线）
+#include <NovaEngine/UI/UIRenderer.h>         // 运行时 UI 输入（V0.3-3；渲染已迁入 renderSceneToOutput 管线）
 
 // glfwGetTime（Play toast 时间戳）用；顺序要求与 EditorApplication 一致：
 // glad 先行（__gl_h_ 守卫令 GLFW 内嵌 <GL/gl.h> 变 no-op），GLFW 头在 glad 之后。
@@ -173,21 +169,30 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
     }
     const float targetAspect = static_cast<float>(targetW) / static_cast<float>(targetH);
 
-    // FBO 尺寸同步（尺寸 0 已跳过；变化时全删重建）
+    // FBO 同步（V0.3-14 波 3 双 FBO）：hdrFbo 承载场景渲染（pp.enabled && hdrSupported
+    // → RGBA16F，否则 RGBA8 直通）；outFbo 为 LDR 输出（RGBA8、无 MSAA，
+    // renderSceneToOutput 内部绘制后处理/UI 的目标）。尺寸或 hdr 模式变化 → 全删重建
+    const bool hdrMode = scene->postProcess.enabled && PostProcess::hdrSupported();
     bool fboReady = true;
-    if (!m_fboCreated) {
-        if (!m_fbo.create(w, h, 4)) {
+    if (!m_fboCreated || hdrMode != m_fboHdrMode) {
+        m_hdrFbo.destroy();
+        m_outFbo.destroy();
+        if (!m_hdrFbo.create(w, h, 4, hdrMode) || !m_outFbo.create(w, h, 1, false)) {
             Logger::error("SceneView: Framebuffer 创建失败 ({}x{})", w, h);
             fboReady = false;   // m_fboCreated 保持 false，下帧重试
         } else {
             m_fboCreated = true;
+            m_fboHdrMode = hdrMode;
         }
-    } else if (w != m_fbo.width() || h != m_fbo.height()) {
-        m_fbo.resize(w, h);
-        if (m_fbo.width() != w || m_fbo.height() != h) {
+    } else if (w != m_hdrFbo.width() || h != m_hdrFbo.height()) {
+        m_hdrFbo.resize(w, h);
+        m_outFbo.resize(w, h);
+        if (m_hdrFbo.width() != w || m_hdrFbo.height() != h ||
+            m_outFbo.width() != w || m_outFbo.height() != h) {
             // resize 无返回值：尺寸未生效视为重建失败，销毁并下帧重试（Reviewer P2-4）
             Logger::error("SceneView: Framebuffer 重建失败 ({}x{})", w, h);
-            m_fbo.destroy();
+            m_hdrFbo.destroy();
+            m_outFbo.destroy();
             m_fboCreated = false;
             fboReady = false;
         }
@@ -207,22 +212,33 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
 
     // 离屏渲染（Stats "render" 段：FBO bind 前取 t0）
     const auto renderT0 = std::chrono::steady_clock::now();
-    RenderCamera renderCam;  // Edit 路径 + gizmo 用
-    if (playMode) {
-        // Play 路径（V0.5-1）：整帧渲染交给 SceneRenderer（天空/阴影/grid/submit/endFrame 全在引擎内；
-        // play 相机选择逻辑也在引擎内，无场景相机时回退编辑器相机）
-        RenderCamera fallback;
-        fallback.view = camera.viewMatrix();
-        fallback.projection = camera.projectionMatrix(targetAspect);
-        fallback.position = camera.position();
-        m_fbo.bind();
-        SceneRenderer::renderScene(*scene, fallback);
-        // 运行时 UI（V0.3-3）：3D pass 之后、同一 FBO 内绘制（§14.3 顺序；
-        // 无 Canvas 时 UIRenderer 内部零开销跳过，无需前置判断）
-        UIRenderer::render(*scene, w, h);
-        // 碰撞体线框（V0.3-1 波 2 编辑器接线，Play 工具栏「Show Colliders」开关）：
-        // debugDraw 回调收集顶点对 → drawLines 一次性绘制（debug_line shader，3D pass 后）
-        if (m_showColliders && scene->physics()) {
+    RenderCamera renderCam;   // 编辑器相机（Play 无场景相机时作 fallback；gizmo 用）
+    renderCam.view = camera.viewMatrix();
+    renderCam.projection = camera.projectionMatrix(targetAspect);
+    renderCam.position = camera.position();
+
+    // V0.3-14 波 3 重线：Edit/Play 统一走 renderSceneToOutput（相机选择/天空/阴影/grid/submit/
+    // 描边/后处理/UI 全在引擎管线内，A 线实现）。原先两处直接 UIRenderer::render 调用
+    //（Play 约 222 行 / Edit 约 308 行）已删除——UI pass 已由管线内部包含（§14.3 迁移目标达成）。
+    // 描边（仅 Edit）：选中对象橙色描边（Play 下 outlines 传 nullptr）
+    std::vector<SceneRenderer::OutlineItem> outlines;
+    if (editMode) {
+        const glm::vec3 kOutlineColor(1.0f, 0.55f, 0.1f);
+        for (uint64_t id : ctx.selectedIds) {
+            GameObject* go = scene->findGameObject(id);
+            if (!go) continue;
+            auto* mr = go->getComponent<MeshRenderer>();
+            if (mr && mr->mesh)
+                outlines.push_back(SceneRenderer::OutlineItem{mr->mesh,
+                                                              go->transform()->worldMatrix(),
+                                                              kOutlineColor});
+        }
+    }
+    // 注入点（仅 Play）：Show Colliders 线框在场景 FBO 内 3D pass 之后、resolve 之前绘制
+    //（afterSceneDraw 回调由管线在 hdrFbo 绑定状态下调用）
+    std::function<void()> afterSceneDraw;
+    if (playMode && m_showColliders && scene->physics()) {
+        afterSceneDraw = [scene] {
             std::vector<glm::vec3> lines;
             scene->physics()->debugDraw([&lines](const glm::vec3& a, const glm::vec3& b) {
                 lines.push_back(a);
@@ -230,95 +246,26 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
             });
             if (!lines.empty())
                 Renderer::drawLines(lines, kColliderLineColor);
-        }
-        m_fbo.resolveMsaa();
-        m_fbo.unbind();
-    } else {
-        // Edit 路径：手写（保持原实现；V0.2-5 drawGrid 传雾色；V0.2-8 阴影收集跳过透明物体）
-        renderCam.view = camera.viewMatrix();
-        renderCam.projection = camera.projectionMatrix(targetAspect);
-        renderCam.position = camera.position();
-        glm::vec4 clearColor(scene->skyColor, 1.0f);  // §3.2：Edit 用 scene.skyColor
-
-        // 灯光：场景第一个 DirectionalLight（方向取自 Transform.forward），无则默认方向
-        DirectionalLightData light;
-        DirectionalLight* dirLight = nullptr;
-        auto lights = scene->findComponents<DirectionalLight>();
-        if (!lights.empty()) {
-            dirLight = lights.front();
-            light.direction = dirLight->transform()->forward();
-            light.color = dirLight->color;
-            light.intensity = dirLight->intensity;
-        }
-        light.ambient = scene->ambientColor;
-
-        // 阴影参数（V0.2-6）：castShadows 时组装；阴影盒中心 = 相机位置沿光轴投影到过原点平面（跟随相机）
-        ShadowCameraParams shadowParams;
-        std::vector<ShadowItem> shadowItems;
-        const bool shadowEnabled = dirLight && dirLight->castShadows;
-        if (shadowEnabled) {
-            shadowParams.lightDirection = light.direction;
-            shadowParams.mapSize = dirLight->shadowMapSize;
-            shadowParams.bias = dirLight->shadowBias;
-            const glm::vec3 camCenter =
-                renderCam.position - light.direction * glm::dot(renderCam.position, light.direction);
-            shadowParams.lightViewProj = computeLightViewProj(light.direction, camCenter,
-                                                              dirLight->shadowRange,
-                                                              dirLight->shadowMapSize);
-        }
-
-        // 天空 cubemap（V0.2-7）：Cubemap 模式且路径非空时加载；失败/渐变走 nullptr（内部回退渐变）
-        std::shared_ptr<Cubemap> skyCube;
-        if (scene->skyMode == SkyMode::Cubemap && !scene->skyCubemapPath.empty())
-            skyCube = AssetDatabase::instance().getCubemap(scene->skyCubemapPath);
-
-        // 严格按 ARCHITECTURE-V0.2 顺序：天空 → 单次遍历收集 → 阴影 → grid → 描边
-        m_fbo.bind();
-        Renderer::beginFrame(renderCam, light, clearColor);
-        SkyboxRenderer::draw(glm::inverse(renderCam.projection * renderCam.view), renderCam.position,
-                             scene->skyMode, scene->skyHorizonColor, scene->skyZenithColor,
-                             skyCube, scene->skyRotation, scene->skyExposure);
-        scene->forEachObject([&](GameObject* go) {
-            if (!go->activeInHierarchy()) return;
-            auto* mr = go->getComponent<MeshRenderer>();
-            if (!mr || !mr->mesh) return;
-            const glm::mat4 world = go->transform()->worldMatrix();
-            // V0.3-6 材质资产双轨：引用 .novamat 时整块提交资产材质；否则内联材质
-            const Material& mat = mr->material.materialAsset
-                                      ? mr->material.materialAsset->material()
-                                      : mr->material;
-            Renderer::submit(mr->mesh, mat, world);
-            // V0.2-8：透明物体（blendMode != Opaque）不进阴影深度 pass
-            //（Reviewer P1-2：判定用解析后的 mat，与 SceneRenderer 一致——资产引用 blendMode 语义正确）
-            if (shadowEnabled && mat.blendMode == BlendMode::Opaque)
-                shadowItems.push_back(ShadowItem{mr->mesh, world});
-        });
-        if (shadowEnabled) Renderer::drawShadowPass(shadowParams, shadowItems);
-        if (scene->showGrid) Renderer::drawGrid(scene->fogColor);  // V0.2-5：网格雾色参数化
-        const glm::vec3 kOutlineColor(1.0f, 0.55f, 0.1f);  // 选中橙色描边
-        for (uint64_t id : ctx.selectedIds) {
-            GameObject* go = scene->findGameObject(id);
-            if (!go) continue;
-            auto* mr = go->getComponent<MeshRenderer>();
-            if (mr && mr->mesh)
-                Renderer::drawOutline(mr->mesh, go->transform()->worldMatrix(), kOutlineColor);
-        }
-        Renderer::endFrame();
-        // 运行时 UI（V0.3-3）：Edit 预览与 Play 同路径（§14.3「Edit 预览与 Play 同路径」）
-        UIRenderer::render(*scene, w, h);
-        m_fbo.resolveMsaa();
-        m_fbo.unbind();
+        };
     }
+    m_hdrFbo.bind();
+    // 参数形态按架构师最终冻结签名（afterSceneDraw 为 const std::function<void()>&，
+    // 默认 nullptr；空 std::function = 无注入点回调）
+    const uint32_t outTex = SceneRenderer::renderSceneToOutput(
+        *scene, renderCam, m_hdrFbo, m_outFbo, scene->postProcess,
+        editMode ? &outlines : nullptr,
+        afterSceneDraw);
+    m_hdrFbo.unbind();
     const auto renderT1 = std::chrono::steady_clock::now();
     Stats::setSectionMs("render",
                         std::chrono::duration<float, std::milli>(renderT1 - renderT0).count());
 
-    // 显示：Edit 与旧行为逐像素一致（FBO = 面板尺寸，直接铺满）；
-    // Play 在面板内容区内等比 fit-rect 居中（letterbox），FBO 纹理相对 ImGui 上下颠倒：
-    // UV 必须 (0,1)-(1,0)（§11.8）
+    // 显示：outTex = renderSceneToOutput 返回的 LDR 输出纹理（后处理/UI 之后）。
+    // Edit 直接铺满（FBO = 面板尺寸）；Play 在面板内容区内等比 fit-rect 居中（letterbox）。
+    // FBO 纹理相对 ImGui 上下颠倒：UV 必须 (0,1)-(1,0)（§11.8）
     bool hovered = false;
     if (editMode) {
-        ImGui::Image((ImTextureID)(intptr_t)m_fbo.colorTextureId(), vpSize,
+        ImGui::Image((ImTextureID)(intptr_t)outTex, vpSize,
                      ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
         hovered = ImGui::IsItemHovered();
     } else {
@@ -326,7 +273,7 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
         const ImVec2 dstSize(targetW * fitScale, targetH * fitScale);
         const ImVec2 offset((vpSize.x - dstSize.x) * 0.5f, (vpSize.y - dstSize.y) * 0.5f);
         ImGui::SetCursorPos(ImGui::GetCursorPos() + offset);  // 居中偏移
-        ImGui::Image((ImTextureID)(intptr_t)m_fbo.colorTextureId(), dstSize,
+        ImGui::Image((ImTextureID)(intptr_t)outTex, dstSize,
                      ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
         hovered = ImGui::IsItemHovered();
         // UI 输入（V0.3-3）：Play 态把鼠标从面板坐标经 letterbox fit-rect 换算到

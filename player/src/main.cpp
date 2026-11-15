@@ -135,18 +135,26 @@ int main(int argc, char** argv) {
     Renderer::init();
     SkyboxRenderer::init();
 
-    // 5. 音频 + 运行时 UI（V0.3-2/3）：音频失败只 warn 继续（优雅降级）；UI 失败内部 no-op
+    // 5. 音频 + 运行时 UI + 后处理（V0.3-2/3/14）：音频失败只 warn 继续（优雅降级）；
+    //   UI 失败内部 no-op；后处理失败内部降级为直通
     if (!AudioEngine::init())
         Logger::warn("[NovaPlayer] 音频设备初始化失败，继续无音频运行");
     UIRenderer::init();
+    PostProcess::init();
 
-    // 6. 场景加载（AssetStream：先查 pak 再查磁盘）+ Play 启动
+    // 6. 场景管理（V0.3-12 波 3）：读 build 列表（缺失/损坏 → 空列表 + warn，不崩溃）
+    SceneManager::init();
+
+    // 7. 场景加载（AssetStream：先查 pak 再查磁盘）+ Play 启动
     Scene scene("Player");
     if (!SceneSerializer::loadFromFile(scene, args.scene)) {
         Logger::error("[NovaPlayer] 场景加载失败: {}", args.scene.string());
         return 1;
     }
     scene.start();
+    // 注册为运行期场景并设为活动场景（§14.9；LoadScene 延迟切换经 flushPendingLoad 作用于本 scene）
+    SceneManager::registerScene(scene.name(), args.scene);
+    SceneManager::setActiveScene(&scene);
 
     // 7. 主循环（无相机时 fallback 相机兜底；场景相机经 collectCamera 优先）
     RenderCamera fallback;
@@ -154,6 +162,12 @@ int main(int argc, char** argv) {
     fallback.view = glm::lookAt(fallback.position, glm::vec3(0.0f, 1.0f, 0.0f),
                                 glm::vec3(0.0f, 1.0f, 0.0f));
     fallback.projection = glm::mat4(1.0f);
+
+    // V0.3-14 后处理链 FBO：hdrFbo（RGBA16F/RGBA8，4x MSAA）+ outLdrFbo（RGBA8 最终画面，无 MSAA）。
+    // 格式随 pp.enabled && hdrSupported 决定；运行期 pp 开关翻转时销毁重建（Player 无设置 UI，正常不变）
+    Framebuffer hdrFbo, outLdrFbo;
+    bool fbosCreated = false;
+    bool hdrFboIsHdr = false;
 
     while (!window->shouldClose()) {
         window->pollEvents();
@@ -181,8 +195,10 @@ int main(int argc, char** argv) {
         UIRenderer::processInput(scene, uiMouse, Input::isMouseDown(MouseButton::Left),
                                  Input::isMousePressed(MouseButton::Left));
 
-        // 帧序（§15）：scene.update（物理→脚本→协程→事件）→ 音频监听 → 3D → UI 渲染 → 显示
+        // 帧序（§15）：scene.update（物理→脚本→协程→事件）→ SceneManager 延迟切场景
+        // → 音频监听 → 3D+后处理+UI → 显示
         scene.update(Time::deltaTime());
+        SceneManager::flushPendingLoad();   // §15：Scene::update 之后调用（延迟执行防广播中迭代器失效）
 
         // 音频监听跟随场景主相机（V0.3-2；直接用主相机 Transform，§14.2）
         if (const Camera* cam = findMainCamera(scene); cam && cam->transform()) {
@@ -195,14 +211,40 @@ int main(int argc, char** argv) {
             AudioEngine::setListener(fallback.position, fwd, up);
         }
 
-        SceneRenderer::renderScene(scene, fallback);
-
-        // 运行时 UI（V0.3-3）：3D pass 之后绘制（输入已在本帧 update 前处理）
-        UIRenderer::render(scene, fbW, fbH);
+        // V0.3-14：完整渲染链（场景→描边/线框注入→resolve→后处理→UI），输出到 outLdrFbo
+        const bool hdr = scene.postProcess.enabled && PostProcess::hdrSupported();
+        if (!fbosCreated || hdr != hdrFboIsHdr) {
+            hdrFbo.destroy();
+            outLdrFbo.destroy();
+            hdrFbo.create(fbW, fbH, 4, hdr);
+            outLdrFbo.create(fbW, fbH, 0, false);
+            hdrFboIsHdr = hdr;
+            fbosCreated = true;
+        } else {
+            hdrFbo.resize(fbW, fbH);
+            outLdrFbo.resize(fbW, fbH);
+        }
+        if (fbosCreated && hdrFbo.width() > 0 && outLdrFbo.width() > 0) {
+            SceneRenderer::renderSceneToOutput(scene, fallback, hdrFbo, outLdrFbo,
+                                               scene.postProcess);
+            // renderSceneToOutput 已 unbind（回到默认帧缓冲）——UI 已在其内部绘制于 outLdrFbo，
+            // 此处经 PostProcess::apply 的 disabled 直通 blit 把最终画面拷回默认帧缓冲（免 FBO 句柄泄漏）
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glViewport(0, 0, fbW, fbH);
+            PostProcess::apply(outLdrFbo.colorTextureId(), PostProcessSettings{});
+        } else {
+            // FBO 创建失败兜底：旧直通路径（渲染到默认帧缓冲）
+            SceneRenderer::renderScene(scene, fallback);
+            UIRenderer::render(scene, fbW, fbH);
+        }
         window->swapBuffers();
     }
 
-    // 8. 清理（UI/音频 → 天空/渲染器 GL 资源先释放；窗口最后析构 → glfwTerminate）
+    // 8. 清理（后处理 FBO → UI/音频 → 天空/渲染器 GL 资源先释放；窗口最后析构 → glfwTerminate）
+    hdrFbo.destroy();
+    outLdrFbo.destroy();
+    SceneManager::shutdown();
+    PostProcess::shutdown();
     UIRenderer::shutdown();
     AudioEngine::shutdown();
     SkyboxRenderer::shutdown();

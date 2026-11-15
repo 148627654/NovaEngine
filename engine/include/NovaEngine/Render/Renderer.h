@@ -37,6 +37,11 @@ public:
                             const glm::vec3& color);        // stencil 两遍描边，立即绘制
     static void endFrame();     // 按 (shader, texture) 排序后统一绘制队列并清空
 
+    // V0.3-14（波 3 后处理）：linearOutput=true 时场景着色器 uGamma=0（直通分支，场景线性输出，
+    // 后处理 combine 内统一做 ACES+gamma）；false = 现值 1/2.2（旧路径）。由 SceneRenderer 每帧设置。
+    static void setGammaMode(bool linearOutput);
+    static bool linearOutput();   // 查询当前帧模式（Skybox 等旁路着色器同步 uGamma 用）
+
     // 阴影深度 prepass（V0.2-6）：beginFrame 之后、drawGrid/endFrame 之前调用一次。
     // 内部：懒创建 ShadowMap（mapSize 变化时重建）、切 FBO、清深度、glCullFace(GL_FRONT) 绘制、
     // 恢复原 FBO 与视口；记录阴影参数供 endFrame/drawGrid 绑定阴影纹理。

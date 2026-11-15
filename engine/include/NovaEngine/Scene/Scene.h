@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <vector>
 #include <glm/vec3.hpp>
+#include <NovaEngine/Render/PostProcess.h>
 #include <NovaEngine/Render/SkyboxRenderer.h>
 #include "GameObject.h"
 
@@ -57,6 +58,9 @@ public:
     std::string skyCubemapPath;                                   // 空=渐变回退；否则 6 面目录或 equirect 文件
     float skyRotation = 0.0f;                                     // cubemap 绕 +Y 旋转（度）
     float skyExposure = 1.0f;                                     // HDR 曝光
+
+    // 后处理（V0.3-14，波 3 冻结；SceneSerializer 读写 environment.postProcess 段）
+    PostProcessSettings postProcess;
 
     // 编辑器相机状态（随场景保存/恢复；SceneSerializer 直接读写）
     glm::vec3 editorCameraTarget = glm::vec3(0.0f, 1.0f, 0.0f);

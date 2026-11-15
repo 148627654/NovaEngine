@@ -49,6 +49,7 @@ int main() {
     Renderer::init();
     SkyboxRenderer::init();  // V0.2-7：天空渲染（空 VAO + skybox shader；失败仅报错不中断）
     UIRenderer::init();      // V0.3-3：运行时 UI（ui.vert/.frag + 动态 VBO；失败降级 no-op）
+    PostProcess::init();     // V0.3-14 波 3：后处理 shader + 全屏 VAO（失败 → 强制 disabled 降级）
 
     // 3.5 音频引擎（V0.3-2 §14.2：编辑器启动即 init，Play 只 stopAll）。
     // 无可用设备时 init 返回 false——音频功能降级禁用（available()=false 全 API no-op），
@@ -59,6 +60,11 @@ int main() {
     // 4. 项目根（与第 2 步的 current_path 一致；VS 调试运行目录同样指向项目根）
     AssetDatabase::setProjectRoot(std::filesystem::current_path());
     Logger::info("项目根目录: {}", AssetDatabase::projectRoot().string());
+
+    // 4.5 场景管理（V0.3-12 波 3）：读盘 assets/build.novabuild（Build Settings 列表 =
+    // Play 中 SceneManager::loadScene 的候选集）。必须在 setProjectRoot 之后（AssetStream
+    // 按项目根解析）；缺失/损坏 → 空列表 + warn，不崩溃
+    SceneManager::init();
 
     // 5. ImGui 上下文 + docking + 样式 + 中文字体
     IMGUI_CHECKVERSION();

@@ -31,6 +31,14 @@ void GameObject::setActiveSelf(bool active) {
     m_activeSelf = active;
 }
 
+bool GameObject::dontDestroyOnLoad() const {
+    return m_dontDestroyOnLoad;
+}
+
+void GameObject::setDontDestroyOnLoad(bool value) {
+    m_dontDestroyOnLoad = value;
+}
+
 bool GameObject::activeInHierarchy() const {
     // 自身 && 所有祖先 activeSelf
     for (const GameObject* p = this; p != nullptr; p = p->m_parent)

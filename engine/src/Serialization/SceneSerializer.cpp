@@ -9,120 +9,16 @@
 #include <NovaEngine/Core/Logger.h>
 #include <NovaEngine/Core/UUID.h>
 #include <nlohmann/json.hpp>
-#include <algorithm>
 #include <fstream>
-#include <string_view>
-#include <typeinfo>
 #include <unordered_map>
+
+// 内部共享头（V0.3 波 3）：GameObject 节点写/读、组件分发、glm<->JSON 辅助等
+// 由 SceneSerializer 与 PrefabSerializer 共用；键名/键序/默认值零行为变更
+#include "SerializationInternals.h"
 
 namespace NovaEngine {
 
-namespace {
-
-// ---- glm <-> JSON 辅助（JSON schema 见 docs/ARCHITECTURE.md §5）----
-
-nlohmann::json vec3ToJson(const glm::vec3& v) {
-    return nlohmann::json::array({v.x, v.y, v.z});
-}
-
-glm::vec3 jsonToVec3(const nlohmann::json& j, const glm::vec3& fallback) {
-    if (!j.is_array() || j.size() < 3)
-        return fallback;
-    try {
-        return glm::vec3(j[0].get<float>(), j[1].get<float>(), j[2].get<float>());
-    } catch (const std::exception&) {
-        return fallback;
-    }
-}
-
-nlohmann::json quatToJson(const glm::quat& q) {
-    return nlohmann::json::array({q.x, q.y, q.z, q.w});  // 四元数 [x, y, z, w]
-}
-
-glm::quat jsonToQuat(const nlohmann::json& j, const glm::quat& fallback) {
-    if (!j.is_array() || j.size() < 4)
-        return fallback;
-    try {
-        // glm::quat 构造参数顺序为 (w, x, y, z)
-        return glm::normalize(glm::quat(j[3].get<float>(), j[0].get<float>(), j[1].get<float>(), j[2].get<float>()));
-    } catch (const std::exception&) {
-        return fallback;
-    }
-}
-
-// ---- 组件类型名 ----
-
-std::string scriptTypeName(const Component* comp) {
-    // 脚本组件类型名：注册名 = 类名最后一段（ScriptRegistry 名字裁剪裁定），
-    // 与 MSVC typeid(*comp).name() 的 "class NovaGame::SpinningCube" 尾段一致
-    std::string raw = typeid(*comp).name();
-    for (const char* prefix : {"class ", "struct ", "enum "}) {
-        if (raw.starts_with(prefix)) {
-            raw.erase(0, std::string_view(prefix).size());
-            break;
-        }
-    }
-    const auto pos = raw.rfind("::");
-    return (pos == std::string::npos) ? raw : raw.substr(pos + 2);
-}
-
-std::string componentTypeName(const Component* comp) {
-    // P1-2 修复（V0.3 波 2）：内置组件名不再硬编码 4 个旧组件——按 typeId 反查
-    // ComponentRegistry 注册名（覆盖波 1/2 新增的 11 个内置组件：AudioSource/Rigidbody/
-    // Canvas 等）；未命中再走 scriptTypeName（脚本组件共用 Behaviour 的 typeId，
-    // 与任何内置组件 typeId 都不相等，天然不会误判）。
-    for (const std::string& name : ComponentRegistry::builtinNames())
-        if (ComponentRegistry::typeIdForName(name) == comp->typeId())
-            return name;
-    const std::string name = scriptTypeName(comp);
-    if (!ScriptRegistry::exists(name))
-        Logger::warn("序列化：脚本组件 \"{}\" 未在 ScriptRegistry 注册，反序列化时将被跳过", name);
-    return name;
-}
-
-// 字段类型不符（如 "id" 是字符串）时回退默认值，保证畸形文件不崩溃
-template<typename T>
-T safeGet(const nlohmann::json& j, const char* key, const T& fallback) {
-    try {
-        return j.value(key, fallback);
-    } catch (const std::exception&) {
-        return fallback;
-    }
-}
-
-// 写出单个对象节点（id/name/active/parent/components），供 serialize 与 serializeGameObject 共用
-void writeGameObjectNode(nlohmann::json& out, GameObject* go) {
-    out["id"] = go->id();
-    out["name"] = go->name();
-    out["active"] = go->activeSelf();
-    out["parent"] = (go->parent() != nullptr) ? go->parent()->id() : UUID::kInvalid;
-
-    std::vector<Component*> comps = go->getComponents<Component>();
-    // schema 约定：组件数组第一项必须是 Transform
-    const auto it = std::find_if(comps.begin(), comps.end(),
-                                 [](Component* c) { return dynamic_cast<Transform*>(c) != nullptr; });
-    if (it != comps.end() && it != comps.begin())
-        std::rotate(comps.begin(), it, it + 1);
-
-    nlohmann::json arr = nlohmann::json::array();
-    for (Component* c : comps) {
-        nlohmann::json cj;
-        // 先写 "type" 名字，再写公共字段，最后调 onSerialize(out) 合并扩展字段
-        cj["type"] = componentTypeName(c);
-        if (auto* t = dynamic_cast<Transform*>(c)) {
-            cj["position"] = vec3ToJson(t->localPosition());
-            cj["rotation"] = quatToJson(t->localRotation());
-            cj["scale"] = vec3ToJson(t->localScale());
-        }
-        if (auto* b = dynamic_cast<Behaviour*>(c))
-            cj["enabled"] = b->enabled;
-        c->onSerialize(cj);
-        arr.push_back(std::move(cj));
-    }
-    out["components"] = std::move(arr);
-}
-
-}  // namespace
+using namespace SerializationInternals;
 
 std::string SceneSerializer::serialize(const Scene& scene, int indent) {
     nlohmann::json root;
@@ -142,6 +38,16 @@ std::string SceneSerializer::serialize(const Scene& scene, int indent) {
         env["skyCubemapPath"] = scene.skyCubemapPath;
         env["skyRotation"] = scene.skyRotation;
         env["skyExposure"] = scene.skyExposure;
+        // 后处理（V0.3-14，波 3）：environment.postProcess 段，读时全默认值兜底
+        {
+            nlohmann::json pp;
+            pp["enabled"] = scene.postProcess.enabled;
+            pp["bloomThreshold"] = scene.postProcess.bloomThreshold;
+            pp["bloomIntensity"] = scene.postProcess.bloomIntensity;
+            pp["bloomLevels"] = scene.postProcess.bloomLevels;
+            pp["exposure"] = scene.postProcess.exposure;
+            env["postProcess"] = std::move(pp);
+        }
         root["environment"] = std::move(env);
     }
     {
@@ -158,6 +64,9 @@ std::string SceneSerializer::serialize(const Scene& scene, int indent) {
     scene.forEachObject([&objects](GameObject* go) {
         nlohmann::json node;
         writeGameObjectNode(node, go);
+        // DDOL（V0.3-12，波 3）：仅 true 时写（缺省 false，旧文件往返无损）
+        if (go->dontDestroyOnLoad())
+            node["dontDestroyOnLoad"] = true;
         objects.push_back(std::move(node));
     });
     root["objects"] = std::move(objects);
@@ -170,6 +79,8 @@ std::string SceneSerializer::serializeGameObject(GameObject& object) {
     // 单对象 JSON（含 parent 引用），编辑器复制/剪贴板用
     nlohmann::json node;
     writeGameObjectNode(node, &object);
+    if (object.dontDestroyOnLoad())  // DDOL 随复制保留（仅 true 时写，缺省 false）
+        node["dontDestroyOnLoad"] = true;
     return node.dump(4);
 }
 
@@ -218,46 +129,18 @@ void SceneSerializer::deserialize(Scene& target, const std::string& json) {
         const std::string name = safeGet(obj, "name", std::string("GameObject"));
         GameObject* go = target.instantiate(id, name);
         go->setActiveSelf(safeGet(obj, "active", true));
+        go->setDontDestroyOnLoad(safeGet(obj, "dontDestroyOnLoad", false));  // V0.3-12：缺省 false
         records.push_back({go, &obj});
     }
 
     // 3. 逐组件 createComponentFromJson + attachComponent(callAwake=false) + onDeserialize
+    //    （循环体已抽取至 SerializationInternals::readComponentsJson——Prefab 共用，逐行等价）
     for (const auto& rec : records) {
         const nlohmann::json& compsNode =
             (rec.node->contains("components") && (*rec.node)["components"].is_array())
                 ? (*rec.node)["components"]
                 : kEmptyArray;
-        for (const auto& cj : compsNode) {
-            if (!cj.is_object())
-                continue;
-            std::unique_ptr<Component> comp = createComponentFromJson(rec.go, cj);
-            if (!comp)
-                continue;  // 未知类型：createComponentFromJson 内部已 Logger::warn 并跳过
-
-            const std::string typeName = safeGet(cj, "type", std::string());
-            Component* raw = comp.get();
-            // typeId 查 ComponentRegistry；脚本组件不在注册表 → 0（getComponents 走 dynamic_cast，不受影响）
-            rec.go->attachComponent(std::move(comp), ComponentRegistry::typeIdForName(typeName),
-                                    /*callAwake=*/false);
-
-            // Transform 公共字段（schema 中由序列化器写，这里也由序列化器读）
-            if (auto* t = dynamic_cast<Transform*>(raw)) {
-                t->setLocalPosition(jsonToVec3(cj.value("position", nlohmann::json()), glm::vec3(0.0f)));
-                t->setLocalRotation(jsonToQuat(cj.value("rotation", nlohmann::json()),
-                                               glm::quat(1.0f, 0.0f, 0.0f, 0.0f)));
-                t->setLocalScale(jsonToVec3(cj.value("scale", nlohmann::json()), glm::vec3(1.0f)));
-            }
-            // Behaviour 公共字段 enabled
-            if (auto* b = dynamic_cast<Behaviour*>(raw))
-                b->enabled = safeGet(cj, "enabled", true);
-
-            // 组件扩展字段：畸形字段类型不崩溃，仅告警
-            try {
-                raw->onDeserialize(cj);
-            } catch (const std::exception& e) {
-                Logger::warn("反序列化组件 \"{}\" 字段失败（{}），已保留默认值", typeName, e.what());
-            }
-        }
+        readComponentsJson(rec.go, compsNode);
     }
 
     // 3.5 无 Transform 防御（V0.2-14）：畸形文件/旧文件缺 Transform 时补默认 Transform，
@@ -314,6 +197,16 @@ void SceneSerializer::deserialize(Scene& target, const std::string& json) {
         target.skyCubemapPath = safeGet(env, "skyCubemapPath", std::string());
         target.skyRotation = safeGet(env, "skyRotation", 0.0f);
         target.skyExposure = safeGet(env, "skyExposure", 1.0f);
+
+        // 后处理（V0.3-14，波 3）：旧文件无此段 → 全默认值兜底（与 PostProcessSettings 一致）
+        const nlohmann::json& pp = (env.contains("postProcess") && env["postProcess"].is_object())
+                                       ? env["postProcess"]
+                                       : kEmptyObject;
+        target.postProcess.enabled = safeGet(pp, "enabled", false);
+        target.postProcess.bloomThreshold = safeGet(pp, "bloomThreshold", 1.0f);
+        target.postProcess.bloomIntensity = safeGet(pp, "bloomIntensity", 0.5f);
+        target.postProcess.bloomLevels = safeGet(pp, "bloomLevels", 3);
+        target.postProcess.exposure = safeGet(pp, "exposure", 1.0f);
 
         const nlohmann::json& cam =
             (root.contains("editorCamera") && root["editorCamera"].is_object()) ? root["editorCamera"] : kEmptyObject;
@@ -413,23 +306,9 @@ void SceneSerializer::remapGameObjectIds(nlohmann::json& objectJson) {
 }
 
 std::unique_ptr<Component> SceneSerializer::createComponentFromJson(GameObject* owner, const nlohmann::json& j) {
-    // 组件分发唯一入口：内置组件查 ComponentRegistry（各组件 .cpp 用 NE_REGISTER_COMPONENT 自注册），
-    // 未知再走 ScriptRegistry；两者皆未知 warn 并跳过（不崩溃）
-    if (!j.is_object()) {
-        Logger::warn("反序列化：组件节点不是 JSON 对象，已跳过");
-        return nullptr;
-    }
-    const std::string type = safeGet(j, "type", std::string());
-    // P1-2 修复：用户脚本与内置组件同名时，反序列化按约定内置优先（与序列化时
-    // componentTypeName 的内置优先判定一致），但显式告警——防静默数据丢失级替换
-    if (ComponentRegistry::exists(type) && ScriptRegistry::exists(type))
-        Logger::warn("反序列化：组件名 \"{}\" 同时存在内置与脚本注册，内置优先（脚本同名组件被替换）", type);
-    if (auto builtin = ComponentRegistry::create(type, owner))
-        return builtin;
-    if (auto script = ScriptRegistry::create(type, owner))
-        return script;
-    Logger::warn("反序列化：未知组件类型 \"{}\"，已跳过该组件（不崩溃）", type);
-    return nullptr;
+    // 分发逻辑已抽取至 SerializationInternals（V0.3 波 3，PrefabSerializer 共用）；
+    // 本私有入口保留为转发壳，公共头 API 不变
+    return SerializationInternals::createComponentFromJson(owner, j);
 }
 
 }  // namespace NovaEngine

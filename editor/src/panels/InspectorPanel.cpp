@@ -176,6 +176,15 @@ void InspectorPanel::onGui(EditorContext& ctx, EditorCamera&) {
         ctx.markSceneDirty();  // Checkbox 无拖拽中间帧，变更即时入栈
     }
     if (!edit) ImGui::EndDisabled();
+    // DontDestroyOnLoad（V0.3-12 波 3）：LoadScene 时该对象（作子树根）跨场景迁移存活
+    //（§14.9；序列化字段，随场景保存/快照还原）
+    bool ddol = go->dontDestroyOnLoad();
+    if (!edit) ImGui::BeginDisabled();
+    if (ImGui::Checkbox("Dont Destroy On Load", &ddol)) {
+        go->setDontDestroyOnLoad(ddol);
+        ctx.markSceneDirty();
+    }
+    if (!edit) ImGui::EndDisabled();
     ImGui::Separator();
 
     drawTransform(ctx, go);

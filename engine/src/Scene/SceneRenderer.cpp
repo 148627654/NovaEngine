@@ -12,6 +12,8 @@
 #include <NovaEngine/Assets/MaterialAsset.h>
 #include <NovaEngine/Core/Logger.h>
 #include <NovaEngine/Render/Cubemap.h>
+#include <NovaEngine/Render/Framebuffer.h>
+#include <NovaEngine/Render/PostProcess.h>
 #include <NovaEngine/Render/ShadowMap.h>
 #include <NovaEngine/Render/SkyboxRenderer.h>
 #include <NovaEngine/Scene/Camera.h>
@@ -19,6 +21,7 @@
 #include <NovaEngine/Scene/MeshRenderer.h>
 #include <NovaEngine/Scene/Scene.h>
 #include <NovaEngine/Scene/Transform.h>
+#include <NovaEngine/UI/UIRenderer.h>
 
 #include <glm/geometric.hpp>              // dot（阴影盒中心投影）
 #include <glm/gtc/matrix_transform.hpp>   // lookAt / perspective / radians / inverse
@@ -49,10 +52,12 @@ bool assembleFromCamera(const Camera* cam, const RenderCamera& fallback, RenderC
 
 }  // namespace
 
-void SceneRenderer::renderScene(const Scene& scene, const RenderCamera& fallbackCamera) {
+// 场景 3D 渲染本体（renderScene 与 renderSceneToOutput 共用；不设置 gamma 模式——
+// 由两个公开入口按路径设置，见各入口注释）
+void renderSceneInternal(const Scene& scene, const RenderCamera& fallbackCamera) {
     // 1. 渲染相机：isMain 优先，无则第一个 Camera，再无则复制 fallback
     RenderCamera renderCam;
-    collectCamera(scene, fallbackCamera, renderCam);
+    SceneRenderer::collectCamera(scene, fallbackCamera, renderCam);
 
     // 2. 灯光：第一个 DirectionalLight（方向取自 Transform.forward）；无则默认方向
     DirectionalLightData light;
@@ -112,6 +117,49 @@ void SceneRenderer::renderScene(const Scene& scene, const RenderCamera& fallback
     if (shadowEnabled) Renderer::drawShadowPass(shadowParams, shadowItems);
     if (scene.showGrid) Renderer::drawGrid(scene.fogColor);
     Renderer::endFrame();
+}
+
+void SceneRenderer::renderScene(const Scene& scene, const RenderCamera& fallbackCamera) {
+    // 旧路径（编辑器 Edit / 兼容调用）：固定非 HDR——uGamma=1/2.2，行为与波 2 逐像素一致
+    // （本入口每帧重置 gamma 模式，防止与 renderSceneToOutput 的 HDR 帧交错时状态泄漏）
+    Renderer::setGammaMode(false);
+    renderSceneInternal(scene, fallbackCamera);
+}
+
+uint32_t SceneRenderer::renderSceneToOutput(const Scene& scene, const RenderCamera& fallbackCamera,
+                                            Framebuffer& hdrFbo, Framebuffer& outLdrFbo,
+                                            const PostProcessSettings& pp,
+                                            const std::vector<OutlineItem>* outlines,
+                                            const std::function<void()>& afterSceneDraw) {
+    // 尺寸无效（最小化/未创建）：不渲染，返回 outLdrFbo 纹理（调用方跳过显示，不崩溃）
+    if (hdrFbo.width() <= 0 || hdrFbo.height() <= 0 ||
+        outLdrFbo.width() <= 0 || outLdrFbo.height() <= 0)
+        return outLdrFbo.colorTextureId();
+
+    // HDR 决策：pp.enabled && GL 支持可渲染 RGBA16F（hdrSupported 内含懒 init + 降级探测）。
+    // HDR → 场景线性输出（uGamma=0 直通，combine 内 ACES+gamma）；否则 1/2.2（直通路径）
+    const bool hdr = pp.enabled && PostProcess::hdrSupported();
+    Renderer::setGammaMode(hdr);
+
+    // 3D pass（含天空/阴影/网格）→ 描边（若有）→ afterSceneDraw 注入点（Show Colliders 线框等）→ resolve
+    hdrFbo.bind();
+    renderSceneInternal(scene, fallbackCamera);
+    if (outlines != nullptr) {
+        for (const OutlineItem& item : *outlines)
+            if (item.mesh)
+                Renderer::drawOutline(item.mesh, item.model, item.color);
+    }
+    if (afterSceneDraw)
+        afterSceneDraw();
+    hdrFbo.resolveMsaa();
+
+    // 后处理（或 RGBA8 直通 blit）→ UI（outLdrFbo 内，§14.3 渲染顺序：HDR→post→UI→显示）
+    PostProcess::resize(hdrFbo.width(), hdrFbo.height());
+    outLdrFbo.bind();
+    PostProcess::apply(hdrFbo.colorTextureId(), pp);
+    UIRenderer::render(scene, outLdrFbo.width(), outLdrFbo.height());
+    outLdrFbo.unbind();
+    return outLdrFbo.colorTextureId();
 }
 
 void SceneRenderer::collectCamera(const Scene& scene, const RenderCamera& fallback,

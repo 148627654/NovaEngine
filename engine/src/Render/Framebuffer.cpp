@@ -9,11 +9,14 @@ namespace {
 
 // 构建渲染目标集合，返回主 FBO 是否完整。
 // samples > 1：主 FBO 挂 MSAA 彩色纹理 + resolve FBO/纹理；否则 resolve 纹理直接挂主 FBO（resolveMsaa 变 no-op）。
+// hdrColor=true（V0.3-14）：MSAA 颜色附件与 resolve 纹理均为 RGBA16F（MSAA blit 同格式）；
+// 默认 RGBA8（旧行为逐像素一致）。
 // 参数用引用回写句柄——冻结头不允许添加成员函数，create 经引用把成员变量交给本函数
 bool buildAttachments(uint32_t& outFbo, uint32_t& outMsaaColor, uint32_t& outDepthStencil,
                       uint32_t& outResolveFbo, uint32_t& outResolveTex,
-                      int width, int height, int samples) {
+                      int width, int height, int samples, bool hdrColor) {
     const bool msaa = samples > 1;
+    const GLenum colorFormat = hdrColor ? GL_RGBA16F : GL_RGBA8;
 
     glGenFramebuffers(1, &outFbo);
     glBindFramebuffer(GL_FRAMEBUFFER, outFbo);
@@ -21,7 +24,7 @@ bool buildAttachments(uint32_t& outFbo, uint32_t& outMsaaColor, uint32_t& outDep
     if (msaa) {
         glGenTextures(1, &outMsaaColor);
         glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, outMsaaColor);
-        glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, samples, GL_RGBA8, width, height, GL_TRUE);
+        glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, samples, colorFormat, width, height, GL_TRUE);
         glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, 0);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                                GL_TEXTURE_2D_MULTISAMPLE, outMsaaColor, 0);
@@ -43,10 +46,14 @@ bool buildAttachments(uint32_t& outFbo, uint32_t& outMsaaColor, uint32_t& outDep
         return false;
     }
 
-    // resolve 纹理（ImGui::Image 显示用）
+    // resolve 纹理（ImGui::Image 显示用；HDR 时 RGBA16F，blit 同格式）
     glGenTextures(1, &outResolveTex);
     glBindTexture(GL_TEXTURE_2D, outResolveTex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    if (hdrColor) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
+    } else {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    }
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -69,7 +76,7 @@ bool buildAttachments(uint32_t& outFbo, uint32_t& outMsaaColor, uint32_t& outDep
 
 }  // namespace
 
-bool Framebuffer::create(int width, int height, int samples) {
+bool Framebuffer::create(int width, int height, int samples, bool hdrColor) {
     if (width <= 0 || height <= 0) {
         Logger::error("[Framebuffer] 非法尺寸 {}x{}", width, height);
         return false;
@@ -79,9 +86,10 @@ bool Framebuffer::create(int width, int height, int samples) {
     m_width = width;
     m_height = height;
     m_samples = samples;
+    m_hdrColor = hdrColor;
 
     if (buildAttachments(m_fbo, m_msaaColor, m_depthStencil, m_resolveFbo, m_resolveTex,
-                         width, height, samples)) {
+                         width, height, samples, hdrColor)) {
         return true;
     }
 
@@ -91,9 +99,10 @@ bool Framebuffer::create(int width, int height, int samples) {
     m_width = width;
     m_height = height;
     m_samples = 0;
+    m_hdrColor = hdrColor;
 
     if (buildAttachments(m_fbo, m_msaaColor, m_depthStencil, m_resolveFbo, m_resolveTex,
-                         width, height, 0)) {
+                         width, height, 0, hdrColor)) {
         return true;
     }
 
@@ -115,9 +124,10 @@ void Framebuffer::destroy() {
 void Framebuffer::resize(int width, int height) {
     if (width == m_width && height == m_height) return;   // 尺寸不变：no-op
     const int samples = m_samples;
+    const bool hdr = m_hdrColor;
     destroy();
     if (width > 0 && height > 0) {
-        create(width, height, samples);
+        create(width, height, samples, hdr);   // 格式保持重建（V0.3-14）
     }
     // 尺寸为 0（窗口最小化/面板折叠）：保持空状态，调用方应跳过本 FBO 的渲染
 }

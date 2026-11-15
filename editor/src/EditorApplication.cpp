@@ -3,6 +3,7 @@
 #include "DragDrop.h"
 #include "Packager.h"
 #include "panels/AssetBrowserPanel.h"
+#include "panels/BuildSettingsPanel.h"
 #include "panels/ConsolePanel.h"
 #include "panels/EnvironmentPanel.h"
 #include "panels/HierarchyPanel.h"
@@ -208,6 +209,11 @@ void EditorApplication::init() {
     statsPanel->open = false;   // 默认关，F8 开关（V0.2-11）
     m_statsPanel = statsPanel.get();
     m_panels.push_back(std::move(statsPanel));
+    // Build Settings（V0.3-12 波 3，第 8 面板）：默认关，File → Build Settings… 打开
+    auto buildSettingsPanel = std::make_unique<BuildSettingsPanel>();
+    buildSettingsPanel->open = false;
+    m_buildSettingsPanel = buildSettingsPanel.get();
+    m_panels.push_back(std::move(buildSettingsPanel));
 
     // 默认加载示例场景（不存在则保持空场景）
     const std::filesystem::path demo =
@@ -229,12 +235,14 @@ void EditorApplication::shutdown() {
     // 音频引擎最先关闭（V0.3-2）：不依赖 GL，先停掉设备线程与全部声音，
     // 再清面板与 Renderer（§14.2 生命周期）
     AudioEngine::shutdown();
+    SceneManager::shutdown();  // V0.3-12 波 3：清活动场景指针/构建列表/待加载队列
     m_panels.clear();  // ConsolePanel 析构时注销 Logger sink
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
     SkyboxRenderer::shutdown();  // V0.2-7：与 Renderer 同序清理（GL 上下文仍存活）
     UIRenderer::shutdown();      // V0.3-3：动态 VBO/ui shader 释放（需 GL 上下文存活，先于 Renderer）
+    PostProcess::shutdown();     // V0.3-14 波 3：后处理 shader/ping-pong 纹理释放（GL 存活期、Renderer 之前）
     Renderer::shutdown();
     Logger::info("NovaEditor 退出");
 }
@@ -296,6 +304,9 @@ void EditorApplication::update(float dt) {
         } else if (!m_context.paused) {
             m_scene->update(dt);
         }
+        // §15 帧内顺序（V0.3-12 波 3）：scene->update 之后执行帧末场景切换
+        //（SceneManager::loadScene 入队的请求在此落地；无待加载 no-op）
+        SceneManager::flushPendingLoad();
     } else {
         m_scene->flushDestroyQueue();
         // 编辑器相机状态回写场景（随 Ctrl+S 持久化）
@@ -387,6 +398,12 @@ void EditorApplication::showMainMenu() {
             ImGui::Separator();
             if (ImGui::MenuItem("Save Scene", "Ctrl+S", false, editMode)) saveScene();
             if (ImGui::MenuItem("Save Scene As...", nullptr, false, editMode)) saveSceneAs();
+            ImGui::Separator();
+            // Build Settings（V0.3-12 波 3）：第 8 面板开关（Edit 态可编辑；Play 态经 SceneManager 消费）
+            if (ImGui::MenuItem("Build Settings...", nullptr, false, editMode)) {
+                if (m_buildSettingsPanel)
+                    m_buildSettingsPanel->open = true;
+            }
             ImGui::Separator();
             // V0.5-1：一键打包（Play 态禁用；无当前场景路径时点击后提示先保存）
             if (ImGui::MenuItem("Build Player...", nullptr, false, editMode)) buildPlayer();
@@ -521,6 +538,9 @@ void EditorApplication::enterPlayMode() {
 
     // 音频生命周期（§14.2）：进入 Play 前停掉一切残留声音（编辑期预览/上一轮 Play 遗留），防爆音
     AudioEngine::stopAll();
+    // 场景管理（V0.3-12 波 3）：登记活动场景——Play 中 loadScene/flushPendingLoad 的
+    // DDOL 迁移与原地重建都作用于此 Scene 指针（同一对象原地重建，指针不失效）
+    SceneManager::setActiveScene(m_scene.get());
 
     m_context.playSnapshot = SceneSerializer::serialize(*m_scene);  // 快照 = JSON 字符串（§7.2）
     m_context.m_playEntryDirty = m_context.sceneDirty;  // 记录进 Play 前脏状态（修复 7.2-4）
@@ -542,6 +562,9 @@ void EditorApplication::exitPlayMode() {
     // 音频生命周期（§14.2）：先统一 stopAll 防爆音；随后 deserialize 析构 AudioSource
     // 时各自的析构 stop 已无句柄可停（no-op），语义仍正确
     AudioEngine::stopAll();
+    // 场景管理（V0.3-12 波 3）：退出 Play 注销活动场景并清待加载队列
+    //（快照还原走 exitPlayMode 自身的 deserialize，与 SceneManager 无关）
+    SceneManager::setActiveScene(nullptr);
 
     // 同一 Scene 对象原地重建（外部持有的 Scene* 不失效；选中集按 ID 天然保留）
     SceneSerializer::deserialize(*m_scene, m_context.playSnapshot);

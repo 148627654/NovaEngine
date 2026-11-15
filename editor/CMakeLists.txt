@@ -19,6 +19,7 @@ add_executable(NovaEditor
     src/panels/ConsolePanel.cpp
     src/panels/AssetBrowserPanel.cpp
     src/panels/StatsPanel.cpp
+    src/panels/BuildSettingsPanel.cpp
     # Dear ImGui（docking）核心源码
     ${imgui_SOURCE_DIR}/imgui.cpp
     ${imgui_SOURCE_DIR}/imgui_draw.cpp
