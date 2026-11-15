@@ -138,3 +138,36 @@ Wave 2 审查无 P0；两条 P1 已修复（见下段「已修复项」）。以
 3. PBR 亮度整体下降无补偿（物理正确化；demo 观感变化已写入 FEATURES §11.1）
 4. resolveAssetAbs 锚点规则在 MaterialAsset.cpp 重复实现（与 AssetDatabase.cpp 文件内 static 两处同步风险，建议收敛共享内部头）
 5. 双轨省略内联段往返语义：Assign 前内联值 save→reload 后丢失（"Assign→重启→Detach"显示默认材质，与同会话 Detach 行为不一致）
+
+## V0.3 波 2 审查（2026-11-15，物理/音频/UI/协程/事件 三线合并）
+
+**总评：需修 → 已修复闭环，可合**。12 项核对清单全部通过（Jolt pimpl 隔离/固定步进反解无 D² 错误/帧序 §15/事件 swap-flush/物理裁定/UI 零 ImGui/CMake 铁律/交叉侵入零越界）。无 P0。
+
+**评审发现（Reviewer）——全部已修复**：
+
+- **P1-1 协程悬挂 UAF**（Behaviour.cpp 帧末回收）：LIFO 处理 pending + 唤醒链重等待已销毁目标 → 下帧解引用已释放节点。修复：FIFO 游标 + 「本 pass 已销毁目标」集合 + 链式唤醒立即续推 + 病态自旋上限 kMaxChainResumes=64（销毁帧+warn）。
+- **P1-2 序列化分发缺口**（SceneSerializer.cpp）：componentTypeName 只硬编码 4 旧组件 → 新内置组件误报「脚本未注册」+ 同名脚本静默换型风险。修复：按 typeId 反查 ComponentRegistry 优先于 scriptTypeName；同名冲突 warn。
+- **P2-1** stopAllCoroutines 请求在帧末唤醒路径被吞 → 回收循环每迭代复查。
+- **P2-2** UI 输入时序：player 侧 processInput 移到 scene.update 前（本帧按钮状态）；编辑器渲染期调用滞后一帧（已知取舍，契约注释分侧表述）。
+- **P2-3** 协程推进无 enabled/activeSelf 过滤 → 按架构师 §14.6 裁定修正注释（enabled=false 不暂停=Unity 一致；inactive 子树照常推进=已文档化差异）。
+- **P2-4** 残留 [DBG] 日志与临时 SEH 栈回溯脚手架 → 全部清除（grep 归零）。
+- **P2-5** player HiDPI 输入坐标不一致 → 逻辑坐标×缩放比换算。
+- **P2-6** UIRenderer 坏尺寸早退未复位本帧输入标志 → 消费前移到尺寸校验前。
+
+**运行期缺陷（DevOps 栈回溯定位）——已修复**：
+
+- **两 exe 启动崩溃**：PhysicsWorld.cpp 的 Jolt 分配器注册晚于 Impl 成员区 Jolt 容器构造（初始化列表阶段 JPH::Allocate 空函数指针调用）。修复：JoltInitGuard RAII 声明在成员区最前（A 线已复核）。
+- **Player 启动挂死**：FontAtlas.cpp 像素缓冲声明了 size 但从未分配 → 首帧白块烘焙越界写。修复：ensureLoaded 分配 512²（B 线已核对磁盘版本）。
+
+**波 2 遗留 backlog**（设计取舍，均已文档化）：
+
+1. **跨 Behaviour 的 WaitForCoroutine 会悬垂**：WaitForCoroutine 指针依赖 std::list 地址稳定，只保证同 Behaviour 内互等安全；跨对象等待请用 WaitUntil 轮询替代（冻结设计取舍，不修）。
+2. **编辑器 SceneView UI 输入滞后一帧**：processInput 在渲染期调用，脚本 onUpdate 读到上一帧按钮状态（player 无此问题；波 3 渲染链重构时评估迁移）。
+3. **Text.fontPath v1 不生效**（仅默认 msyh.ttc 图集），字段仅序列化保留（V0.5 字体资产化时启用）。
+4. **FontAtlas 固定 64px 参考高**：冻结头 glyph() 无字号参数所致，>64px 字号放大略软；图集满（1024²）后新字形缺失。
+5. **物理近似裁定**：sensor 为 body 级（混合 trigger/实体 collider 按实体处理）；子 GO Collider 相对 TRS 注册时烘焙（运行期移动需重挂）；Play 期增删 Collider 走销毁重建丢速度；球/胶囊非均匀缩放取近似轴。
+6. **Jolt 进程级初始化随 Scene 构造**：编辑器启动即起 hw-1 job 线程（与 miniaudio 设备线程并列为引擎合法非主线程）。
+7. **msyh.ttc 绝对路径 Windows 专用**：缺文件时 warn 降级内置 5x7 ASCII 字体，不崩。
+8. **Release 构建未验证**：本波仅 Debug 全量构建+冒烟；Release（含 Jolt 首编）随波 4 全量回归执行。
+
+**验证记录**：74 第一方源文件强制重编译零错误零第一方警告；NovaEditor 冒烟（demo v3 打开、守卫 15 条验证通过、真实拖放 sphere.obj 导入成功）；NovaPlayer 冒烟（场景加载 + SpinningCube 旋转正常）；音频本机有设备 init 成功（无设备降级路径代码化，未实测）。日志归档 build/smoke/。

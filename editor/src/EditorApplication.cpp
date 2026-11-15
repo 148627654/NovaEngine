@@ -138,6 +138,42 @@ bool insideRect(const ImVec2& p, const ImVec2& mn, const ImVec2& mx) {
     return p.x >= mn.x && p.x <= mx.x && p.y >= mn.y && p.y <= mx.y;
 }
 
+// §14.2/§15：Play 态每帧把音频监听器同步到「主相机」。选择顺序：
+//   AudioListener 组件（第一个 active，§14.2「挂主相机 GO」）→ isMain 相机 →
+//   第一个 active 相机 → 编辑器相机位置兜底。
+// 与 SceneViewPanel 的 pickPlayCamera（面板内匿名函数，规则一致）解耦实现：
+// 监听器更新放在 EditorApplication 而非面板——保证 SceneView 面板关闭时监听器仍更新，
+// 且位置落在 §15 帧内顺序的 setListener 位（scene->update 之后、渲染之前）。
+void updateAudioListener(NovaEngine::Scene* scene, const NovaEditor::EditorCamera& editorCam) {
+    using namespace NovaEngine;
+    if (!AudioEngine::available())
+        return;   // 无设备降级：跳过（AudioEngine 内部同样 no-op，此处省一次遍历）
+
+    const Transform* t = nullptr;
+    for (auto* l : scene->findComponents<AudioListener>())
+        if (l->gameObject()->activeInHierarchy()) { t = l->transform(); break; }
+    if (!t) {
+        auto cameras = scene->findComponents<Camera>();
+        for (auto* c : cameras)
+            if (c->isMain && c->gameObject()->activeInHierarchy()) { t = c->transform(); break; }
+        if (!t)
+            for (auto* c : cameras)
+                if (c->gameObject()->activeInHierarchy()) { t = c->transform(); break; }
+    }
+
+    glm::vec3 pos, forward(0.0f, 0.0f, -1.0f), up(0.0f, 1.0f, 0.0f);
+    if (t) {
+        pos = t->worldPosition();
+        forward = t->forward();   // 世界 forward（Transform 约定 +Z）
+        up = t->up();
+    } else {
+        pos = editorCam.position();
+        forward = editorCam.forward();
+        up = glm::vec3(0.0f, 1.0f, 0.0f);   // 编辑器相机 up 近似 +Y（俯仰不过极点即成立）
+    }
+    AudioEngine::setListener(pos, forward, up);
+}
+
 }  // namespace
 
 EditorApplication::EditorApplication(std::unique_ptr<NovaEngine::Window> window)
@@ -190,11 +226,15 @@ void EditorApplication::init() {
 
 void EditorApplication::shutdown() {
     using namespace NovaEngine;
+    // 音频引擎最先关闭（V0.3-2）：不依赖 GL，先停掉设备线程与全部声音，
+    // 再清面板与 Renderer（§14.2 生命周期）
+    AudioEngine::shutdown();
     m_panels.clear();  // ConsolePanel 析构时注销 Logger sink
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
     SkyboxRenderer::shutdown();  // V0.2-7：与 Renderer 同序清理（GL 上下文仍存活）
+    UIRenderer::shutdown();      // V0.3-3：动态 VBO/ui shader 释放（需 GL 上下文存活，先于 Renderer）
     Renderer::shutdown();
     Logger::info("NovaEditor 退出");
 }
@@ -267,6 +307,11 @@ void EditorApplication::update(float dt) {
     const auto updateT1 = std::chrono::steady_clock::now();
     Stats::setSectionMs("update",
                         std::chrono::duration<float, std::milli>(updateT1 - updateT0).count());
+
+    // 音频监听器（V0.3-2，§15 帧内顺序）：scene->update 之后、面板渲染（SceneView 整帧 3D
+    // 渲染在 onGui 内完成）之前。Edit 态仅 flushDestroyQueue，不进音频路径（退出 Play 已 stopAll）
+    if (m_context.state == EditorContext::EditorState::Play)
+        updateAudioListener(m_scene.get(), m_camera);
 
     showMainMenu();
     handleGlobalShortcuts();
@@ -474,6 +519,9 @@ void EditorApplication::enterPlayMode() {
     using namespace NovaEngine;
     if (m_context.state != EditorContext::EditorState::Edit) return;
 
+    // 音频生命周期（§14.2）：进入 Play 前停掉一切残留声音（编辑期预览/上一轮 Play 遗留），防爆音
+    AudioEngine::stopAll();
+
     m_context.playSnapshot = SceneSerializer::serialize(*m_scene);  // 快照 = JSON 字符串（§7.2）
     m_context.m_playEntryDirty = m_context.sceneDirty;  // 记录进 Play 前脏状态（修复 7.2-4）
     m_context.state = EditorContext::EditorState::Play;
@@ -490,6 +538,10 @@ void EditorApplication::enterPlayMode() {
 void EditorApplication::exitPlayMode() {
     using namespace NovaEngine;
     if (m_context.state != EditorContext::EditorState::Play) return;
+
+    // 音频生命周期（§14.2）：先统一 stopAll 防爆音；随后 deserialize 析构 AudioSource
+    // 时各自的析构 stop 已无句柄可停（no-op），语义仍正确
+    AudioEngine::stopAll();
 
     // 同一 Scene 对象原地重建（外部持有的 Scene* 不失效；选中集按 ID 天然保留）
     SceneSerializer::deserialize(*m_scene, m_context.playSnapshot);

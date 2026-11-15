@@ -2,6 +2,8 @@
 #include <NovaEngine/Scene/Transform.h>
 #include <NovaEngine/Core/UUID.h>
 #include <NovaEngine/Core/Logger.h>
+#include <NovaEngine/Core/Events.h>
+#include <NovaEngine/Physics/PhysicsWorld.h>
 #include <NovaEngine/Scripting/Behaviour.h>
 #include <algorithm>
 #include <functional>
@@ -17,7 +19,15 @@ void collectSubtree(GameObject* root, std::vector<GameObject*>& out) {
 }
 }  // namespace
 
-Scene::Scene(const std::string& name) : m_name(name) {}
+Scene::Scene(const std::string& name)
+    : m_name(name), m_physics(std::make_unique<PhysicsWorld>(*this)) {}
+
+// 析构定义在 .cpp：unique_ptr<PhysicsWorld> 需要 Impl 完整类型（PhysicsWorld.h 为 pimpl）
+Scene::~Scene() = default;
+
+PhysicsWorld* Scene::physics() const {
+    return m_physics.get();
+}
 
 const std::string& Scene::name() const {
     return m_name;
@@ -132,8 +142,12 @@ void Scene::forEachObject(const std::function<void(GameObject*)>& fn) const {
 }
 
 void Scene::update(float dt) {
-    // Play 态：flush 销毁队列 + 深度优先广播 onUpdate
+    // Play 态帧序骨架（V0.3 波 2 定案，§15）：
+    //   flush 销毁队列 → 物理固定步进 → onUpdate 广播 → 协程 advance(false)
+    //   → Events::flushDeferred → 协程 advance(true)
+    // Edit 态不调 update（编辑器只在 Play 调）；物理 step 在广播前（脚本当帧读到新物理状态）。
     flushDestroyQueue();
+    if (m_physics) m_physics->step(dt);   // 固定步进累加器（kFixedStep=1/60，每帧最多 3 步）
 
     std::function<void(GameObject*)> broadcast = [&](GameObject* go) {
         if (go->activeSelf()) {
@@ -150,9 +164,39 @@ void Scene::update(float dt) {
     };
     for (const auto& root : m_rootObjects)
         broadcast(root.get());
+
+    // 协程推进（普通 yield：NextFrame/AfterSeconds/…）——advanceCoroutines 是 Behaviour 私有，
+    // Scene 是 friend（§14.6 帧内顺序第 c 步）。裁定：enabled=false 不暂停协程（与 Unity 一致）；
+    // 非激活 GO 的协程照常推进（已知差异，已文档化）
+    std::function<void(GameObject*)> advance = [&](GameObject* go) {
+        for (auto& comp : go->m_components)
+            if (auto* b = dynamic_cast<Behaviour*>(comp.get()))
+                b->advanceCoroutines(dt, false);
+        for (auto& child : go->m_children)
+            advance(child.get());
+    };
+    for (const auto& root : m_rootObjects)
+        advance(root.get());
+
+    NovaEngine::Events::flushDeferred();   // 延迟事件投递（物理 TriggerEvent 等在此送达脚本）
+
+    // 协程推进（WaitForEndOfFrame）：第 e 步（§15）
+    std::function<void(GameObject*)> advanceEnd = [&](GameObject* go) {
+        for (auto& comp : go->m_components)
+            if (auto* b = dynamic_cast<Behaviour*>(comp.get()))
+                b->advanceCoroutines(0.0f, true);
+        for (auto& child : go->m_children)
+            advanceEnd(child.get());
+    };
+    for (const auto& root : m_rootObjects)
+        advanceEnd(root.get());
 }
 
 void Scene::start() {
+    // V0.3-1：进入 Play 时物理全量重建——所有 body 从当前 Transform 重建（覆盖 Edit 态
+    // 的增量注册漂移，保证 Play 起始状态与编辑结果一致）
+    if (m_physics) m_physics->syncFromTransforms();
+
     // 进入 Play 时调用一次：深度优先广播 onStart（顺序与 onUpdate 一致）。
     // 跳过非激活子树与 enabled=false 的 Behaviour（裁定 #6）。
     std::function<void(GameObject*)> broadcast = [&](GameObject* go) {

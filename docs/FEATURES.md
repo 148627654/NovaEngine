@@ -680,4 +680,57 @@ NovaPlayer 内快捷键：**Esc** 退出（其余无）。
 
 ---
 
+## 12. V0.3 波 2 新增：物理 / 音频 / 运行时 UI / 协程 / 事件（2026-11-15）
+
+> 本波引入两个新第三方库：Jolt Physics v5.7.0（物理）、miniaudio 0.11.26（音频）。全部组件经 ComponentRegistry 注册（内置组件现共 15 个），Inspector Add Component 下拉自动出现。
+
+### 12.1 物理（Jolt）
+
+- **组件**：Rigidbody（mass/useGravity/isKinematic/线性与角度阻尼）+ BoxCollider/SphereCollider/CapsuleCollider/MeshCollider（isTrigger/center/形状参数）
+- **挂载规则**：仅 Collider → 静态体（地面类）；Rigidbody（可无 Collider）→ 动态/kinematic 体；Collider 可挂同 GO 或子 GO（子 GO 相对 TRS 烘焙为附加形状）；isTrigger 只发事件不参与碰撞求解；MeshCollider 仅 static/kinematic
+- **脚本 API**：`addForce/addImpulse/velocity()/setVelocity`（body 未创建时安全 no-op）；`scene->physics()->raycast(origin, dir, maxDist, outHit)` 返回 RaycastHit{hit,gameObject,point,normal,distance}
+- **固定步进**：60Hz 累加器（每帧最多 3 步防死亡螺旋）；**动态刚体直改 Transform 会被物理覆盖**——用 addForce/setVelocity 驱动；kinematic 由脚本改 Transform 驱动
+- **触发器 = 事件**：脚本 `subscribeEvent<TriggerEvent>`（TriggerEvent{entered, gameObjectA, gameObjectB}）帧末投递
+- **Play 调试**：Play 工具栏「Show Colliders」开关绘制碰撞体绿色线框（Edit 态不显示）
+- 退出 Play 物理状态随快照还原；进入 Play 自动 syncFromTransforms
+
+### 12.2 3D 音频（miniaudio）
+
+- **组件**：AudioSource（clipPath 支持 wav/mp3/flac/ogg、volume/loop/spatialBlend/minDistance/maxDistance/playOnAwake + Play()/Stop()）；AudioListener 无字段（挂主相机 GO）
+- **空间化**：spatialBlend=0 纯 2D、=1 全 3D（min/maxDistance 线性衰减）、中间值双分量混合；位置每帧跟随 Transform
+- **生命周期**：编辑器启动即初始化设备；进出 Play 自动 stopAll 防爆音；无音频设备时优雅降级（warn + Play() no-op）
+- 资产经 AssetStream 加载（pak 兼容）；v1 全量解码 PCM f32（流式 BGM 列 V1.0-8）
+
+### 12.3 运行时 UI（与编辑器 ImGui 完全分离，可打包进 Player）
+
+- **组件**：Canvas（UI 子树根，屏幕空间全屏）+ Image（spritePath/color/slice9 九宫格/anchor/offset/size）+ Text（UTF-8 中文/fontSize/color/fontPath）+ Button（三色组 + onClick 脚本回调 + hovered()/pressedThisFrame() 查询）
+- **布局**：点锚 v1（位置 = anchor×屏幕 + offset 像素）；全锚点拉伸列 V0.5-13
+- **字体**：stb_truetype 按需烘焙图集（中文）；默认系统 msyh.ttc，失败降级内置 5x7 ASCII（warn）；Text.fontPath v1 仅序列化保留
+- **渲染**：单动态 VBO + per-atlas 批处理 → 每 Canvas 内容走字体图集时 1 draw call（每张精灵贴图 +1）；Edit 预览与 Play 同路径，无 Canvas 零开销
+- **输入**：Play 态 letterbox fit-rect 坐标换算 → Button hover/press/onClick 边沿触发；Edit 态不处理（点击不穿透场景拾取）
+- **时序契约**：Player 主循环在 scene.update **前**调 processInput（脚本 onUpdate 读到本帧按钮状态）；编辑器 SceneView 为渲染期调用（脚本侧滞后一帧，已知取舍）
+
+### 12.4 协程（C++20）
+
+- `Behaviour::startCoroutine(...)` 内 `co_yield WaitForSeconds(2)` / `WaitForEndOfFrame()` / `WaitUntil(条件)` / `WaitForCoroutine(另一协程指针)`（嵌套等待）
+- 帧内顺序：物理 step → onUpdate 广播 → 协程推进（普通 yield）→ 事件 flush → 协程推进（WaitForEndOfFrame）
+- **语义**：enabled=false 不暂停协程（与 Unity 一致）；非激活 GO 上的协程照常推进（与 Unity 差异，已知取舍）；对象销毁/退出 Play 协程自动终止
+- 同 Behaviour 内嵌套等待完全安全；**跨 Behaviour 的 WaitForCoroutine 可能悬垂（设计取舍，勿跨对象等待）**
+
+### 12.5 事件系统
+
+- `Events::subscribe<E>(handler)` / `publish<E>(event)`（同步）/ `post<E>(event)`（延迟，帧末 flush）/ `unsubscribe(sub)`
+- `Behaviour::subscribeEvent<E>(handler)` 成员便捷版——组件析构自动退订（无悬挂）
+- 类型 key = std::type_index；publish 快照防重入；flush swap 模式防投递期间重入；物理 TriggerEvent 经 post 投递
+
+### 12.6 架构变化速览
+
+- **帧序**：flushDestroyQueue → 物理 step(60Hz) → onUpdate → 协程(普通) → Events flush → 协程(帧末) → 渲染 → UI
+- **ComponentRegistry**：内置组件 15 个（Transform/MeshRenderer/Camera/DirectionalLight + 物理 5 + UI 4 + 音频 2）；序列化分发按注册表反查（同名脚本冲突会 warn，不再静默替换）
+- **依赖**：cmake/Dependencies.cmake 新增 Jolt v5.7.0 + miniaudio 0.11.26（FetchContent）
+- **着色器**：新增 ui.vert/.frag、debug_line.vert/.frag
+- 构建冒烟：74 源文件零错误零第一方警告；编辑器守卫 15 条验证通过；Player 场景加载+旋转正常
+
+---
+
 *本文档由文档 Agent 基于 editor/src 与 engine/src 的实际实现撰写。发现文档与代码不符时，以代码为准并欢迎更新本文件。*

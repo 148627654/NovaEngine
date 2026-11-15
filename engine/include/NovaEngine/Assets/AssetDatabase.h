@@ -4,6 +4,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <NovaEngine/Audio/AudioClip.h>
 #include <NovaEngine/Render/Cubemap.h>
 #include <NovaEngine/Render/Material.h>
 #include <NovaEngine/Render/Mesh.h>
@@ -37,6 +38,8 @@ public:
     std::shared_ptr<MaterialAsset> getMaterialAsset(const std::filesystem::path& relativePath);
     // Inspector 保存 .novamat 后刷新：清该路径缓存 → 引用物体下一帧提交即变色
     void reloadMaterialAsset(const std::filesystem::path& relativePath);
+    // 音频资产（V0.3-2）：weak_ptr 缓存；解码失败 nullptr + Logger::warn
+    std::shared_ptr<AudioClip> getAudioClip(const std::filesystem::path& relativePath);
     void clearCache();       // 菜单 Reload Assets（修改文件后手动刷新）
     void releaseUnused();
 
@@ -46,6 +49,7 @@ private:
     std::unordered_map<std::string, std::weak_ptr<Texture>> m_textureCache;
     std::unordered_map<std::string, std::weak_ptr<Cubemap>> m_cubemapCache;
     std::unordered_map<std::string, std::weak_ptr<MaterialAsset>> m_materialAssetCache;
+    std::unordered_map<std::string, std::weak_ptr<AudioClip>> m_audioClipCache;
     std::unordered_map<std::string, Material> m_materialCache;             // 子网格键 → 材质（importModel 旁表）
     std::filesystem::path m_projectRoot;
 };

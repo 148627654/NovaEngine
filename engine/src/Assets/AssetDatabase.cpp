@@ -407,11 +407,36 @@ void AssetDatabase::reloadMaterialAsset(const std::filesystem::path& relativePat
     m_materialAssetCache.erase(cacheKeyFor(abs));
 }
 
+std::shared_ptr<AudioClip> AssetDatabase::getAudioClip(const std::filesystem::path& relativePath) {
+    // 音频资产（V0.3-2）：weak_ptr 缓存（同文件只解码一次）；解码失败 nullptr + Logger::warn
+    if (relativePath.empty()) return nullptr;
+
+    const std::filesystem::path abs = resolveAssetAbs(relativePath);
+    const std::string key = cacheKeyFor(abs);
+
+    // 缓存命中（weak_ptr 失效时锁失败 → 清掉重载）
+    if (auto it = m_audioClipCache.find(key); it != m_audioClipCache.end()) {
+        if (auto clip = it->second.lock())
+            return clip;
+        m_audioClipCache.erase(it);
+    }
+
+    // 未命中 → AudioClip::load（AssetStream 读取 + miniaudio 全量解码，细节失败原因已由其记录）
+    auto clip = AudioClip::load(relativePath);
+    if (!clip) {
+        Logger::warn("AssetDatabase: 音频资产加载失败 {}", relativePath.string());
+        return nullptr;
+    }
+    m_audioClipCache[key] = clip;
+    return clip;
+}
+
 void AssetDatabase::clearCache() {
     m_meshCache.clear();
     m_textureCache.clear();
     m_cubemapCache.clear();
     m_materialAssetCache.clear();
+    m_audioClipCache.clear();   // V0.3-2：音频缓存随 Reload Assets 一并清空
     // 旁表缓存一并清空（改文件后 Reload Assets 重取材质/贴图路径）
     m_materialCache.clear();
     s_albedoPathCache.clear();
@@ -423,6 +448,7 @@ void AssetDatabase::releaseUnused() {
     std::erase_if(m_textureCache, [](const auto& kv) { return kv.second.expired(); });
     std::erase_if(m_cubemapCache, [](const auto& kv) { return kv.second.expired(); });
     std::erase_if(m_materialAssetCache, [](const auto& kv) { return kv.second.expired(); });
+    std::erase_if(m_audioClipCache, [](const auto& kv) { return kv.second.expired(); });
 }
 
 }  // namespace NovaEngine

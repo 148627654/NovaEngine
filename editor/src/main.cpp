@@ -48,6 +48,13 @@ int main() {
     // 3. 渲染器（必须在窗口上下文创建之后）
     Renderer::init();
     SkyboxRenderer::init();  // V0.2-7：天空渲染（空 VAO + skybox shader；失败仅报错不中断）
+    UIRenderer::init();      // V0.3-3：运行时 UI（ui.vert/.frag + 动态 VBO；失败降级 no-op）
+
+    // 3.5 音频引擎（V0.3-2 §14.2：编辑器启动即 init，Play 只 stopAll）。
+    // 无可用设备时 init 返回 false——音频功能降级禁用（available()=false 全 API no-op），
+    // 不中断编辑器；失败原因已由 AudioEngine::init 内部 Logger::warn 记录。
+    if (!AudioEngine::init())
+        Logger::warn("音频引擎初始化失败：音频功能已禁用（不影响其余功能）");
 
     // 4. 项目根（与第 2 步的 current_path 一致；VS 调试运行目录同样指向项目根）
     AssetDatabase::setProjectRoot(std::filesystem::current_path());

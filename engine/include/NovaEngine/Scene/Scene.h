@@ -11,6 +11,8 @@
 
 namespace NovaEngine {
 
+class PhysicsWorld;
+
 class Scene {
 public:
     explicit Scene(const std::string& name = "Untitled");
@@ -39,6 +41,8 @@ public:
     }
     void update(float dt);      // Play 态：flush + 深度优先广播 onUpdate
     void start();               // Play 开始时调用一次：DFS 广播 onStart（跳过非激活子树与 enabled=false 的 Behaviour）
+    ~Scene();                   // 定义在 .cpp（PhysicsWorld 完整类型）
+    PhysicsWorld* physics() const;   // V0.3-1：场景级物理服务（Edit 态不 step）
 
     // 环境（SceneSerializer 直接读写）
     glm::vec3 skyColor = glm::vec3(0.18f, 0.22f, 0.35f);
@@ -62,6 +66,7 @@ public:
 
 private:
     std::string m_name;
+    std::unique_ptr<PhysicsWorld> m_physics;   // V0.3-1：构造时创建
     std::vector<std::unique_ptr<GameObject>> m_rootObjects;
     std::unordered_map<uint64_t, GameObject*> m_objectById;   // O(1) 查找
     std::vector<uint64_t> m_destroyQueue;                     // 避免 update 中迭代器失效

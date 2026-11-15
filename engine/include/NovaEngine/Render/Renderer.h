@@ -50,6 +50,8 @@ public:
     static uint32_t lastTriangleCount();    // 上一帧主 pass 累计三角形数（indexCount/3）
     static uint32_t lastShadowItemCount();  // 上一帧阴影 pass 项数（不计入 lastDrawCalls）
     static uint32_t lastTransparentCount(); // 上一帧透明队列项数（V0.2-8）
+    // 调试线框（V0.3-1 物理碰撞体）：positions 为顶点对序列（a,b 成对）；3D pass 后绘制
+    static void drawLines(const std::vector<glm::vec3>& positions, const glm::vec3& color);
 };
 
 }  // namespace NovaEngine

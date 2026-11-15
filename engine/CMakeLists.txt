@@ -17,6 +17,8 @@ target_link_libraries(NovaEngine PUBLIC
     glm::glm
     assimp
     nlohmann_json::nlohmann_json
-    stb)
+    stb
+    Jolt
+    miniaudio)
 
 nova_configure_target(NovaEngine)

@@ -1,5 +1,8 @@
 #include "InspectorPanel.h"
+#include "AudioWidgets.h"         // 音频组件编辑（V0.3-2，本线 Coder C）
 #include "MaterialEditorWidgets.h"   // 材质编辑控件集（Inspector 与 .novamat 模态共用，V0.3-6）
+#include "PhysicsWidgets.h"       // 物理组件编辑（V0.3-1，Coder A 波 2 并行创建；不匹配类型 no-op）
+#include "UIWidgets.h"            // UI 组件编辑（V0.3-3，Coder B 波 2 并行创建；不匹配类型 no-op）
 
 #include "../EditorContext.h"
 
@@ -180,6 +183,23 @@ void InspectorPanel::onGui(EditorContext& ctx, EditorCamera&) {
     drawMeshRenderer(ctx, go);
     drawCamera(ctx, go);
     drawDirectionalLight(ctx, go);
+    // V0.3 波 2：物理/音频/UI 组件编辑——widget 头漏斗分发（三个 header-only 头签名一致：
+    // drawXxxComponents(ctx, comp, editMode)；各头 dynamic_cast 识别自身组件类型，不匹配 no-op）。
+    // 遍历 go 全部组件（getComponents 走 dynamic_cast，含派生类）。
+    {
+        const bool editMode = ctx.state == EditorContext::EditorState::Edit;
+        for (auto* comp : go->getComponents<NovaEngine::Component>()) {
+            drawPhysicsComponents(ctx, comp, editMode);
+            drawAudioComponents(ctx, comp, editMode);
+            drawUIComponents(ctx, comp, editMode);
+            // 上面的 Remove 按钮可能已释放 comp（析构指针作废）：校验存活后继续，
+            // 否则终止分发（后续快照指针不可再解引用）
+            bool alive = false;
+            for (auto* c : go->getComponents<NovaEngine::Component>())
+                if (c == comp) { alive = true; break; }
+            if (!alive) break;
+        }
+    }
     // 移除脚本会重建整个场景（旧指针作废），立即结束本帧其余绘制
     if (drawScripts(ctx, go)) {
         ImGui::End();

@@ -31,6 +31,9 @@ std::shared_ptr<Shader> s_blinnPhong;
 std::shared_ptr<Shader> s_gridShader;
 std::shared_ptr<Shader> s_outlineShader;
 std::shared_ptr<Shader> s_shadowShader;   // 阴影深度 pass（V0.2-6）；加载失败置 nullptr，不崩溃
+std::shared_ptr<Shader> s_debugLineShader;   // 物理碰撞体线框（V0.3-1）；失败置 nullptr，不崩溃
+uint32_t s_debugLineVao = 0;                 // 线框 VAO/VBO（懒创建，动态顶点流）
+uint32_t s_debugLineVbo = 0;
 
 // ===== 阴影（V0.2-6）=====
 ShadowMap s_shadowMap;                // 深度贴图（懒创建，mapSize 变化时重建）
@@ -198,6 +201,12 @@ void Renderer::init() {
     if (!s_shadowShader)
         Logger::error("[Renderer] 阴影着色器加载失败，阴影功能不可用（不崩溃）");
 
+    // 调试线框着色器（V0.3-1 物理碰撞体）：CameraBlock UBO（binding 0）复用 + uColor uniform
+    s_debugLineShader = Shader::createFromFiles("assets/shaders/debug_line.vert",
+                                                "assets/shaders/debug_line.frag");
+    if (!s_debugLineShader)
+        Logger::error("[Renderer] debug_line 着色器加载失败，物理线框不可用（不崩溃）");
+
     // CameraBlock UBO（binding 0：mat4 uViewProj + vec4 uCamPos，std140）
     glGenBuffers(1, &s_cameraUbo);
     glBindBuffer(GL_UNIFORM_BUFFER, s_cameraUbo);
@@ -227,6 +236,9 @@ void Renderer::shutdown() {
     s_outlineShader.reset();
     s_shadowMap.destroy();
     s_shadowShader.reset();
+    s_debugLineShader.reset();
+    if (s_debugLineVao) { glDeleteVertexArrays(1, &s_debugLineVao); s_debugLineVao = 0; }
+    if (s_debugLineVbo) { glDeleteBuffers(1, &s_debugLineVbo); s_debugLineVbo = 0; }
     s_shadowActive = false;
     s_initialized = false;
 }
@@ -455,6 +467,35 @@ void Renderer::drawOutline(std::shared_ptr<Mesh> mesh, const glm::mat4& modelMat
     glStencilMask(0xFF);
 
     s_drawCalls += 2;   // 描边两遍各计一次
+}
+
+void Renderer::drawLines(const std::vector<glm::vec3>& positions, const glm::vec3& color) {
+    // 调试线框（V0.3-1 物理碰撞体）：positions 为顶点对序列（a,b 成对，GL_LINES）。
+    // 3D pass 之后调用；CameraBlock UBO（binding 0，beginFrame 已填充）复用为 uViewProj。
+    if (!s_initialized || !s_debugLineShader || positions.size() < 2)
+        return;
+
+    // 懒创建线框 VAO/VBO（动态顶点流，每帧整体上传——碰撞体线框规模小）
+    if (s_debugLineVao == 0) {
+        glGenVertexArrays(1, &s_debugLineVao);
+        glBindVertexArray(s_debugLineVao);
+        glGenBuffers(1, &s_debugLineVbo);
+        glBindBuffer(GL_ARRAY_BUFFER, s_debugLineVbo);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), nullptr);
+        glBindVertexArray(0);
+    }
+
+    s_debugLineShader->bind();
+    s_debugLineShader->setVec3("uColor", color);
+    glBindVertexArray(s_debugLineVao);
+    glBindBuffer(GL_ARRAY_BUFFER, s_debugLineVbo);
+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(positions.size() * sizeof(glm::vec3)),
+                 positions.data(), GL_STREAM_DRAW);
+    glLineWidth(2.0f);   // 碰撞体线宽 2px（深度测试保持开启：线框被场景几何正确遮挡）
+    glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(positions.size()));
+    glBindVertexArray(0);
+    ++s_drawCalls;
 }
 
 // ===== 统计访问器（V0.2-11）：返回上一帧结算值 =====

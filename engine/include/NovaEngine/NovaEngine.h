@@ -7,6 +7,7 @@
 #include <NovaEngine/Core/Logger.h>
 #include <NovaEngine/Core/UUID.h>
 #include <NovaEngine/Core/Stats.h>
+#include <NovaEngine/Core/Events.h>
 
 #include <NovaEngine/Render/Renderer.h>
 #include <NovaEngine/Render/Shader.h>
@@ -30,6 +31,14 @@
 #include <NovaEngine/Scene/MeshRenderer.h>
 #include <NovaEngine/Scene/Camera.h>
 #include <NovaEngine/Scene/DirectionalLight.h>
+#include <NovaEngine/Scene/Rigidbody.h>
+#include <NovaEngine/Scene/Collider.h>
+#include <NovaEngine/Scene/AudioListener.h>
+#include <NovaEngine/Scene/AudioSource.h>
+#include <NovaEngine/Scene/Canvas.h>
+#include <NovaEngine/Scene/Image.h>
+#include <NovaEngine/Scene/Text.h>
+#include <NovaEngine/Scene/Button.h>
 
 #include <NovaEngine/Assets/AssetDatabase.h>
 #include <NovaEngine/Assets/AssetStream.h>
@@ -41,6 +50,16 @@
 #include <NovaEngine/Assets/TextureMeta.h>
 
 #include <NovaEngine/Scripting/Behaviour.h>
+#include <NovaEngine/Scripting/Coroutine.h>
 #include <NovaEngine/Scripting/ScriptRegistry.h>
+
+#include <NovaEngine/Physics/PhysicsTypes.h>
+#include <NovaEngine/Physics/PhysicsWorld.h>
+
+#include <NovaEngine/Audio/AudioEngine.h>
+#include <NovaEngine/Audio/AudioClip.h>
+
+#include <NovaEngine/UI/FontAtlas.h>
+#include <NovaEngine/UI/UIRenderer.h>
 
 #include <NovaEngine/Serialization/SceneSerializer.h>

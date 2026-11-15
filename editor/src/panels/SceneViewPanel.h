@@ -41,6 +41,9 @@ private:
     // Follow Selected 状态（V0.3-10 子集）：开关/选中变化/退出 Play 时重置偏移
     bool m_followOffsetValid = false;
     glm::vec3 m_followOffset{0.0f};
+    // Show Colliders（V0.3-1 波 2 编辑器接线）：Play 工具栏开关 → 渲染时
+    // physics()->debugDraw 收集线段 + Renderer::drawLines 绘制（Edit 态不显示不收集）
+    bool m_showColliders = false;
 };
 
 }  // namespace NovaEditor

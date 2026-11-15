@@ -14,6 +14,7 @@
 #include <NovaEngine/Core/Stats.h>
 #include <NovaEngine/Core/Time.h>
 #include <NovaEngine/Core/UUID.h>
+#include <NovaEngine/Physics/PhysicsWorld.h>   // debugDraw（Show Colliders 线段收集，V0.3-1）
 #include <NovaEngine/Render/Renderer.h>
 #include <NovaEngine/Render/ShadowMap.h>
 #include <NovaEngine/Render/SkyboxRenderer.h>
@@ -23,6 +24,7 @@
 #include <NovaEngine/Scene/Scene.h>
 #include <NovaEngine/Scene/SceneRenderer.h>
 #include <NovaEngine/Scene/Transform.h>
+#include <NovaEngine/UI/UIRenderer.h>         // 运行时 UI 渲染/输入（V0.3-3 编辑器接线）
 
 // glfwGetTime（Play toast 时间戳）用；顺序要求与 EditorApplication 一致：
 // glad 先行（__gl_h_ 守卫令 GLFW 内嵌 <GL/gl.h> 变 no-op），GLFW 头在 glad 之后。
@@ -36,6 +38,7 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <vector>
 
 namespace NovaEditor {
 
@@ -94,6 +97,9 @@ uint64_t pickObject(NovaEngine::Scene* scene, const glm::vec3& origin, const glm
     });
     return bestId;
 }
+
+// 碰撞体线框颜色（V0.3-1 波 2 编辑器接线：绿色，Unity Physics Debug 视觉一致）
+constexpr glm::vec3 kColliderLineColor(0.25f, 0.95f, 0.35f);
 
 // 子树（含自身）全部 MeshRenderer 的世界包围盒并集
 void accumulateAabb(NovaEngine::GameObject* go, NovaEngine::AABB& out, bool& any) {
@@ -211,6 +217,20 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
         fallback.position = camera.position();
         m_fbo.bind();
         SceneRenderer::renderScene(*scene, fallback);
+        // 运行时 UI（V0.3-3）：3D pass 之后、同一 FBO 内绘制（§14.3 顺序；
+        // 无 Canvas 时 UIRenderer 内部零开销跳过，无需前置判断）
+        UIRenderer::render(*scene, w, h);
+        // 碰撞体线框（V0.3-1 波 2 编辑器接线，Play 工具栏「Show Colliders」开关）：
+        // debugDraw 回调收集顶点对 → drawLines 一次性绘制（debug_line shader，3D pass 后）
+        if (m_showColliders && scene->physics()) {
+            std::vector<glm::vec3> lines;
+            scene->physics()->debugDraw([&lines](const glm::vec3& a, const glm::vec3& b) {
+                lines.push_back(a);
+                lines.push_back(b);
+            });
+            if (!lines.empty())
+                Renderer::drawLines(lines, kColliderLineColor);
+        }
         m_fbo.resolveMsaa();
         m_fbo.unbind();
     } else {
@@ -284,6 +304,8 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
                 Renderer::drawOutline(mr->mesh, go->transform()->worldMatrix(), kOutlineColor);
         }
         Renderer::endFrame();
+        // 运行时 UI（V0.3-3）：Edit 预览与 Play 同路径（§14.3「Edit 预览与 Play 同路径」）
+        UIRenderer::render(*scene, w, h);
         m_fbo.resolveMsaa();
         m_fbo.unbind();
     }
@@ -307,6 +329,17 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
         ImGui::Image((ImTextureID)(intptr_t)m_fbo.colorTextureId(), dstSize,
                      ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
         hovered = ImGui::IsItemHovered();
+        // UI 输入（V0.3-3）：Play 态把鼠标从面板坐标经 letterbox fit-rect 换算到
+        // FBO 渲染分辨率坐标（w/h 即 UIRenderer::render 的布局空间）；Edit 态不处理。
+        // 仅悬停在游戏画面内时投递（工具栏/letterbox 黑边区域不算命中）。
+        if (hovered) {
+            const ImGuiIO& io = ImGui::GetIO();
+            const glm::vec2 mouseFbo(
+                (io.MousePos.x - (vpPos.x + offset.x)) * (static_cast<float>(w) / dstSize.x),
+                (io.MousePos.y - (vpPos.y + offset.y)) * (static_cast<float>(h) / dstSize.y));
+            UIRenderer::processInput(*scene, mouseFbo, Input::isMouseDown(MouseButton::Left),
+                                     Input::isMousePressed(MouseButton::Left));
+        }
     }
     const bool windowHovered = ImGui::IsWindowHovered();
     const glm::vec2 vpPosF(vpPos.x, vpPos.y), vpSizeF(vpSize.x, vpSize.y);
@@ -410,6 +443,10 @@ void SceneViewPanel::drawPlayToolbar(EditorContext& ctx) {
     // Follow Selected（V0.3-10 子集）：开关切换时重置偏移
     ImGui::SameLine();
     if (ImGui::Checkbox("Follow Selected", &ctx.followSelected)) m_followOffsetValid = false;
+    // Show Colliders（V0.3-1 波 2 编辑器接线）：Play 中开关碰撞体线框（面板局部状态，
+    // 不序列化不置脏；渲染路径见 onGui 的 Play 分支）
+    ImGui::SameLine();
+    ImGui::Checkbox("Show Colliders", &m_showColliders);
     ImGui::Separator();
 }
 

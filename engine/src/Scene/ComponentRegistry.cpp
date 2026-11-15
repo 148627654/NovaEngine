@@ -1,7 +1,15 @@
 #include <NovaEngine/Scene/ComponentRegistry.h>
+#include <NovaEngine/Scene/AudioListener.h>
+#include <NovaEngine/Scene/AudioSource.h>
+#include <NovaEngine/Scene/Button.h>
 #include <NovaEngine/Scene/Camera.h>
+#include <NovaEngine/Scene/Canvas.h>
+#include <NovaEngine/Scene/Collider.h>
 #include <NovaEngine/Scene/DirectionalLight.h>
+#include <NovaEngine/Scene/Image.h>
 #include <NovaEngine/Scene/MeshRenderer.h>
+#include <NovaEngine/Scene/Rigidbody.h>
+#include <NovaEngine/Scene/Text.h>
 #include <NovaEngine/Scene/Transform.h>
 #include <NovaEngine/Core/Logger.h>
 #include <algorithm>
@@ -53,6 +61,17 @@ std::unique_ptr<Component> ComponentRegistry::create(const std::string& typeName
         (void)std::make_unique<MeshRenderer>(owner);
         (void)std::make_unique<Camera>(owner);
         (void)std::make_unique<DirectionalLight>(owner);
+        (void)std::make_unique<AudioSource>(owner);    // V0.3-2（Coder C 波 2）
+        (void)std::make_unique<AudioListener>(owner);  // V0.3-2（Coder C 波 2）
+        (void)std::make_unique<Canvas>(owner);         // V0.3-3（Coder B 波 2 UI）
+        (void)std::make_unique<Image>(owner);          // V0.3-3（Coder B 波 2 UI）
+        (void)std::make_unique<Text>(owner);           // V0.3-3（Coder B 波 2 UI）
+        (void)std::make_unique<Button>(owner);         // V0.3-3（Coder B 波 2 UI）
+        (void)std::make_unique<Rigidbody>(owner);      // V0.3-1（Coder A 波 2 物理）
+        (void)std::make_unique<BoxCollider>(owner);    // V0.3-1（Coder A 波 2 物理）
+        (void)std::make_unique<SphereCollider>(owner); // V0.3-1（Coder A 波 2 物理）
+        (void)std::make_unique<CapsuleCollider>(owner);// V0.3-1（Coder A 波 2 物理）
+        (void)std::make_unique<MeshCollider>(owner);   // V0.3-1（Coder A 波 2 物理）
     }
 
     auto& map = entries();

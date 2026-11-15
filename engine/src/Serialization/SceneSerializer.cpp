@@ -4,9 +4,6 @@
 #include <NovaEngine/Scene/Scene.h>
 #include <NovaEngine/Scene/GameObject.h>
 #include <NovaEngine/Scene/Transform.h>
-#include <NovaEngine/Scene/MeshRenderer.h>
-#include <NovaEngine/Scene/Camera.h>
-#include <NovaEngine/Scene/DirectionalLight.h>
 #include <NovaEngine/Scripting/Behaviour.h>
 #include <NovaEngine/Scripting/ScriptRegistry.h>
 #include <NovaEngine/Core/Logger.h>
@@ -70,14 +67,13 @@ std::string scriptTypeName(const Component* comp) {
 }
 
 std::string componentTypeName(const Component* comp) {
-    if (dynamic_cast<const Transform*>(comp))
-        return "Transform";
-    if (dynamic_cast<const MeshRenderer*>(comp))
-        return "MeshRenderer";
-    if (dynamic_cast<const Camera*>(comp))
-        return "Camera";
-    if (dynamic_cast<const DirectionalLight*>(comp))
-        return "DirectionalLight";
+    // P1-2 修复（V0.3 波 2）：内置组件名不再硬编码 4 个旧组件——按 typeId 反查
+    // ComponentRegistry 注册名（覆盖波 1/2 新增的 11 个内置组件：AudioSource/Rigidbody/
+    // Canvas 等）；未命中再走 scriptTypeName（脚本组件共用 Behaviour 的 typeId，
+    // 与任何内置组件 typeId 都不相等，天然不会误判）。
+    for (const std::string& name : ComponentRegistry::builtinNames())
+        if (ComponentRegistry::typeIdForName(name) == comp->typeId())
+            return name;
     const std::string name = scriptTypeName(comp);
     if (!ScriptRegistry::exists(name))
         Logger::warn("序列化：脚本组件 \"{}\" 未在 ScriptRegistry 注册，反序列化时将被跳过", name);
@@ -424,6 +420,10 @@ std::unique_ptr<Component> SceneSerializer::createComponentFromJson(GameObject* 
         return nullptr;
     }
     const std::string type = safeGet(j, "type", std::string());
+    // P1-2 修复：用户脚本与内置组件同名时，反序列化按约定内置优先（与序列化时
+    // componentTypeName 的内置优先判定一致），但显式告警——防静默数据丢失级替换
+    if (ComponentRegistry::exists(type) && ScriptRegistry::exists(type))
+        Logger::warn("反序列化：组件名 \"{}\" 同时存在内置与脚本注册，内置优先（脚本同名组件被替换）", type);
     if (auto builtin = ComponentRegistry::create(type, owner))
         return builtin;
     if (auto script = ScriptRegistry::create(type, owner))

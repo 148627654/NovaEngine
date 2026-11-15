@@ -1549,4 +1549,22 @@ SceneSerializer 组件分发改查 ComponentRegistry（脚本仍走 ScriptRegist
 4. LoadScene 一律延迟到 flushPendingLoad（防广播中迭代器失效）
 5. UI 零 ImGui 依赖：评审 grep engine/include/NovaEngine/UI 校验
 6. 动态刚体直改 Transform 被覆盖（文档化）；miniaudio 单实现点
+
+## 20. 波 2 落地终态（2026-11-15，物理/音频/UI/协程/事件 三线合并验收通过）
+
+**执行结果**：74 第一方源文件强制重编译零错误零第一方警告；NovaEditor/NovaPlayer 两 exe 冒烟全绿（守卫 15 条验证通过、demo v3 打开、Player 场景加载+旋转正常）。Reviewer 12 项清单全过，2 P1 + 6 P2 全部修复闭环；DevOps 另定位修复 2 处运行期启动缺陷（栈回溯实证）。
+
+**§13 增补（序列化分发终态）**：SceneSerializer::componentTypeName 已改为**按 typeId 反查 ComponentRegistry**（遍历 builtinNames 比对 typeIdForName）优先于 scriptTypeName——覆盖全部 11 个新内置组件，不再误报「脚本组件未注册」；内置+脚本同名双注册在反序列化时 Logger::warn 防静默替换（P1-2 修复）。组件分发契约自波 0 起不变。
+
+**§14.3 增补（UI 输入时序分侧契约）**：`UIRenderer::processInput` 的调用时序为——Player 主循环在 `scene.update` **之前**调用（脚本 onUpdate 读到本帧按钮状态）；编辑器 SceneView 为渲染期调用（脚本侧按钮状态滞后一帧，已知取舍，调用点注释文档化）。波 2 的编辑器 UI 渲染位于场景 FBO 内、resolveMsaa 前（MSAA 覆盖 UI，波 2 无后处理故正确）；**波 3 迁移**：renderSceneToOutput 落地后两处调用点（SceneViewPanel Play/Edit 路径）迁至 PostProcess::apply 之后、输出 LDR FBO 内，Player 侧换 renderSceneToOutput 统一（调用点已留注释）。
+
+**§14.6 增补（协程回收实现注记）**：帧末回收采用 FIFO 游标 + 「本 pass 已销毁目标」集合 + 链式唤醒（新 waitFor 指向已销毁/正在销毁目标时立即续推）；病态自旋上限 kMaxChainResumes=64（销毁帧 + warn）。节点地址复用误判的最坏后果是提前放行一次（无崩溃，安全降级）。跨 Behaviour 的 WaitForCoroutine 悬垂为冻结设计取舍（同 Behaviour 内互等完全安全）。
+
+**§14.1 增补（Jolt 初始化顺序，DevOps 修复）**：`RegisterDefaultAllocator/Factory/RegisterTypes` 必须先于任何 Jolt 对象构造——PhysicsWorld.cpp 的 Impl 成员区以 **JoltInitGuard RAII 声明在最前**（先注册分配器；析构逆序在 teardownAll 之后注销，引用计数无泄漏）。此前分配器注册晚于 pairFilter 等成员构造，启动即 JPH::Allocate 空指针崩溃。
+
+**§12 增补（已批准的物理头补全并入冻结签名）**：PhysicsWorld.h 注册通道 8 方法（register/unregisterRigidbody/Collider + addForce/addImpulse/velocity(const Rigidbody*)/setVelocity）；Rigidbody.h/Collider.h 显式 `~X() override` 与 `onAwake() override` 声明；AudioSource.h 私有 AudioHandle m_handle + 显式析构；Button.h 三个非序列化运行期输入状态字段（m_hovered/m_pressed/m_pressedEdge）；Scene::start() 头部调用 `m_physics->syncFromTransforms()`。
+
+**UI 模块零 ImGui 依赖**已复核（grep 仅注释命中）；NovaPlayer 直接继承 UI 模块 → 打包独立性成立。
+
+**遗留**（详见 KNOWN-ISSUES.md「波 2 遗留 backlog」）：跨 Behaviour 协程等待悬垂（设计取舍）、编辑器 UI 输入一帧滞后、Text.fontPath v1 不生效、物理近似裁定 5 项、Release 构建留待波 4 全量回归。
 7. 波间热点文件（Scene.cpp/EditorApplication.cpp/SceneViewPanel.cpp/InspectorPanel.cpp）按「骨架先行」纪律执行

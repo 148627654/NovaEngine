@@ -100,7 +100,44 @@ endif()
 add_library(stb INTERFACE)
 target_include_directories(stb INTERFACE ${stb_SOURCE_DIR})
 
-# ---------- 拉取并配置其余依赖（imgui/imguizmo/stb 已单独 Populate）----------
+# ---------- Jolt Physics v5.7.0（§12.1：仓库根无 CMakeLists.txt → Populate + add_subdirectory(Build)）----------
+# 注意：必须显式保持 CMP0169 OLD（本文件开头已设置），Jolt 走 Populate 路径
+FetchContent_Declare(jolt
+    GIT_REPOSITORY https://github.com/jrouwe/JoltPhysics.git
+    GIT_TAG v5.7.0
+    GIT_SHALLOW TRUE)
+FetchContent_GetProperties(jolt)
+if(NOT jolt_POPULATED)
+    FetchContent_Populate(jolt)
+endif()
+# 选项铁律（§12.1/§12.3 逐条）：漏设 USE_STATIC_MSVC_RUNTIME_LIBRARY=OFF 会 /MT 混用 → LNK2038；
+# FLOATING_POINT_EXCEPTIONS_ENABLED=ON 时 Debug 下 FP 异常中断；其余为项目规则要求的裁剪
+set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "" FORCE)
+set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
+set(FLOATING_POINT_EXCEPTIONS_ENABLED OFF CACHE BOOL "" FORCE)
+set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
+set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+set(ENABLE_OBJECT_STREAM OFF CACHE BOOL "" FORCE)
+set(JPH_USE_DX12 OFF CACHE BOOL "" FORCE)
+set(JPH_USE_VK OFF CACHE BOOL "" FORCE)
+set(JPH_USE_MTL OFF CACHE BOOL "" FORCE)
+set(DEBUG_RENDERER_IN_DEBUG_AND_RELEASE ON CACHE BOOL "" FORCE)   # 碰撞体线框提取（debugDraw 依赖）
+add_subdirectory(${jolt_SOURCE_DIR}/Build ${jolt_BINARY_DIR})
+
+# ---------- miniaudio 0.11.26（§12.2：单头文件无 CMakeLists → Populate 成 INTERFACE 库）----------
+# MINIAUDIO_IMPLEMENTATION 唯一定义于 engine/src/Audio/AudioEngine.cpp（stb_image 同款纪律）
+FetchContent_Declare(miniaudio
+    GIT_REPOSITORY https://github.com/mackron/miniaudio.git
+    GIT_TAG 0.11.26
+    GIT_SHALLOW TRUE)
+FetchContent_GetProperties(miniaudio)
+if(NOT miniaudio_POPULATED)
+    FetchContent_Populate(miniaudio)
+endif()
+add_library(miniaudio INTERFACE)
+target_include_directories(miniaudio INTERFACE ${miniaudio_SOURCE_DIR})
+
+# ---------- 拉取并配置其余依赖（imgui/imguizmo/stb/jolt/miniaudio 已单独 Populate）----------
 FetchContent_MakeAvailable(glfw glm assimp nlohmann_json glad)
 
 # glad v2.0.8 仓库根没有 CMakeLists.txt（MakeAvailable 只拉取、不 add_subdirectory），

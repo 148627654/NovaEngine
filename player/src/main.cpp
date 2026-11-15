@@ -16,6 +16,7 @@
 #include <NovaEngine/NovaEngine.h>
 
 #include <glad/gl.h>                    // glViewport
+#include <GLFW/glfw3.h>                  // glfwGetWindowSize（窗口逻辑尺寸；GLFW_INCLUDE_NONE 已定义）
 #include <glm/gtc/matrix_transform.hpp> // lookAt / perspective / radians
 
 #include <cstring>
@@ -70,6 +71,21 @@ std::filesystem::path executableDir() {
     return std::filesystem::path(buf).parent_path();
 }
 
+// 场景主相机（isMain 优先 → 第一个 Camera；跳过非激活子树）；无相机返回 nullptr。
+// 与 SceneRenderer::collectCamera 同一选取约定（§7.3）。
+const NovaEngine::Camera* findMainCamera(const NovaEngine::Scene& scene) {
+    const NovaEngine::Camera* first = nullptr;
+    const NovaEngine::Camera* main = nullptr;
+    scene.forEachObject([&](NovaEngine::GameObject* go) {
+        if (!go->activeInHierarchy()) return;
+        const NovaEngine::Camera* cam = go->getComponent<NovaEngine::Camera>();
+        if (!cam) return;
+        if (!first) first = cam;
+        if (cam->isMain && !main) main = cam;
+    });
+    return main ? main : first;
+}
+
 // 默认 pak：exe 同目录第一个 *.novapak（§10.5）
 std::filesystem::path findPakNextToExe(const std::filesystem::path& exeDir) {
     std::error_code ec;
@@ -119,7 +135,12 @@ int main(int argc, char** argv) {
     Renderer::init();
     SkyboxRenderer::init();
 
-    // 5. 场景加载（AssetStream：先查 pak 再查磁盘）+ Play 启动
+    // 5. 音频 + 运行时 UI（V0.3-2/3）：音频失败只 warn 继续（优雅降级）；UI 失败内部 no-op
+    if (!AudioEngine::init())
+        Logger::warn("[NovaPlayer] 音频设备初始化失败，继续无音频运行");
+    UIRenderer::init();
+
+    // 6. 场景加载（AssetStream：先查 pak 再查磁盘）+ Play 启动
     Scene scene("Player");
     if (!SceneSerializer::loadFromFile(scene, args.scene)) {
         Logger::error("[NovaPlayer] 场景加载失败: {}", args.scene.string());
@@ -127,7 +148,7 @@ int main(int argc, char** argv) {
     }
     scene.start();
 
-    // 6. 主循环（无相机时 fallback 相机兜底；场景相机经 collectCamera 优先）
+    // 7. 主循环（无相机时 fallback 相机兜底；场景相机经 collectCamera 优先）
     RenderCamera fallback;
     fallback.position = glm::vec3(0.0f, 1.5f, 8.0f);
     fallback.view = glm::lookAt(fallback.position, glm::vec3(0.0f, 1.0f, 0.0f),
@@ -149,12 +170,41 @@ int main(int argc, char** argv) {
         fallback.projection = glm::perspective(glm::radians(60.0f), aspect, 0.1f, 1000.0f);
         glViewport(0, 0, fbW, fbH);
 
+        // UI 输入（V0.3-3 契约：Scene::update 之前调用 → 脚本 onUpdate 读到本帧按钮状态）。
+        // HiDPI：Input 鼠标为窗口逻辑坐标，UI 渲染按帧缓冲尺寸——按缩放比换算（评审 P2-5）
+        int winW = args.width, winH = args.height;
+        glfwGetWindowSize(window->nativeHandle(), &winW, &winH);
+        glm::vec2 uiMouse = Input::mousePosition();
+        if (winW > 0 && winH > 0)
+            uiMouse = glm::vec2(uiMouse.x * static_cast<float>(fbW) / static_cast<float>(winW),
+                                uiMouse.y * static_cast<float>(fbH) / static_cast<float>(winH));
+        UIRenderer::processInput(scene, uiMouse, Input::isMouseDown(MouseButton::Left),
+                                 Input::isMousePressed(MouseButton::Left));
+
+        // 帧序（§15）：scene.update（物理→脚本→协程→事件）→ 音频监听 → 3D → UI 渲染 → 显示
         scene.update(Time::deltaTime());
+
+        // 音频监听跟随场景主相机（V0.3-2；直接用主相机 Transform，§14.2）
+        if (const Camera* cam = findMainCamera(scene); cam && cam->transform()) {
+            const Transform* t = cam->transform();
+            AudioEngine::setListener(t->worldPosition(), t->forward(), t->up());
+        } else {
+            // 无场景相机：fallback 相机（view 为 lookAt 矩阵，forward = -第三行，up = 第二行）
+            const glm::vec3 fwd(-fallback.view[2][0], -fallback.view[2][1], -fallback.view[2][2]);
+            const glm::vec3 up(fallback.view[1][0], fallback.view[1][1], fallback.view[1][2]);
+            AudioEngine::setListener(fallback.position, fwd, up);
+        }
+
         SceneRenderer::renderScene(scene, fallback);
+
+        // 运行时 UI（V0.3-3）：3D pass 之后绘制（输入已在本帧 update 前处理）
+        UIRenderer::render(scene, fbW, fbH);
         window->swapBuffers();
     }
 
-    // 7. 清理（GL 资源先释放；窗口最后析构 → glfwTerminate）
+    // 8. 清理（UI/音频 → 天空/渲染器 GL 资源先释放；窗口最后析构 → glfwTerminate）
+    UIRenderer::shutdown();
+    AudioEngine::shutdown();
     SkyboxRenderer::shutdown();
     Renderer::shutdown();
     Logger::info("[NovaPlayer] 退出");
