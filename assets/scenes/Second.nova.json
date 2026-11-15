@@ -1,0 +1,123 @@
+{
+    "editorCamera": {
+        "distance": 8.0,
+        "pitch": -0.3499999940395355,
+        "target": [
+            0.0,
+            1.0,
+            0.0
+        ],
+        "yaw": 0.6000000238418579
+    },
+    "environment": {
+        "ambientColor": [
+            0.12000000476837158,
+            0.15000000596046448,
+            0.15000000596046448
+        ],
+        "showGrid": true,
+        "skyColor": [
+            0.10000000149011612,
+            0.20000000298023224,
+            0.2199999988079071
+        ],
+        "skyCubemapPath": "",
+        "skyExposure": 1.0,
+        "skyHorizonColor": [
+            0.4000000059604645,
+            0.6200000047683716,
+            0.6100000143051148
+        ],
+        "skyMode": "Gradient",
+        "skyRotation": 0.0,
+        "skyZenithColor": [
+            0.15000000596046448,
+            0.3600000143051147,
+            0.38999998569488525
+        ]
+    },
+    "name": "Second",
+    "objects": [
+        {
+            "active": true,
+            "components": [
+                {
+                    "position": [
+                        0.0,
+                        3.0,
+                        8.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        1.0,
+                        0.0,
+                        6.123233995736766e-17
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "type": "Transform"
+                },
+                {
+                    "clearColor": [
+                        0.10000000149011612,
+                        0.20000000298023224,
+                        0.2199999988079071,
+                        1.0
+                    ],
+                    "farPlane": 1000.0,
+                    "fov": 60.0,
+                    "isMain": true,
+                    "nearPlane": 0.10000000149011612,
+                    "type": "Camera"
+                }
+            ],
+            "id": 16840732146653812735,
+            "name": "Main Camera",
+            "parent": 0
+        },
+        {
+            "active": true,
+            "components": [
+                {
+                    "position": [
+                        0.0,
+                        5.0,
+                        0.0
+                    ],
+                    "rotation": [
+                        -0.3535766899585724,
+                        0.3535766899585724,
+                        -0.14639034867286682,
+                        0.853543758392334
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "type": "Transform"
+                },
+                {
+                    "castShadows": true,
+                    "color": [
+                        1.0,
+                        0.949999988079071,
+                        0.8500000238418579
+                    ],
+                    "intensity": 1.2000000476837158,
+                    "shadowBias": 0.0005000000237487257,
+                    "shadowMapSize": 2048,
+                    "shadowRange": 60.0,
+                    "type": "DirectionalLight"
+                }
+            ],
+            "id": 9723810445972830153,
+            "name": "Sun",
+            "parent": 0
+        }
+    ],
+    "version": 3
+}
