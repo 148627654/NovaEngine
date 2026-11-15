@@ -237,3 +237,14 @@ Wave 2 审查无 P0；两条 P1 已修复（见下段「已修复项」）。以
 - **根因**：AssetBrowserPanel 拖拽源条件只含模型/贴图文件，`.novaprefab` 漏在条件外 → 按住 [PF] 条目拖拽根本不启动。接收端（SceneViewPanel 的 kAssetPayload → importPrefabToScene）与拖放链路波 4 已全部就位，仅缺源头一处注册。
 - **修复**：拖拽源条件补 `DragDrop::isPrefabFile(e.rel)`（AssetBrowserPanel.cpp）。教训：GUI 验收清单「拖放实例化」正是为捕获这类交互缺口而设——自动冒烟验不到拖拽源是否注册。
 - **验证**：Debug 重编译通过；拖放交互待用户 GUI 复验。
+
+**波 4 后修复（2026-11-15，物理验收「Cube 不掉落/穿地」——三层 Jolt 集成缺陷）**：
+
+验收场景 `assets/scenes/PhysicsTest.nova.json`（静态地面 + 落体刚体）暴露三个叠加缺陷，全部修复（PhysicsWorld.cpp）：
+
+1. **动态体未激活**（症状：Cube 悬浮不动）：`CreateBody` 只分配+入管理器，Jolt 要求显式 `AddBody(id, EActivation)`——AddBody 才进 broadphase、Activate 才入活动列表（官方 HelloWorld 用 `CreateAndAddBody(settings, Activate)` 同义）。修复：createBodyFor/rebuildStaticBody 补 AddBody（静态 DontActivate、其余 Activate）。
+2. **destroyBody 缺 RemoveBody 前置**（症状：补 1 后重建时断言崩溃）：Jolt 规定先 `RemoveBody`（退出活动列表+移出 broadphase）再 `DestroyBody` 释放；此前 bodies 从未 AddBody 过故断言静默通过。修复：destroyBody 补 RemoveBody。
+3. **宽相位跨层表全 FALSE**（症状：补 1/2 后 Cube 穿地直落）：`objectVsBpFilter` 是成员，在初始化列表阶段构造——彼时 pairFilter/layerInterface 尚未配置（EnableCollision/Map 都在构造体）→ 建表全 FALSE → 宽相位拒绝动态(kMoving)与静态(kBpNonMoving)的一切配对。修复：派生类把层配置移进自身构造（ConfiguredLayerInterface/ConfiguredPairFilter），声明顺序自然满足依赖；PhysicsSystem::Init 持表指针，表地址须稳定。
+
+- **验证**：Player 跑 PhysicsTest——step 日志 velY 递增、transformY 逐帧跟随、落地 y=0.50（板顶 0 + 半高 0.5）后 velY=0 进入休眠；**GPU 读回 outLdrFbo 采样 (640,566) = R103 G67 B56（橙色方块落在板上）**。另加两层长期诊断：JoltAssert 断言转发引擎日志（不回断点，无人值守可收集）、syncFromTransforms body 统计。
+- **教训**：① 波 2 物理「代码交付」仅日志冒烟——三层集成缺陷均无日志报错、必须像素/读回级验证才暴露，渲染与物理验收须「真跑真看」；② Jolt 生命周期四步（CreateBody→AddBody(激活)→RemoveBody→DestroyBody）不可省任何一步；③ 宽相位表是「构造期快照」，配置必须先于其构造。物理验收清单（ROADMAP §5.1）其余项待人工。

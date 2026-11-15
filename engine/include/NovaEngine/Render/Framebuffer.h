@@ -19,6 +19,7 @@ public:
     void unbind() const;                                   // 恢复默认 FBO
     void resolveMsaa() const;                              // glBlitFramebuffer 到 resolve 纹理（bind 状态下调用）
     uint32_t colorTextureId() const;                       // 供 ImGui::Image 使用
+    uint32_t fboId() const { return m_fbo; }               // 诊断读回/外部绑定（验收诊断期使用）
     int width() const;
     int height() const;
 

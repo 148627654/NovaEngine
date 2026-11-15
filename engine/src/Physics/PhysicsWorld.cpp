@@ -102,6 +102,14 @@ void ensureJoltInitialized() {
         JPH::RegisterDefaultAllocator();
         JPH::Factory::sInstance = new JPH::Factory();
         JPH::RegisterTypes();
+#ifdef JPH_ENABLE_ASSERTS
+        // 诊断：Jolt 断言转发到引擎日志（不回断点，可一次收集全部断言；
+        // 默认行为是 OutputDebugString + __debugbreak → 无人值守直接退出码 3）
+        JPH::AssertFailed = [](const char* expr, const char* msg, const char* file, JPH::uint line) {
+            Logger::info("[JoltAssert] {}:{} — {} ({})", file, line, expr, msg ? msg : "");
+            return false;
+        };
+#endif
     }
 }
 
@@ -260,9 +268,27 @@ struct PhysicsWorld::Impl {
     glm::vec3 gravity{0.0f, -9.81f, 0.0f};
 
     // Jolt 核心（成员顺序 = 构造顺序，勿动）
-    JPH::ObjectLayerPairFilterTable pairFilter{Layers::kNumObjectLayers};
-    JPH::BroadPhaseLayerInterfaceTable layerInterface{Layers::kNumObjectLayers,
-                                                      Layers::kNumBroadPhaseLayers};
+    // V0.3-1 修复：pairFilter/layerInterface 必须在 objectVsBpFilter 构造前配置完成——
+    // 该表构造时一次性按「pairFilter 允许的对象层对」建位图，构造体里事后 EnableCollision
+    // 无效（表已全 FALSE → 宽相位拒绝一切跨层配对，动态体直穿静态地面）。故用派生类把
+    // 配置移进自身构造，使声明顺序自然满足依赖。
+    struct ConfiguredLayerInterface : JPH::BroadPhaseLayerInterfaceTable {
+        ConfiguredLayerInterface()
+            : JPH::BroadPhaseLayerInterfaceTable(Layers::kNumObjectLayers,
+                                                 Layers::kNumBroadPhaseLayers) {
+            MapObjectToBroadPhaseLayer(Layers::kNonMoving, Layers::kBpNonMoving);
+            MapObjectToBroadPhaseLayer(Layers::kMoving, Layers::kBpMoving);
+        }
+    };
+    struct ConfiguredPairFilter : JPH::ObjectLayerPairFilterTable {
+        ConfiguredPairFilter() : JPH::ObjectLayerPairFilterTable(Layers::kNumObjectLayers) {
+            EnableCollision(Layers::kNonMoving, Layers::kNonMoving);
+            EnableCollision(Layers::kNonMoving, Layers::kMoving);
+            EnableCollision(Layers::kMoving, Layers::kMoving);
+        }
+    };
+    ConfiguredLayerInterface layerInterface;
+    ConfiguredPairFilter pairFilter;
     JPH::ObjectVsBroadPhaseLayerFilterTable objectVsBpFilter{
         layerInterface, Layers::kNumBroadPhaseLayers, pairFilter, Layers::kNumObjectLayers};
     JPH::TempAllocatorImpl tempAllocator{10 * 1024 * 1024};
@@ -284,12 +310,7 @@ struct PhysicsWorld::Impl {
 PhysicsWorld::Impl::Impl(Scene& s)
     : scene(s), bodyInterface(system.GetBodyInterface()) {
     // Jolt 全局初始化已由 joltInitGuard 在成员构造前完成（DevOps 修复）
-    layerInterface.MapObjectToBroadPhaseLayer(Layers::kNonMoving, Layers::kBpNonMoving);
-    layerInterface.MapObjectToBroadPhaseLayer(Layers::kMoving, Layers::kBpMoving);
-    pairFilter.EnableCollision(Layers::kNonMoving, Layers::kNonMoving);
-    pairFilter.EnableCollision(Layers::kNonMoving, Layers::kMoving);
-    pairFilter.EnableCollision(Layers::kMoving, Layers::kMoving);
-
+    // 层配置已移入 ConfiguredLayerInterface / ConfiguredPairFilter 构造（见成员声明注释）
     system.Init(4096, 0, 4096, 4096, layerInterface, objectVsBpFilter, pairFilter);
     system.SetContactListener(&contactListener);
     system.SetGravity(toJolt(gravity));
@@ -474,6 +495,10 @@ JPH::Ref<JPH::Shape> PhysicsWorld::Impl::buildShape(const std::vector<Collider*>
 void PhysicsWorld::Impl::destroyBody(JPH::BodyID id) {
     if (id.IsInvalid())
         return;
+    // Jolt 语义：先 RemoveBody（退出活动列表 + 移出 broadphase），再 DestroyBody 释放。
+    // 只 DestroyBody 会触发 DestroyBodies 断言（!IsActive && !IsInBroadPhase），且 body
+    // 索引复用后 broadphase 跟踪残留 → 后续 AddBody 断言 + 树损坏（2026-11-15 验收暴露）。
+    bodyInterface.RemoveBody(id);
     bodyInterface.DestroyBody(id);
     const uint32_t idx = id.GetIndexAndSequenceNumber();
     rbByBodyId.erase(idx);
@@ -534,6 +559,14 @@ JPH::BodyID PhysicsWorld::Impl::createBodyFor(Rigidbody* rb) {
         return JPH::BodyID{};
     }
     const JPH::BodyID id = body->GetID();
+    // Jolt 语义：CreateBody 只分配+入管理器；必须再显式 AddBody(id, activation)——
+    // AddBody 才把 body 插入 broadphase（参与碰撞），EActivation::Activate 把非静态体
+    // 加入活动列表（官方 HelloWorld 用 CreateAndAddBody(settings, Activate) 同义）。
+    // 缺失症状（2026-11-15 物理验收暴露）：body 创建成功、motion=Dynamic、重力正确，
+    // 但 active=false、位置永不动；且不在 broadphase → 会穿地。
+    bodyInterface.AddBody(id, settings.mMotionType == JPH::EMotionType::Static
+                                  ? JPH::EActivation::DontActivate
+                                  : JPH::EActivation::Activate);
     bodyInterface.SetUserData(id, reinterpret_cast<uint64_t>(go));
     bodyByRb[rb] = id;
     rbByBodyId[id.GetIndexAndSequenceNumber()] = rb;
@@ -577,6 +610,8 @@ JPH::BodyID PhysicsWorld::Impl::rebuildStaticBody(GameObject* go) {
     if (body == nullptr)
         return JPH::BodyID{};
     const JPH::BodyID id = body->GetID();
+    // 静态体同样必须 AddBody 进 broadphase（DontActivate；不参与模拟但参与碰撞）
+    bodyInterface.AddBody(id, JPH::EActivation::DontActivate);
     bodyInterface.SetUserData(id, reinterpret_cast<uint64_t>(go));
     staticBodyByGo[go] = id;
     goByBodyId[id.GetIndexAndSequenceNumber()] = go;
@@ -816,6 +851,25 @@ void PhysicsWorld::step(float dt) {
         impl.accumulator -= kFixedStep;
         ++steps;
     }
+    // 诊断（验收期）：前 5 帧打印步数与动态 body 世界位置（确认模拟在跑）
+    static int s_stepLogFrames = 0;
+    if (s_stepLogFrames < 5 && steps > 0) {
+        ++s_stepLogFrames;
+        for (const auto& [rb, id] : impl.bodyByRb) {
+            const JPH::RVec3 p = impl.bodyInterface.GetPosition(id);
+            JPH::BodyLockRead lock(impl.system.GetBodyLockInterface(), id);
+            const int motion = lock.Succeeded() ? int(lock.GetBody().GetMotionType()) : -1;
+            const bool active = lock.Succeeded() && lock.GetBody().IsActive();
+            const float velY = lock.Succeeded() ? lock.GetBody().GetLinearVelocity().GetY() : 0.0f;
+            const float gravY = impl.system.GetGravity().GetY();
+            const Transform* t = rb->gameObject() ? rb->gameObject()->transform() : nullptr;
+            const glm::vec3 tp = t ? t->worldPosition() : glm::vec3(-999.0f);
+            Logger::info(
+                "[Physics] step={} dt={:.4f} {} pos=({:.2f},{:.2f},{:.2f}) motion={} active={} velY={:.3f} gravY={:.2f} transformY={:.2f}",
+                steps, dt, rb->gameObject() ? rb->gameObject()->name() : "?",
+                p.GetX(), p.GetY(), p.GetZ(), motion, active, velY, gravY, tp.y);
+        }
+    }
     if (steps == 3)
         impl.accumulator = 0.0f;   // 防死亡螺旋：丢弃溢出部分
     impl.flushTriggerEvents();     // 帧末统一 post TriggerEvent
@@ -835,6 +889,9 @@ void PhysicsWorld::syncFromTransforms() {
             impl.rebuildStaticBody(c->gameObject());
     }
     impl.synced = true;
+    // 诊断（验收期）：打印 body 统计，冒烟/验收可据此确认物理世界非空
+    Logger::info("[Physics] syncFromTransforms 完成：动态/运动 body={}，static body={}，synced=true",
+                 impl.rbByBodyId.size(), impl.staticBodyByGo.size());
 }
 
 bool PhysicsWorld::raycast(const glm::vec3& origin, const glm::vec3& direction,
