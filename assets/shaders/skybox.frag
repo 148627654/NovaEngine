@@ -11,6 +11,10 @@ uniform float uSkyExposure;       // cubemap（HDR）曝光
 uniform float uSkyRotation;       // cubemap 绕 +Y 旋转（弧度，C++ 侧已由度转换）
 uniform samplerCube uSkyCubemap;  // unit 1
 
+// ===== 输出 gamma（V0.3-4，与 blinn_phong.frag 同步）=====
+// 无后处理：1/2.2（V0.2 现行为）；HDR 模式：0（触发直通分支，非 pow 指数 0；波 3 后处理接管，届时 C++ 侧改设）
+uniform float uGamma;
+
 out vec4 fragColor;
 
 void main() {
@@ -30,7 +34,8 @@ void main() {
         color = mix(uHorizonColor, uZenithColor, t);
     }
 
-    // 输出前 gamma 校正（引擎管线按线性计算，显示器按 sRGB 显示）
-    color = pow(max(color, vec3(0.0)), vec3(1.0 / 2.2));
+    // 输出前 gamma 校正（引擎管线按线性计算，显示器按 sRGB 显示；uGamma=1/2.2 现行为）
+    // uGamma<=0（HDR 模式，波 3 启用）走直通分支——pow(x,0)≡1 会全白，故必须显式分支
+    color = uGamma <= 0.0 ? color : pow(max(color, vec3(0.0)), vec3(uGamma));
     fragColor = vec4(color, 1.0);
 }

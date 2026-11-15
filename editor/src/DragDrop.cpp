@@ -70,11 +70,12 @@ std::pair<std::shared_ptr<NovaEngine::Texture>, std::filesystem::path> resolveTe
             std::filesystem::relative(abs, NovaEngine::AssetDatabase::projectRoot(), ec);
         const bool inside = !ec && !rel.empty() && *rel.begin() != "..";
         if (inside)
-            return {NovaEngine::AssetDatabase::instance().getTexture(rel), rel};
+            return {NovaEngine::AssetDatabase::instance().getTexture(rel, /*srgb=*/true), rel};
         // 项目外：拷贝进 assets/textures/ 后按相对路径走缓存
         const std::filesystem::path copiedRel = copyIntoAssets(abs);
         if (!copiedRel.empty())
-            return {NovaEngine::AssetDatabase::instance().getTexture(copiedRel), copiedRel};
+            return {NovaEngine::AssetDatabase::instance().getTexture(copiedRel, /*srgb=*/true),
+                    copiedRel};
     }
     NovaEngine::Logger::warn("贴图未找到，使用纯色: {}", texPath.string());
     return {nullptr, {}};
@@ -91,7 +92,8 @@ std::pair<std::shared_ptr<NovaEngine::Texture>, std::filesystem::path> resolveIm
     const fs::path rel = fs::relative(abs, root, ec);
     const bool inside = !ec && !rel.empty() && *rel.begin() != "..";
     if (inside) {
-        auto tex = NovaEngine::AssetDatabase::instance().getTexture(rel);
+        // albedo 贴图按 sRGB 加载（Reviewer P1-1b）：与场景/.novamat 反序列化的 srgb=true 口径一致
+        auto tex = NovaEngine::AssetDatabase::instance().getTexture(rel, /*srgb=*/true);
         if (tex) return {tex, rel};
     }
     // 回退：搜索 + 拷贝（拷贝/缓存逻辑保持）

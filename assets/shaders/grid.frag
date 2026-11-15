@@ -16,6 +16,10 @@ uniform int uShadowEnabled;     // 0 = 无阴影（无阴影帧由 C++ 关掉）
 uniform float uShadowBias;      // 深度偏置（[0,1] 深度空间；默认 0.0005 约合数厘米世界距离）
 uniform float uShadowMapSize;   // 深度贴图边长（texel 步长用）
 
+// ===== 输出 gamma（V0.3-4，与 blinn_phong.frag 同步）=====
+// 无后处理：1/2.2（V0.2 现行为）；HDR 模式：0（触发直通分支，非 pow 指数 0；波 3 后处理接管，届时 C++ 侧改设）
+uniform float uGamma;
+
 out vec4 fragColor;
 
 // PCF 3x3 手动比较 + 斜率自适应偏置；光空间盒外（白色边框 → 深度 1.0）返回 1.0（不受影）
@@ -51,5 +55,9 @@ void main() {
     line *= mix(0.35, 1.0, shadow);
 
     vec3 color = mix(uFogColor, line, fade);
+
+    // 输出前 gamma 校正（线性计算；uGamma=1/2.2 现行为）
+    // uGamma<=0（HDR 模式，波 3 启用）走直通分支——pow(x,0)≡1 会全白，故必须显式分支
+    color = uGamma <= 0.0 ? color : pow(max(color, vec3(0.0)), vec3(uGamma));
     fragColor = vec4(color, 1.0);
 }

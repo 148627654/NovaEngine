@@ -127,3 +127,14 @@ Wave 2 审查无 P0；两条 P1 已修复（见下段「已修复项」）。以
 - Packager：builtin 跳过、albedoMap、六面探测（扩展名顺序与引擎一致）、shaders 递归收集、.hdr 跳过 meta、缺失清单逐条报错、std::map 排序确定性、NovaPlayer.exe 预检、pak 命名（场景 stem）全部正确；场景 JSON 键名与 SceneSerializer/MeshRenderer 实际序列化逐键核对一致。
 - meta 消费：sRGB 判定（meta==Srgb 且请求 srgb）、wrap/filter/mip 传递、NormalMap→Linear、serialize 稳定文本（nlohmann std::map 键序）均正确。
 - COM 初始化配对（S_OK/S_FALSE 均配 CoUninitialize）、clearCache 语义（内存清空 + bin 缓存按内容键自然失效）、meta 模态 Reset 不落盘——复核通过。
+
+## V0.3 波 1 审查（2026-11-15，PBR + 材质库）
+
+**已修复**：P1-1 贴图缓存键加 sRGB 维度（先加载者胜出毒化）+ DragDrop albedo srgb=true；P1-2 Edit 阴影收集用解析后 blendMode；P1-3 uGamma=0 全白陷阱（shader 显式直通分支 + 契约修正）；P2-1 G 项 k=α/2 与 D 重映射一致；P2-3 双轨序列化门与渲染门一致；P2-5 readMaterialJson 非对象防御；P2-8 refreshSceneMaterialRefs 失败 warn。
+
+**遗留 backlog**：
+1. 副切线手性：B=cross(N,T) 恒右手系，镜像 UV 网格法线贴图 X 轴翻转（建议存 handedness 到 tangent.w，波次待排）
+2. Inspector 拖放赋值 .novamat 未实现（现为 Assign 文本输入；AssetBrowser 拖拽源仅模型/贴图）——ARCHITECTURE §14.5 承诺需改契约或补实现
+3. PBR 亮度整体下降无补偿（物理正确化；demo 观感变化已写入 FEATURES §11.1）
+4. resolveAssetAbs 锚点规则在 MaterialAsset.cpp 重复实现（与 AssetDatabase.cpp 文件内 static 两处同步风险，建议收敛共享内部头）
+5. 双轨省略内联段往返语义：Assign 前内联值 save→reload 后丢失（"Assign→重启→Detach"显示默认材质，与同会话 Detach 行为不一致）

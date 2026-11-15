@@ -8,6 +8,7 @@
 #include <imgui.h>
 
 #include <NovaEngine/Assets/AssetDatabase.h>
+#include <NovaEngine/Assets/MaterialAsset.h>   // 双轨材质解析：materialAsset->material()（完整类型）
 #include <NovaEngine/Core/Input.h>
 #include <NovaEngine/Core/Logger.h>
 #include <NovaEngine/Core/Stats.h>
@@ -262,9 +263,14 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
             auto* mr = go->getComponent<MeshRenderer>();
             if (!mr || !mr->mesh) return;
             const glm::mat4 world = go->transform()->worldMatrix();
-            Renderer::submit(mr->mesh, mr->material, world);
+            // V0.3-6 材质资产双轨：引用 .novamat 时整块提交资产材质；否则内联材质
+            const Material& mat = mr->material.materialAsset
+                                      ? mr->material.materialAsset->material()
+                                      : mr->material;
+            Renderer::submit(mr->mesh, mat, world);
             // V0.2-8：透明物体（blendMode != Opaque）不进阴影深度 pass
-            if (shadowEnabled && mr->material.blendMode == BlendMode::Opaque)
+            //（Reviewer P1-2：判定用解析后的 mat，与 SceneRenderer 一致——资产引用 blendMode 语义正确）
+            if (shadowEnabled && mat.blendMode == BlendMode::Opaque)
                 shadowItems.push_back(ShadowItem{mr->mesh, world});
         });
         if (shadowEnabled) Renderer::drawShadowPass(shadowParams, shadowItems);

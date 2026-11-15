@@ -1,8 +1,13 @@
 #version 450 core
 
+// V0.3-4：Blinn-Phong → Cook-Torrance GGX PBR（金属工作流）整体重写。
+// 文件名不变：drawOutline 第一遍 / 透明队列共用此路径；grid 沿用同一 uniform 约定（uGamma 同步，§14.4）。
+// 贴图 unit 总表：0 albedo / 1 shadow / 2 normal / 3 metallic / 4 roughness / 5 emission。
+
 in vec3 vWorldPos;
 in vec3 vNormal;
 in vec2 vUV;
+in vec3 vTangent;
 
 // 每帧相机数据（与顶点着色器同一 UBO，binding 0）
 layout(std140, binding = 0) uniform CameraBlock {
@@ -10,24 +15,47 @@ layout(std140, binding = 0) uniform CameraBlock {
     vec4 uCamPos;
 };
 
+// ===== 灯光（沿用 V0.2 语义）=====
 uniform vec3 uLightDir;       // 指向光源（DirectionalLightData.direction 语义）
 uniform vec3 uLightColor;     // 已乘 intensity
 uniform vec3 uAmbient;
+
+// ===== 材质 =====
 uniform vec3 uAlbedo;
 uniform float uRoughness;
 uniform float uMetallic;
 uniform float uAlpha;         // V0.2-8：AlphaBlend 混合系数（Opaque 恒 1.0）
-uniform int uUseAlbedoMap;
-uniform sampler2D uAlbedoMap; // unit 0
 
-// ===== 阴影（V0.2-6）=====
+// ===== 贴图开关 + 采样器（贴图 null 时 C++ 侧开关置 0）=====
+uniform int uUseAlbedoMap;
+uniform sampler2D uAlbedoMap;     // unit 0
+uniform int uUseNormalMap;
+uniform sampler2D uNormalMap;     // unit 2（法线贴图按 .novameta 线性加载）
+uniform int uUseMetallicMap;
+uniform sampler2D uMetallicMap;   // unit 3
+uniform int uUseRoughnessMap;
+uniform sampler2D uRoughnessMap;  // unit 4
+uniform int uUseEmissionMap;
+uniform sampler2D uEmissionMap;   // unit 5
+
+// ===== 自发光 =====
+uniform vec3 uEmissionColor;
+uniform float uEmissionIntensity;
+
+// ===== 阴影（V0.2-6，原样保留）=====
 uniform sampler2D uShadowMap;   // 深度贴图（unit 1；CLAMP_TO_BORDER + 白色边框）
 uniform mat4 uLightViewProj;    // 光空间矩阵（已纹素对齐）
 uniform int uShadowEnabled;     // 0 = 无阴影（无阴影帧由 C++ 关掉）
 uniform float uShadowBias;      // 深度偏置（[0,1] 深度空间；默认 0.0005 约合数厘米世界距离）
 uniform float uShadowMapSize;   // 深度贴图边长（texel 步长用）
 
+// ===== 输出 gamma（V0.3-4）=====
+// 无后处理：1/2.2（V0.2 现行为）；HDR 模式：0（触发直通分支，非 pow 指数 0；波 3 后处理接管，届时 C++ 侧改设）
+uniform float uGamma;
+
 out vec4 fragColor;
+
+const float PI = 3.14159265359;
 
 // PCF 3x3 手动比较 + 斜率自适应偏置；光空间盒外（白色边框 → 深度 1.0）返回 1.0（不受影）
 float shadowFactor(vec3 worldPos, vec3 normal, vec3 lightDir) {
@@ -49,28 +77,78 @@ float shadowFactor(vec3 worldPos, vec3 normal, vec3 lightDir) {
     return shadow / 9.0;
 }
 
+// 法线分布 D（GGX / Trowbridge-Reitz）
+float distributionGGX(float NdotH, float roughness) {
+    float a = roughness * roughness;
+    float a2 = a * a;
+    float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
+    return a2 / max(PI * d * d, 1e-4);
+}
+
+// 几何遮蔽 G（Smith-Schlick GGX）
+float geometrySmith(float NdotV, float NdotL, float roughness) {
+    float k = roughness * roughness * 0.5;   // k = α/2，与 D 的 α=r² 重映射同一粗糙度约定（r 为 clamp 后的值）
+    float gv = NdotV / (NdotV * (1.0 - k) + k);
+    float gl = NdotL / (NdotL * (1.0 - k) + k);
+    return gv * gl;
+}
+
+// Fresnel-Schlick（金属工作流：F0 = mix(vec3(0.04), albedo, metallic)）
+vec3 fresnelSchlick(float cosTheta, vec3 F0) {
+    return F0 + (vec3(1.0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+
 void main() {
     vec3 albedo = uUseAlbedoMap != 0 ? texture(uAlbedoMap, vUV).rgb * uAlbedo : uAlbedo;
+    float metallic = uUseMetallicMap != 0 ? texture(uMetallicMap, vUV).r * uMetallic : uMetallic;
+    float roughness = uUseRoughnessMap != 0 ? texture(uRoughnessMap, vUV).r * uRoughness : uRoughness;
+    metallic = clamp(metallic, 0.0, 1.0);
+    roughness = clamp(roughness, 0.045, 1.0);   // 下限防 roughness=0 时 D 项全零（镜面消失）
 
+    // 法线：默认世界法线；有法线贴图时经 TBN 变换到世界空间。
+    // T 投影去掉平行 N 的分量、B 由右手叉积重建——插值后重新正交化（右手系 TBN）
     vec3 N = normalize(vNormal);
+    if (uUseNormalMap != 0) {
+        vec3 tn = texture(uNormalMap, vUV).rgb * 2.0 - 1.0;
+        vec3 T = normalize(vTangent - N * dot(vTangent, N));
+        vec3 B = cross(N, T);
+        N = normalize(T * tn.x + B * tn.y + N * tn.z);
+    }
+
     vec3 L = normalize(uLightDir);
     vec3 V = normalize(uCamPos.xyz - vWorldPos);
     vec3 H = normalize(L + V);
 
-    // 漫反射：金属度越高漫反射越弱
-    vec3 diffuse = uLightColor * albedo * max(dot(N, L), 0.0) * (1.0 - uMetallic);
+    float NdotL = max(dot(N, L), 0.0);
+    float NdotV = max(dot(N, V), 1e-4);
+    float NdotH = max(dot(N, H), 0.0);
+    float HdotV = max(dot(H, V), 0.0);
 
-    // Blinn-Phong 镜面：粗糙度 0..1 映射到高光指数 256..2
-    float shininess = mix(256.0, 2.0, uRoughness);
-    float spec = pow(max(dot(N, H), 0.0), shininess);
-    vec3 specColor = mix(vec3(0.04), albedo, uMetallic);   // 金属高光带底色，非金属灰白
-    vec3 specular = uLightColor * specColor * spec;
+    // 金属工作流：非金属 F0=0.04，金属 F0=albedo；金属无漫反射
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
+    vec3 F = fresnelSchlick(HdotV, F0);
+    float D = distributionGGX(NdotH, roughness);
+    float G = geometrySmith(NdotV, NdotL, roughness);
+    vec3 specular = F * D * G / max(4.0 * NdotV * NdotL, 1e-4);
+
+    // 漫反射：Lambert（kD = (1-F)(1-metallic)，/PI 能量守恒）
+    vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
+    vec3 direct = (kD * albedo / PI + specular) * uLightColor * NdotL;
 
     // 阴影只作用于直射光（环境光不受影）
     float shadow = uShadowEnabled != 0 ? shadowFactor(vWorldPos, N, L) : 1.0;
-    vec3 color = uAmbient * albedo + (diffuse + specular) * shadow;
 
-    // 输出前 gamma 校正（引擎管线按线性计算，显示器按 sRGB 显示）
-    color = pow(max(color, vec3(0.0)), vec3(1.0 / 2.2));
+    // 环境光沿用 V0.2 语义（ambient * albedo；无 IBL，金属环境反射留待后处理扩展）
+    vec3 ambient = uAmbient * albedo;
+
+    // 自发光（贴图 × 颜色 × 强度，线性空间相加）
+    vec3 emission = (uUseEmissionMap != 0 ? texture(uEmissionMap, vUV).rgb : vec3(1.0))
+                    * uEmissionColor * uEmissionIntensity;
+
+    vec3 color = ambient + direct * shadow + emission;
+
+    // 输出前 gamma 校正（引擎管线按线性计算，显示器按 sRGB 显示；uGamma=1/2.2 现行为）
+    // uGamma<=0（HDR 模式，波 3 启用）走直通分支——pow(x,0)≡1 会全白，故必须显式分支
+    color = uGamma <= 0.0 ? color : pow(max(color, vec3(0.0)), vec3(uGamma));
     fragColor = vec4(color, uAlpha);
 }

@@ -261,9 +261,11 @@ std::shared_ptr<Texture> AssetDatabase::getTexture(const std::filesystem::path& 
     if (relativePath.empty()) return nullptr;
 
     const std::filesystem::path abs = resolveAssetAbs(relativePath);
-    const std::string key = cacheKeyFor(abs);
+    // 缓存键加 sRGB 维度（Reviewer P1-1a）：同一贴图按 sRGB/线性分别缓存，
+    // 消除「先加载者胜出」的格式毒化（albedo 按 sRGB 与法线按线性各持各的实例）
+    const std::string texKey = cacheKeyFor(abs) + (srgb ? "#srgb" : "#linear");
 
-    if (auto it = m_textureCache.find(key); it != m_textureCache.end())
+    if (auto it = m_textureCache.find(texKey); it != m_textureCache.end())
         if (auto tex = it->second.lock())
             return tex;
 
@@ -303,7 +305,7 @@ std::shared_ptr<Texture> AssetDatabase::getTexture(const std::filesystem::path& 
         Logger::error("AssetDatabase: 上传贴图失败 {}", relativePath.string());
         return nullptr;
     }
-    m_textureCache[key] = tex;
+    m_textureCache[texKey] = tex;
     return tex;
 }
 
@@ -373,10 +375,43 @@ std::shared_ptr<Cubemap> AssetDatabase::getCubemap(const std::filesystem::path& 
     return cubemap;
 }
 
+std::shared_ptr<MaterialAsset> AssetDatabase::getMaterialAsset(
+    const std::filesystem::path& relativePath) {
+    if (relativePath.empty()) return nullptr;
+
+    const std::filesystem::path abs = resolveAssetAbs(relativePath);
+    const std::string key = cacheKeyFor(abs);
+
+    // weak_ptr 缓存命中（失效时锁失败 → 清掉重载）
+    if (auto it = m_materialAssetCache.find(key); it != m_materialAssetCache.end()) {
+        if (auto asset = it->second.lock())
+            return asset;
+        m_materialAssetCache.erase(it);
+    }
+
+    // 未命中 → MaterialAsset::load（AssetStream 读取 + 贴图解析，细节失败原因已由其记录）
+    auto asset = MaterialAsset::load(relativePath);
+    if (!asset) {
+        Logger::warn("AssetDatabase: 材质资产加载失败 {}", relativePath.string());
+        return nullptr;
+    }
+    m_materialAssetCache[key] = asset;
+    return asset;
+}
+
+void AssetDatabase::reloadMaterialAsset(const std::filesystem::path& relativePath) {
+    // 编辑器保存 .novamat 后刷新：清该路径缓存键 → 下次 getMaterialAsset 重新加载
+    //（引用物体由编辑器侧重新解析 materialAsset 指针，下一帧提交即变色）
+    if (relativePath.empty()) return;
+    const std::filesystem::path abs = resolveAssetAbs(relativePath);
+    m_materialAssetCache.erase(cacheKeyFor(abs));
+}
+
 void AssetDatabase::clearCache() {
     m_meshCache.clear();
     m_textureCache.clear();
     m_cubemapCache.clear();
+    m_materialAssetCache.clear();
     // 旁表缓存一并清空（改文件后 Reload Assets 重取材质/贴图路径）
     m_materialCache.clear();
     s_albedoPathCache.clear();
@@ -387,6 +422,7 @@ void AssetDatabase::releaseUnused() {
     std::erase_if(m_meshCache, [](const auto& kv) { return kv.second.expired(); });
     std::erase_if(m_textureCache, [](const auto& kv) { return kv.second.expired(); });
     std::erase_if(m_cubemapCache, [](const auto& kv) { return kv.second.expired(); });
+    std::erase_if(m_materialAssetCache, [](const auto& kv) { return kv.second.expired(); });
 }
 
 }  // namespace NovaEngine

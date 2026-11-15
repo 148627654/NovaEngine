@@ -130,7 +130,7 @@ void writeGameObjectNode(nlohmann::json& out, GameObject* go) {
 
 std::string SceneSerializer::serialize(const Scene& scene, int indent) {
     nlohmann::json root;
-    root["version"] = 3;   // V0.2-8/V0.2-14：+fogColor / material alpha+blendMode（读时兼容 1/2/3）
+    root["version"] = 4;   // V0.3-4/6：+PBR 材质字段 / materialAsset 材质库双轨（读时兼容 1/2/3/4）
     root["name"] = scene.name();
 
     {
@@ -190,8 +190,9 @@ void SceneSerializer::deserialize(Scene& target, const std::string& json) {
         return;
     }
     const int version = safeGet(root, "version", 0);
-    if (version != 1 && version != 2 && version != 3)
-        Logger::warn("场景文件版本为 {}（期望 1/2/3），仍尝试加载", version);
+    // V0.3：写 4，读 1/2/3/4（旧文件默认值兜底）；其它版本 warn 但继续尝试加载
+    if (version != 1 && version != 2 && version != 3 && version != 4)
+        Logger::warn("场景文件版本为 {}（期望 1/2/3/4），仍尝试加载", version);
 
     // 1. 清空 target（保留 Scene 对象身份）：全部对象入销毁队列并立即执行
     {

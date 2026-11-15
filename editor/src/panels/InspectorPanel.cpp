@@ -1,4 +1,5 @@
 #include "InspectorPanel.h"
+#include "MaterialEditorWidgets.h"   // 材质编辑控件集（Inspector 与 .novamat 模态共用，V0.3-6）
 
 #include "../EditorContext.h"
 
@@ -236,49 +237,52 @@ void InspectorPanel::drawMeshRenderer(EditorContext& ctx, NovaEngine::GameObject
     if (!edit) ImGui::EndDisabled();
     ImGui::TextDisabled("(builtin:cube / builtin:sphere / builtin:plane or relative path)");
 
-    // 材质编辑（数值/颜色 live edit 在 Play 态保留）
-    if (ImGui::ColorEdit3("Albedo", glm::value_ptr(mr->material.albedo))) ctx.markDirtyOnly();
-    if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
-    if (ImGui::SliderFloat("Roughness", &mr->material.roughness, 0.0f, 1.0f)) ctx.markDirtyOnly();
-    if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
-    if (ImGui::SliderFloat("Metallic", &mr->material.metallic, 0.0f, 1.0f)) ctx.markDirtyOnly();
-    if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
-
-    // 透明参数（V0.2-8）：混合系数 + 渲染队列模式（blendMode 决定 opaque/transparent 队列归属）
-    if (ImGui::SliderFloat("Alpha", &mr->material.alpha, 0.0f, 1.0f)) ctx.markDirtyOnly();
-    if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
-    int blendMode = static_cast<int>(mr->material.blendMode);
-    const char* blendModes[] = {"Opaque", "AlphaBlend"};
-    if (ImGui::Combo("Blend Mode", &blendMode, blendModes,
-                     static_cast<int>(sizeof(blendModes) / sizeof(blendModes[0])))) {
-        mr->material.blendMode = static_cast<NovaEngine::BlendMode>(blendMode);
-        ctx.markSceneDirty();
-    }
-
-    // 贴图路径回显 + 编辑（Enter 生效；Play 态禁用输入）；同时写入 albedoMapPath（序列化用，避免 Ctrl+S 丢失）
-    const std::string boundLabel =
-        mr->material.albedoMapPath.empty() ? "Albedo Map: none"
-                                           : "Albedo Map: " + mr->material.albedoMapPath;
-    ImGui::TextUnformatted(boundLabel.c_str());
-    std::string texPath = mr->material.albedoMapPath;
-    if (!edit) ImGui::BeginDisabled();
-    if (ImGui::InputText("Albedo Map Path", &texPath, ImGuiInputTextFlags_EnterReturnsTrue)) {
-        if (texPath.empty()) {
-            mr->material.albedoMap = nullptr;
-            mr->material.albedoMapPath.clear();
-            ctx.markSceneDirty();
-        } else {
-            auto tex = NovaEngine::AssetDatabase::instance().getTexture(texPath);
-            if (tex) {
-                mr->material.albedoMap = tex;
-                mr->material.albedoMapPath = texPath;  // 同步写路径（项目内相对路径）
+    // ---- 材质区（V0.3-6 扩展：材质资产双轨 + PBR 贴图/发射参数）----
+    // 双轨：引用资产时显示路径 + Detach；未引用时 Assign 输入（Enter 生效经 getMaterialAsset 解析）。
+    // 引用资产 → 内联字段区灰显（整块引用，无 per-instance override，Unity 语义）。
+    const bool hasAsset = mr->material.materialAsset != nullptr;
+    {
+        const std::string assetLabel = mr->material.materialAssetPath.empty()
+                                           ? "Material Asset: none"
+                                           : "Material Asset: " + mr->material.materialAssetPath;
+        ImGui::TextUnformatted(assetLabel.c_str());
+        if (hasAsset) {
+            if (!edit) ImGui::BeginDisabled();
+            if (ImGui::Button("Detach Material Asset")) {
+                mr->material.materialAsset.reset();
+                mr->material.materialAssetPath.clear();
                 ctx.markSceneDirty();
-            } else {
-                NovaEngine::Logger::warn("贴图加载失败: {}", texPath);
             }
+            if (!edit) ImGui::EndDisabled();
+        } else {
+            // 局部缓冲：每次重输，Enter 才应用（与 Mesh 路径输入同模式）
+            std::string assetPath;
+            if (!edit) ImGui::BeginDisabled();
+            if (ImGui::InputText("Assign Material Asset", &assetPath,
+                                 ImGuiInputTextFlags_EnterReturnsTrue)) {
+                if (assetPath.empty()) {
+                    NovaEngine::Logger::warn("材质资产路径为空，未赋值");
+                } else {
+                    auto asset = NovaEngine::AssetDatabase::instance().getMaterialAsset(assetPath);
+                    if (asset) {
+                        mr->material.materialAsset = asset;
+                        mr->material.materialAssetPath = assetPath;
+                        ctx.markSceneDirty();
+                    } else {
+                        NovaEngine::Logger::warn("材质资产加载失败: {}（保持原状）", assetPath);
+                    }
+                }
+            }
+            if (!edit) ImGui::EndDisabled();
+            ImGui::TextDisabled("(assets/... .novamat path, Enter)");
         }
+        ImGui::Separator();
     }
-    if (!edit) ImGui::EndDisabled();
+
+    // 内联材质编辑（引用资产时灰显）
+    if (hasAsset) ImGui::BeginDisabled();
+    drawMaterialEditor(mr->material, ctx);
+    if (hasAsset) ImGui::EndDisabled();
 
     if (!edit) ImGui::BeginDisabled();
     if (ImGui::Button("Remove Component")) remove = true;
@@ -551,9 +555,58 @@ void InspectorPanel::drawMultiVec3(EditorContext& ctx, const char* label,
 
 void InspectorPanel::drawMultiMaterial(EditorContext& ctx,
                                        const std::vector<NovaEngine::MeshRenderer*>& mrs) {
-    // 以第一个对象的材质为编辑缓冲，逐字段应用到全部 MeshRenderer（V0.2-15）
+    // 以第一个对象的材质为编辑缓冲，逐字段应用到全部 MeshRenderer（V0.2-15）；
+    // V0.3-6 扩展：材质资产双轨 + PBR 贴图/发射参数（公共值语义）
     if (!ImGui::CollapsingHeader("Mesh Renderer (Material)", ImGuiTreeNodeFlags_DefaultOpen)) return;
     ImGui::PushID("multimat");
+    const bool edit = ctx.state == EditorContext::EditorState::Edit;
+
+    // 双轨（缓冲 = 首对象）：引用资产时 Detach 应用到全部；未引用时 Assign 输入应用到全部
+    const bool frontHasAsset = mrs.front()->material.materialAsset != nullptr;
+    {
+        const std::string assetLabel =
+            mrs.front()->material.materialAssetPath.empty()
+                ? "Material Asset: none"
+                : "Material Asset: " + mrs.front()->material.materialAssetPath;
+        ImGui::TextUnformatted(assetLabel.c_str());
+        if (frontHasAsset) {
+            if (!edit) ImGui::BeginDisabled();
+            if (ImGui::Button("Detach Material Asset")) {
+                for (auto* mr : mrs) {
+                    mr->material.materialAsset.reset();
+                    mr->material.materialAssetPath.clear();
+                }
+                ctx.markSceneDirty();
+            }
+            if (!edit) ImGui::EndDisabled();
+        } else {
+            std::string assetPath;
+            if (!edit) ImGui::BeginDisabled();
+            if (ImGui::InputText("Assign Material Asset", &assetPath,
+                                 ImGuiInputTextFlags_EnterReturnsTrue)) {
+                if (assetPath.empty()) {
+                    NovaEngine::Logger::warn("材质资产路径为空，未赋值");
+                } else {
+                    auto asset = NovaEngine::AssetDatabase::instance().getMaterialAsset(assetPath);
+                    if (asset) {
+                        for (auto* mr : mrs) {
+                            mr->material.materialAsset = asset;
+                            mr->material.materialAssetPath = assetPath;
+                        }
+                        ctx.markSceneDirty();
+                    } else {
+                        NovaEngine::Logger::warn("材质资产加载失败: {}（保持原状）", assetPath);
+                    }
+                }
+            }
+            if (!edit) ImGui::EndDisabled();
+            ImGui::TextDisabled("(assets/... .novamat path, Enter)");
+        }
+        ImGui::Separator();
+    }
+
+    // 内联参数（首对象引用资产时灰显）
+    if (frontHasAsset) ImGui::BeginDisabled();
 
     glm::vec3 albedo = mrs.front()->material.albedo;
     if (ImGui::ColorEdit3("Albedo", glm::value_ptr(albedo))) {
@@ -591,6 +644,57 @@ void InspectorPanel::drawMultiMaterial(EditorContext& ctx,
         for (auto* mr : mrs) mr->material.blendMode = static_cast<NovaEngine::BlendMode>(blendMode);
         ctx.markSceneDirty();
     }
+
+    // V0.3-4 PBR 发射参数（公共值语义）
+    glm::vec3 emissionColor = mrs.front()->material.emissionColor;
+    if (ImGui::ColorEdit3("Emission Color", glm::value_ptr(emissionColor))) {
+        for (auto* mr : mrs) mr->material.emissionColor = emissionColor;
+        ctx.markDirtyOnly();
+    }
+    if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
+
+    float emissionIntensity = mrs.front()->material.emissionIntensity;
+    if (ImGui::DragFloat("Emission Intensity", &emissionIntensity, 0.05f, 0.0f, 100.0f)) {
+        for (auto* mr : mrs) mr->material.emissionIntensity = emissionIntensity;
+        ctx.markDirtyOnly();
+    }
+    if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
+
+    // PBR 贴图路径行（公共值缓冲自首对象；Enter 应用到全部；失败 warn 保持原状）
+    for (const MaterialTextureSlot& slot : kMaterialTextureSlots) {
+        const std::string boundLabel =
+            (mrs.front()->material.*slot.pathField).empty()
+                ? std::string(slot.label) + ": none"
+                : std::string(slot.label) + ": " + (mrs.front()->material.*slot.pathField);
+        ImGui::TextUnformatted(boundLabel.c_str());
+        std::string pathBuf = mrs.front()->material.*slot.pathField;
+        if (!edit) ImGui::BeginDisabled();
+        const std::string inputLabel = std::string(slot.label) + " Path";
+        if (ImGui::InputText(inputLabel.c_str(), &pathBuf, ImGuiInputTextFlags_EnterReturnsTrue)) {
+            if (pathBuf.empty()) {
+                for (auto* mr : mrs) {
+                    mr->material.*slot.mapField = nullptr;
+                    mr->material.*slot.pathField = std::string();
+                }
+                ctx.markSceneDirty();
+            } else {
+                // 解析一次（AssetDatabase 缓存共享同一纹理实例），成功应用到全部
+                auto tex = NovaEngine::AssetDatabase::instance().getTexture(pathBuf, slot.srgb);
+                if (tex) {
+                    for (auto* mr : mrs) {
+                        mr->material.*slot.mapField = tex;
+                        mr->material.*slot.pathField = pathBuf;
+                    }
+                    ctx.markSceneDirty();
+                } else {
+                    NovaEngine::Logger::warn("贴图加载失败: {}（{} 保持原状）", pathBuf, slot.label);
+                }
+            }
+        }
+        if (!edit) ImGui::EndDisabled();
+    }
+
+    if (frontHasAsset) ImGui::EndDisabled();
     ImGui::PopID();
 }
 

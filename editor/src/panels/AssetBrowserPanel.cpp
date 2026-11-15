@@ -1,12 +1,17 @@
 #include "AssetBrowserPanel.h"
+#include "MaterialEditorWidgets.h"   // .novamat 编辑模态复用 Inspector 材质编辑控件（V0.3-6）
 
 #include "../DragDrop.h"
 #include "../EditorContext.h"
 
 #include <imgui.h>
+#include <misc/cpp/imgui_stdlib.h>   // InputText(std::string*) 包装
 
 #include <NovaEngine/Assets/AssetDatabase.h>
+#include <NovaEngine/Assets/MaterialAsset.h>
 #include <NovaEngine/Core/Logger.h>
+#include <NovaEngine/Scene/GameObject.h>
+#include <NovaEngine/Scene/MeshRenderer.h>
 
 #include <algorithm>
 #include <cctype>
@@ -30,6 +35,34 @@ bool byName(const Entry& a, const Entry& b) {
     std::transform(bn.begin(), bn.end(), bn.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return an < bn;
+}
+
+// .novamat 材质资产文件判定（扩展名不区分大小写）
+bool isMaterialFile(const std::filesystem::path& p) {
+    std::string ext = p.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return ext == ".novamat";
+}
+
+// V0.3-6：保存 .novamat 后重新解析场景内全部材质资产引用——
+// MeshRenderer 持有的 shared_ptr 不随 reloadMaterialAsset 自动更新，这里显式换新，
+// 引用物体下一帧提交即变色；重新加载失败保持旧引用（不打回内联）并 warn（Reviewer P2-8）。
+void refreshSceneMaterialRefs(EditorContext& ctx) {
+    if (!ctx.scene) return;
+    ctx.scene->forEachObject([](NovaEngine::GameObject* go) {
+        auto* mr = go->getComponent<NovaEngine::MeshRenderer>();
+        if (!mr) return;
+        if (mr->material.materialAssetPath.empty()) return;
+        auto asset =
+            NovaEngine::AssetDatabase::instance().getMaterialAsset(mr->material.materialAssetPath);
+        if (asset) {
+            mr->material.materialAsset = asset;
+        } else {
+            NovaEngine::Logger::warn("材质资产刷新失败，保持旧引用: {}",
+                                     mr->material.materialAssetPath);
+        }
+    });
 }
 
 }  // namespace
@@ -98,7 +131,8 @@ void AssetBrowserPanel::onGui(EditorContext& ctx, EditorCamera&) {
                 : DragDrop::isModelFile(e.rel) ? "[M] "
                 : DragDrop::isTextureFile(e.rel) ? "[T] "
                 : DragDrop::isSceneFile(e.rel) ? "[S] "
-                                               : "[F] ";
+                : isMaterialFile(e.rel) ? "[MA] "      // 材质资产（V0.3-6）
+                                        : "[F] ";
             const std::string label = prefix + e.rel.filename().string();
             ImGui::Selectable(label.c_str(), false, ImGuiSelectableFlags_AllowDoubleClick);
 
@@ -113,6 +147,21 @@ void AssetBrowserPanel::onGui(EditorContext& ctx, EditorCamera&) {
                             if (openSceneCallback) openSceneCallback(e.rel);
                         } else {
                             NovaEngine::Logger::warn("Play 模式下不可加载场景");
+                        }
+                    } else if (isMaterialFile(e.rel)) {
+                        // 双击 .novamat 打开材质编辑模态（V0.3-6）
+                        if (ctx.state == EditorContext::EditorState::Edit) {
+                            // 直读磁盘（不经 weak_ptr 缓存），保证模态编辑的是最新文件内容
+                            auto asset = NovaEngine::MaterialAsset::load(e.rel);
+                            if (!asset) {
+                                NovaEngine::Logger::warn("材质资产加载失败: {}", e.rel.string());
+                            } else {
+                                m_matEditPath = e.rel;
+                                m_matEditMaterial = asset->material();
+                                m_matEditOpen = true;
+                            }
+                        } else {
+                            NovaEngine::Logger::warn("Play 模式下不可编辑材质资产");
                         }
                     }
                 }
@@ -149,6 +198,18 @@ void AssetBrowserPanel::onGui(EditorContext& ctx, EditorCamera&) {
         };
         for (const auto& e : dirs) drawEntry(e);
         for (const auto& e : files) drawEntry(e);
+
+        // 右键空白处菜单：Create → Material（V0.3-6；条目级右键菜单优先于窗口级）
+        if (ImGui::BeginPopupContextWindow("asset_create_ctx")) {
+            if (ImGui::BeginMenu("Create")) {
+                if (ImGui::MenuItem("Material")) {
+                    m_createMaterialOpen = true;
+                    m_createMaterialName = "NewMaterial";
+                }
+                ImGui::EndMenu();
+            }
+            ImGui::EndPopup();
+        }
     }
     ImGui::EndChild();
 
@@ -231,6 +292,71 @@ void AssetBrowserPanel::onGui(EditorContext& ctx, EditorCamera&) {
             ImGui::EndPopup();
         }
         if (!stayOpen && m_metaEditOpen) m_metaEditOpen = false;
+    }
+
+    // ---- 新建材质资产模态（V0.3-6：输入名 → 写默认 .novamat 落盘；列表每帧重扫自动刷新）----
+    if (m_createMaterialOpen) {
+        ImGui::OpenPopup("Create Material");
+        bool stayOpen = true;
+        if (ImGui::BeginPopupModal("Create Material", &stayOpen,
+                                   ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDocking)) {
+            ImGui::TextUnformatted("Name");
+            ImGui::SetNextItemWidth(320.0f);
+            ImGui::InputText("##material_name", &m_createMaterialName);
+            ImGui::Separator();
+            if (ImGui::Button("Create", ImVec2(120, 0))) {
+                if (m_createMaterialName.empty()) {
+                    NovaEngine::Logger::warn("材质资产名不能为空");
+                } else {
+                    // 已带扩展名则原样使用，否则补 .novamat
+                    std::string name = m_createMaterialName;
+                    if (!name.ends_with(".novamat")) name += ".novamat";
+                    const fs::path rel = m_currentDir / name;
+                    std::error_code existEc;
+                    if (fs::exists(root / rel, existEc)) {
+                        NovaEngine::Logger::warn("材质资产已存在: {}", rel.string());
+                    } else if (NovaEngine::MaterialAsset::save(rel, NovaEngine::Material{})) {
+                        NovaEngine::Logger::info("材质资产已创建: {}", rel.string());
+                        m_createMaterialOpen = false;
+                    }
+                    // 写失败原因已由 MaterialAsset::save 记录
+                }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(80, 0))) m_createMaterialOpen = false;
+            ImGui::EndPopup();
+        }
+        if (!stayOpen && m_createMaterialOpen) m_createMaterialOpen = false;
+    }
+
+    // ---- .novamat 编辑模态（V0.3-6：复用 Inspector 材质编辑控件；Save 落盘 + 刷新引用）----
+    if (m_matEditOpen) {
+        ImGui::OpenPopup("Edit Material Asset");
+        ImGui::SetNextWindowSize(ImVec2(460.0f, 0.0f), ImGuiCond_Appearing);
+        bool stayOpen = true;
+        if (ImGui::BeginPopupModal("Edit Material Asset", &stayOpen,
+                                   ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDocking)) {
+            ImGui::TextUnformatted(m_matEditPath.string().c_str());
+            ImGui::Separator();
+            // 纯编辑不置脏（markDirty=false）：Save 才统一落盘 + reload + 刷新引用 + 置脏
+            drawMaterialEditor(m_matEditMaterial, ctx, /*markDirty=*/false);
+            ImGui::Separator();
+            if (ImGui::Button("Save", ImVec2(120, 0))) {
+                if (NovaEngine::MaterialAsset::save(m_matEditPath, m_matEditMaterial)) {
+                    NovaEngine::AssetDatabase::instance().reloadMaterialAsset(m_matEditPath);
+                    refreshSceneMaterialRefs(ctx);   // 引用物体下一帧提交即变色
+                    ctx.markSceneDirty();
+                    NovaEngine::Logger::info("材质资产已保存: {}", m_matEditPath.string());
+                    m_matEditOpen = false;
+                } else {
+                    NovaEngine::Logger::error("材质资产保存失败: {}", m_matEditPath.string());
+                }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Close", ImVec2(80, 0))) m_matEditOpen = false;
+            ImGui::EndPopup();
+        }
+        if (!stayOpen && m_matEditOpen) m_matEditOpen = false;
     }
 
     ImGui::End();

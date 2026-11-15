@@ -119,6 +119,46 @@ void setBlinnPhongUniforms(const std::shared_ptr<Shader>& shader,
     } else {
         shader->setInt("uUseAlbedoMap", 0);
     }
+
+    // ===== V0.3-4 PBR 贴图 =====
+    // unit 总表（§14.4）：0 albedo / 1 shadow / 2 normal / 3 metallic / 4 roughness / 5 emission；
+    // 贴图 null → 开关置 0（shader 侧走纯色/数值回退）
+    if (material.normalMap) {
+        material.normalMap->bind(2);
+        shader->setInt("uNormalMap", 2);
+        shader->setInt("uUseNormalMap", 1);
+    } else {
+        shader->setInt("uUseNormalMap", 0);
+    }
+    if (material.metallicMap) {
+        material.metallicMap->bind(3);
+        shader->setInt("uMetallicMap", 3);
+        shader->setInt("uUseMetallicMap", 1);
+    } else {
+        shader->setInt("uUseMetallicMap", 0);
+    }
+    if (material.roughnessMap) {
+        material.roughnessMap->bind(4);
+        shader->setInt("uRoughnessMap", 4);
+        shader->setInt("uUseRoughnessMap", 1);
+    } else {
+        shader->setInt("uUseRoughnessMap", 0);
+    }
+    if (material.emissionMap) {
+        material.emissionMap->bind(5);
+        shader->setInt("uEmissionMap", 5);
+        shader->setInt("uUseEmissionMap", 1);
+    } else {
+        shader->setInt("uUseEmissionMap", 0);
+    }
+    shader->setVec3("uEmissionColor", material.emissionColor);
+    shader->setFloat("uEmissionIntensity", material.emissionIntensity);
+
+    // ===== V0.3-4 输出 gamma 指数 =====
+    // 无后处理 = 1/2.2（V0.2 现行为）；HDR 模式 = 0（触发 shader 直通分支，非 pow 指数 0；
+    // 波 3 后处理接管，届时此处改为由 PostProcess 状态驱动）
+    shader->setFloat("uGamma", 1.0f / 2.2f);
+
     shader->setMat4("uModel", model);
 
     // 阴影 uniform（V0.2-6）：有阴影时绑定深度贴图到 unit 1；无阴影只关开关
@@ -355,6 +395,8 @@ void Renderer::drawGrid(const glm::vec3& fogColor) {
     s_gridShader->setVec3("uFogColor", fogColor);   // V0.2-5：雾色参数化（Scene::fogColor）
     s_gridShader->setVec3("uLineColor", kGridLineColor);
     s_gridShader->setVec3("uLightDir", s_light.direction);
+    // V0.3-4：与 blinn_phong 同款 gamma 指数（无后处理 = 1/2.2；HDR 模式 = 0 触发直通分支，非 pow 指数 0；波 3 后处理接管）
+    s_gridShader->setFloat("uGamma", 1.0f / 2.2f);
 
     // 地面也接收阴影（V0.2-6）：与 setBlinnPhongUniforms 同一套 uniform 约定
     if (s_shadowActive) {

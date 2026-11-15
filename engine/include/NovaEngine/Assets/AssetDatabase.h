@@ -8,6 +8,7 @@
 #include <NovaEngine/Render/Material.h>
 #include <NovaEngine/Render/Mesh.h>
 #include <NovaEngine/Render/Texture.h>
+#include "MaterialAsset.h"
 
 namespace NovaEngine {
 
@@ -32,6 +33,10 @@ public:
     // relativePath 为目录（含 px/nx/py/ny/pz/nz 六图，扩展名 .png/.jpg/.jpeg/.bmp/.tga/.hdr）
     // 或单文件（equirect）；失败返回 nullptr + Logger::warn
     std::shared_ptr<Cubemap> getCubemap(const std::filesystem::path& relativePath);
+    // 材质资产（V0.3-6）：weak_ptr 缓存；加载失败 nullptr + Logger::warn
+    std::shared_ptr<MaterialAsset> getMaterialAsset(const std::filesystem::path& relativePath);
+    // Inspector 保存 .novamat 后刷新：清该路径缓存 → 引用物体下一帧提交即变色
+    void reloadMaterialAsset(const std::filesystem::path& relativePath);
     void clearCache();       // 菜单 Reload Assets（修改文件后手动刷新）
     void releaseUnused();
 
@@ -40,6 +45,7 @@ private:
     std::unordered_map<std::string, std::weak_ptr<Mesh>> m_meshCache;      // key = canonical 绝对路径
     std::unordered_map<std::string, std::weak_ptr<Texture>> m_textureCache;
     std::unordered_map<std::string, std::weak_ptr<Cubemap>> m_cubemapCache;
+    std::unordered_map<std::string, std::weak_ptr<MaterialAsset>> m_materialAssetCache;
     std::unordered_map<std::string, Material> m_materialCache;             // 子网格键 → 材质（importModel 旁表）
     std::filesystem::path m_projectRoot;
 };

@@ -9,6 +9,7 @@
 #include <NovaEngine/Scene/SceneRenderer.h>
 
 #include <NovaEngine/Assets/AssetDatabase.h>
+#include <NovaEngine/Assets/MaterialAsset.h>
 #include <NovaEngine/Core/Logger.h>
 #include <NovaEngine/Render/Cubemap.h>
 #include <NovaEngine/Render/ShadowMap.h>
@@ -99,9 +100,13 @@ void SceneRenderer::renderScene(const Scene& scene, const RenderCamera& fallback
         const Transform* t = go->transform();
         if (!t) return;
         const glm::mat4 world = t->worldMatrix();
-        Renderer::submit(mr->mesh, mr->material, world);
+        // 材质双轨（V0.3-6，§14.5）：引用材质资产时整块取值（submit 与阴影收集共用同一解析结果）；
+        // MaterialAsset 由资产线实现，此处只消费冻结头 Material.h 的 materialAsset 字段
+        const Material& mat = mr->material.materialAsset ? mr->material.materialAsset->material()
+                                                         : mr->material;
+        Renderer::submit(mr->mesh, mat, world);
         // 透明物体不进阴影（裁定 2：队列归属只看 blendMode）
-        if (shadowEnabled && mr->material.blendMode == BlendMode::Opaque)
+        if (shadowEnabled && mat.blendMode == BlendMode::Opaque)
             shadowItems.push_back(ShadowItem{mr->mesh, world});
     });
     if (shadowEnabled) Renderer::drawShadowPass(shadowParams, shadowItems);

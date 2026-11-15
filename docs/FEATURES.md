@@ -663,4 +663,21 @@ NovaPlayer 内快捷键：**Esc** 退出（其余无）。
 
 ---
 
+## 11. V0.3 波 1 新增：PBR 材质 + 材质库（2026-11-15）
+
+### 11.1 PBR 材质升级
+- 光照模型升级为 Cook-Torrance GGX + Fresnel-Schlick 金属工作流（能量守恒）
+- Inspector 材质区新增：**Normal / Metallic / Roughness / Emission 四张贴图路径**（Enter 生效，空=清除）+ **Emission Color / Emission Intensity**
+- 贴图约定：albedo 按 sRGB 解码；normal/metallic/roughness/emission 一律线性解码（法线贴图强制）
+- **注意：PBR 迁移后画面整体变暗**（物理正确化，无补偿项）；demo 如需提亮可调 DirectionalLight intensity 或环境光
+
+### 11.2 材质库 .novamat
+- **创建**：Asset Browser 空白处右键 → Create → Material（输入名字，生成 `.novamat`，条目带 `[MA]` 前缀）
+- **编辑**：双击 .novamat 打开模态编辑（Save 才落盘）；保存后场景内所有引用该材质的物体**当帧同步变色**
+- **引用**：Inspector 材质区 Assign 输入 .novamat 路径（Enter 生效）→ 内联字段灰显（整块引用）；Detach 回内联
+- 场景保存时引用态只写 `"materialAsset"` 路径键；跨场景复用（加载时经 AssetDatabase 解析）
+- 缺失资产加载不崩溃（warn + 回退内联默认材质）
+
+---
+
 *本文档由文档 Agent 基于 editor/src 与 engine/src 的实际实现撰写。发现文档与代码不符时，以代码为准并欢迎更新本文件。*
