@@ -225,3 +225,9 @@ Wave 2 审查无 P0；两条 P1 已修复（见下段「已修复项」）。以
 6. **波 3 遗留两项**继续有效：双 FBO resize 分支与 LoadScene 端到端留人工验收。
 
 **验证记录**：Debug 全量构建零错误零第一方警告（NovaEditor.exe 重链接）；**Release 全量构建零错误**（Jolt 首次 Release 编译，Release 双 exe 产出）；编辑器冒烟守卫 16 条通过无 PrefabManager 错误；Player 冒烟旋转正常。日志归档 build/smoke/w4f-*.log。
+
+**波 4 后修复（2026-11-15，用户报障「Scene 看不到 cube」）**：
+
+- **根因**：波 3 重线后 Edit 路径改走 renderSceneToOutput → 内部 collectCamera 优先场景 Main Camera（忽略编辑器相机）；demo 的 Main Camera 为恒等旋转（forward=+Z，背对原点）→ Scene View 只有天空，网格/cube 全部不可见。此前冒烟只验日志未验画面，故未发现（教训：渲染回归必须像素级验证）。
+- **修复**：renderSceneToOutput 增 `bool useSceneCamera = true` 尾参——Edit 传 false 强制用编辑器相机（场景相机不得劫持 Scene View 取景）；Play/Player 默认 true 不变。demo.nova.json Main Camera 旋转改 180° 偏航（0,1,0,0）朝向原点（修复前 Play 同样只有天空）。
+- **验证**：编辑器窗口截图像素采样——修复前场景区 100% 天空蓝零亮像素；修复后地面亮灰+天空+视口中心橙色描边 cube 齐全。

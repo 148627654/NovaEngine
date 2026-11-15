@@ -39,12 +39,16 @@ public:
     // - 否则：hdrFbo 以 RGBA8 创建 + blit 直通（与旧路径逐像素一致）
     // - outlines：编辑器描边（Play 下传 nullptr）
     // - afterSceneDraw：场景 FBO 内 3D pass 之后、resolve 之前执行的注入点（Show Colliders 线框等）
+    // - useSceneCamera（V0.3-14 修复，波 4 后）：true=按场景相机选择（isMain→第一个→fallback，
+    //   Play/Player 语义）；false=强制用 fallbackCamera（编辑器 Edit 语义——编辑器相机才是
+    //   Scene View 的取景器，场景相机不得接管；否则场景里有 Camera 时 Edit 视图被其劫持）
     // - 返回 outLdrFbo 的颜色纹理 id（供 ImGui::Image / 交换缓冲使用）
     static uint32_t renderSceneToOutput(const Scene& scene, const RenderCamera& fallbackCamera,
                                         Framebuffer& hdrFbo, Framebuffer& outLdrFbo,
                                         const PostProcessSettings& pp,
                                         const std::vector<OutlineItem>* outlines = nullptr,
-                                        const std::function<void()>& afterSceneDraw = {});
+                                        const std::function<void()>& afterSceneDraw = {},
+                                        bool useSceneCamera = true);
 };
 
 }  // namespace NovaEngine

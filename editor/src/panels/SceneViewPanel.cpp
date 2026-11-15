@@ -254,7 +254,8 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
     const uint32_t outTex = SceneRenderer::renderSceneToOutput(
         *scene, renderCam, m_hdrFbo, m_outFbo, scene->postProcess,
         editMode ? &outlines : nullptr,
-        afterSceneDraw);
+        afterSceneDraw,
+        /*useSceneCamera=*/!editMode);   // Edit 用编辑器相机（场景相机不得劫持 Scene View）
     m_hdrFbo.unbind();
     const auto renderT1 = std::chrono::steady_clock::now();
     Stats::setSectionMs("render",

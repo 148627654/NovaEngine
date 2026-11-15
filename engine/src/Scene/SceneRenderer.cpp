@@ -54,10 +54,16 @@ bool assembleFromCamera(const Camera* cam, const RenderCamera& fallback, RenderC
 
 // 场景 3D 渲染本体（renderScene 与 renderSceneToOutput 共用；不设置 gamma 模式——
 // 由两个公开入口按路径设置，见各入口注释）
-void renderSceneInternal(const Scene& scene, const RenderCamera& fallbackCamera) {
-    // 1. 渲染相机：isMain 优先，无则第一个 Camera，再无则复制 fallback
+void renderSceneInternal(const Scene& scene, const RenderCamera& fallbackCamera,
+                         bool useSceneCamera) {
+    // 1. 渲染相机：useSceneCamera=true 走场景相机选择（isMain→第一个→fallback，Play 语义）；
+    //    false 强制 fallback（编辑器 Edit 语义——场景相机不得劫持 Scene View 取景）
     RenderCamera renderCam;
-    SceneRenderer::collectCamera(scene, fallbackCamera, renderCam);
+    if (useSceneCamera) {
+        SceneRenderer::collectCamera(scene, fallbackCamera, renderCam);
+    } else {
+        renderCam = fallbackCamera;
+    }
 
     // 2. 灯光：第一个 DirectionalLight（方向取自 Transform.forward）；无则默认方向
     DirectionalLightData light;
@@ -123,14 +129,15 @@ void SceneRenderer::renderScene(const Scene& scene, const RenderCamera& fallback
     // 旧路径（编辑器 Edit / 兼容调用）：固定非 HDR——uGamma=1/2.2，行为与波 2 逐像素一致
     // （本入口每帧重置 gamma 模式，防止与 renderSceneToOutput 的 HDR 帧交错时状态泄漏）
     Renderer::setGammaMode(false);
-    renderSceneInternal(scene, fallbackCamera);
+    renderSceneInternal(scene, fallbackCamera, /*useSceneCamera=*/true);
 }
 
 uint32_t SceneRenderer::renderSceneToOutput(const Scene& scene, const RenderCamera& fallbackCamera,
                                             Framebuffer& hdrFbo, Framebuffer& outLdrFbo,
                                             const PostProcessSettings& pp,
                                             const std::vector<OutlineItem>* outlines,
-                                            const std::function<void()>& afterSceneDraw) {
+                                            const std::function<void()>& afterSceneDraw,
+                                            bool useSceneCamera) {
     // 尺寸无效（最小化/未创建）：不渲染，返回 outLdrFbo 纹理（调用方跳过显示，不崩溃）
     if (hdrFbo.width() <= 0 || hdrFbo.height() <= 0 ||
         outLdrFbo.width() <= 0 || outLdrFbo.height() <= 0)
@@ -143,7 +150,7 @@ uint32_t SceneRenderer::renderSceneToOutput(const Scene& scene, const RenderCame
 
     // 3D pass（含天空/阴影/网格）→ 描边（若有）→ afterSceneDraw 注入点（Show Colliders 线框等）→ resolve
     hdrFbo.bind();
-    renderSceneInternal(scene, fallbackCamera);
+    renderSceneInternal(scene, fallbackCamera, useSceneCamera);
     if (outlines != nullptr) {
         for (const OutlineItem& item : *outlines)
             if (item.mesh)

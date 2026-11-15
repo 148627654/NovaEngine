@@ -1598,6 +1598,8 @@ static uint32_t renderSceneToOutput(const Scene& scene, const RenderCamera& fall
 
 **遗留**（详见 KNOWN-ISSUES.md「波 3 遗留 backlog」）：build.novabuild 缺失良性 warn、bloom 单方向降采样近似、resize 在 disabled 时仍建纹理、Release 构建留待波 4。
 
+**波 4 后修复（2026-11-15，用户报障）**：Scene 视图 Edit 模式被场景相机劫持——renderSceneToOutput 内部 collectCamera 优先场景 Main Camera，编辑器相机被忽略；demo 的 Main Camera 又恰为恒等旋转（forward=+Z 背对原点）→ 视图只有天空、cube/网格全部不可见。修复：renderSceneToOutput 增 `bool useSceneCamera = true` 尾参（Edit 传 false 强制 fallback 编辑器相机；Play/Player 默认 true 场景相机语义不变）；demo.nova.json 的 Main Camera 旋转改 180° 偏航（0,1,0,0）朝向原点。验证：编辑器截图像素采样——修复前场景区纯天空蓝、修复后地面+天空+中心橙色描边 cube 齐全。
+
 ## 22. 波 4 落地终态 + V0.3 收官（2026-11-15，Prefab 完整化 + 全量回归）
 
 **执行结果**：Debug 全量构建零错误零第一方警告（NovaEditor.exe 重链接）；**Release 全量构建零错误**（Jolt 首次 Release 编译，Release 双 exe 产出）；编辑器守卫 16 条验证通过；双 exe 冒烟通过；v3 旧场景加载参数不变（schema 回归通过）。Reviewer 12 项清单全过，2 P1 + 4 P2 全部修复闭环。
