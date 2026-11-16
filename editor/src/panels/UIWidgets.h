@@ -90,7 +90,8 @@ inline void drawTextEditor(EditorContext& ctx, NovaEngine::Text* t, bool editMod
     if (ImGui::ColorEdit4("Color", glm::value_ptr(t->color))) ctx.markDirtyOnly();
     uiDirtyOnEditEnd(ctx);
     drawUIPathRow(ctx, "Font Path", t->fontPath, editMode);
-    if (t->fontPath.empty()) ImGui::TextDisabled("(empty = default font msyh.ttc)");
+    if (t->fontPath.empty())
+        ImGui::TextDisabled("(empty = Noto Sans SC / 等线 / 微软雅黑；可填 C:/Windows/Fonts/times.ttf 等)");
     if (ImGui::SliderFloat2("Anchor", glm::value_ptr(t->anchor), 0.0f, 1.0f)) ctx.markDirtyOnly();
     uiDirtyOnEditEnd(ctx);
     if (ImGui::DragFloat2("Offset", glm::value_ptr(t->offset), 0.5f)) ctx.markDirtyOnly();

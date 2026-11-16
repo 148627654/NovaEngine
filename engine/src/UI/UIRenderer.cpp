@@ -231,10 +231,13 @@ void emitImage(BatchSink& sink, const Image& img, float us, const Glyph* white,
                      vs_[r + 1], img.color);
 }
 
-void emitText(BatchSink& sink, const Text& t, float us, uint32_t atlasTex) {
+void emitText(BatchSink& sink, const Text& t, float us) {
     if (t.text.empty() || t.fontSize <= 0.0f) return;
+    // 每文本独立字体图集（fontPath 空 = 默认链；v1.1）
+    const uint32_t atlasTex = FontAtlas::textureId(t.fontPath);
+    if (!atlasTex) return;
     // 行高探针：基线与行高（每帧重取——图集重建后旧指针失效的规避契约）
-    const Glyph* probe = FontAtlas::glyph(kMetricsProbeCp);
+    const Glyph* probe = FontAtlas::glyph(kMetricsProbeCp, t.fontPath);
     const float scale = (t.fontSize * us) / kRefPx;
     const glm::vec2 pen0 = anchorPoint(t.anchor, t.offset, us);
     float penX = pen0.x;
@@ -248,7 +251,7 @@ void emitText(BatchSink& sink, const Text& t, float us, uint32_t atlasTex) {
             baseline += lineH;
             continue;
         }
-        const Glyph* g = FontAtlas::glyph(cp);
+        const Glyph* g = FontAtlas::glyph(cp, t.fontPath);
         if (!g || g->w <= 0.0f || g->h <= 0.0f) {  // 缺失/空白：仅推进（图集满时跳字符）
             penX += g ? g->advance * scale : t.fontSize * us * 0.25f;
             continue;
@@ -380,11 +383,12 @@ void UIRenderer::render(const Scene& scene, int screenW, int screenH) {
         if (nodes.empty()) continue;
 
         // 预烘焙 pass：先触发全部字形烘焙（含可能的图集扩容重建），再构建 quad——
-        // 保证同帧取到的 Glyph UV 一致（重建后旧指针失效的规避契约）
+        // 保证同帧取到的 Glyph UV 一致（重建后旧指针失效的规避契约）。
+        // v1.1：按 Text.fontPath 分别烘焙到对应字体图集
         for (const GameObject* n : nodes)
             if (const Text* t = n->getComponent<Text>())
                 for (size_t i = 0; i < t->text.size();)
-                    FontAtlas::glyph(utf8Decode(t->text, i));
+                    FontAtlas::glyph(utf8Decode(t->text, i), t->fontPath);
 
         const Glyph* white = FontAtlas::glyph(kWhiteBlockCp);
         const uint32_t atlasTex = FontAtlas::textureId();
@@ -404,7 +408,7 @@ void UIRenderer::render(const Scene& scene, int screenW, int screenH) {
             if (const Image* img = n->getComponent<Image>())
                 emitImage(sink, *img, us, white, atlasTex);
             if (const Text* t = n->getComponent<Text>())
-                emitText(sink, *t, us, atlasTex);
+                emitText(sink, *t, us);   // v1.1：文本内部按 fontPath 选图集
             if (const Button* b = n->getComponent<Button>())
                 emitButton(sink, *b, us, white, atlasTex, useInputState);
         }

@@ -111,6 +111,29 @@
                     "offset": [0.0, 60.0]
                 }
             ]
+        },
+        {
+            "id": 10000000000000000005,
+            "name": "TextTimes",
+            "active": true,
+            "parent": 10000000000000000002,
+            "components": [
+                {
+                    "type": "Transform",
+                    "position": [0.0, 0.0, 0.0],
+                    "rotation": [1.0, 0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "Text",
+                    "text": "Times New Roman 496",
+                    "fontSize": 36.0,
+                    "color": [1.0, 1.0, 1.0, 1.0],
+                    "fontPath": "C:/Windows/Fonts/times.ttf",
+                    "anchor": [0.5, 0.5],
+                    "offset": [0.0, 0.0]
+                }
+            ]
         }
     ]
 }

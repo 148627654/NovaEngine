@@ -154,6 +154,8 @@ constexpr uint8_t kFont5x7[95][5] = {
 
 // 图集内部实现（函数内静态防初始化顺序问题；FontAtlas 冻结头无成员，全部状态收敛于此）
 struct AtlasImpl {
+    std::string path;                 // 字体文件路径（空 = 默认链字体）
+    bool fallbackToDefault = false;   // 自定义字体加载失败 → 全部请求转发默认图集
     std::vector<uint8_t> pixels;  // R8，size²（顶行在前，与屏幕 Y 向下约定一致）
     int size = 512;
     int cursorX = kPad, cursorY = kPad, rowHeight = 0;
@@ -171,31 +173,46 @@ struct AtlasImpl {
         // DevOps 修复：pixels 此前未分配（size=512 但 vector 为空），首次白块烘焙
         // pixels[...] 越界写 + glTexImage2D 读空缓冲 → 播放器启动挂死。此处按初始 512² 分配。
         pixels.assign(static_cast<size_t>(size) * size, 0);
-        // 2026-11-16：字体优先级链（用户要求更好看的默认字体）——
+        // 空路径 = 默认链字体；非空 = 指定字体文件（Text.fontPath 每文本独立图集）。
+        // 2026-11-16 默认字体优先级链（用户要求更好看的默认字体）——
         // Noto Sans SC（现代无衬线）→ 等线 DengXian → 微软雅黑 msyh。
-        // 首个加载成功的生效（.ttf 与 .ttc 统一走 GetFontOffsetForIndex，普通
-        // ttf 恒返回 0）；全部失败才降级内置 5x7 ASCII。生效字体打 info 日志。
-        static const char* kFontCandidates[] = {
-            "C:/Windows/Fonts/NotoSansSC-VF.ttf",
-            "C:/Windows/Fonts/Deng.ttf",
-            "C:/Windows/Fonts/msyh.ttc",
-        };
-        for (const char* path : kFontCandidates) {
-            std::vector<uint8_t> data;
-            if (!AssetStream::readAllBytes(path, data) || data.empty()) {
-                Logger::warn("[FontAtlas] 字体不存在，尝试下一个: {}", path);
-                continue;
+        // .ttf 与 .ttc 统一走 GetFontOffsetForIndex（普通 ttf 恒返回 0）。
+        // 指定字体加载失败：置 fallbackToDefault（请求转发默认图集），warn 一次。
+        if (path.empty()) {
+            static const char* kFontCandidates[] = {
+                "C:/Windows/Fonts/NotoSansSC-VF.ttf",
+                "C:/Windows/Fonts/Deng.ttf",
+                "C:/Windows/Fonts/msyh.ttc",
+            };
+            for (const char* cand : kFontCandidates) {
+                std::vector<uint8_t> data;
+                if (!AssetStream::readAllBytes(cand, data) || data.empty()) {
+                    Logger::warn("[FontAtlas] 字体不存在，尝试下一个: {}", cand);
+                    continue;
+                }
+                const int off = stbtt_GetFontOffsetForIndex(data.data(), 0);
+                if (off >= 0 && stbtt_InitFont(&font, data.data(), off)) {
+                    fontData = std::move(data);
+                    Logger::info("[FontAtlas] 默认字体: {}", cand);
+                    return;
+                }
+                Logger::warn("[FontAtlas] 字体解析失败，尝试下一个: {}", cand);
             }
+            Logger::warn("[FontAtlas] 无可用系统字体，降级内置 ASCII 位图字体");
+            builtin = true;
+            return;
+        }
+        std::vector<uint8_t> data;
+        if (AssetStream::readAllBytes(path, data) && !data.empty()) {
             const int off = stbtt_GetFontOffsetForIndex(data.data(), 0);
             if (off >= 0 && stbtt_InitFont(&font, data.data(), off)) {
                 fontData = std::move(data);
-                Logger::info("[FontAtlas] 默认字体: {}", path);
+                Logger::info("[FontAtlas] 指定字体: {}", path);
                 return;
             }
-            Logger::warn("[FontAtlas] 字体解析失败，尝试下一个: {}", path);
         }
-        Logger::warn("[FontAtlas] 无可用系统字体，降级内置 ASCII 位图字体");
-        builtin = true;
+        Logger::warn("[FontAtlas] 指定字体加载失败（{}），回退默认字体（中文可能显示为 ?）", path);
+        fallbackToDefault = true;
     }
 
     // 简易行式摆放：行内放不下换行，换行仍放不下返回 false（零尺寸恒成功、不占空间）
@@ -448,9 +465,29 @@ struct AtlasImpl {
     }
 };
 
-AtlasImpl& impl() {
-    static AtlasImpl s;
+// 图集注册表：字体路径 → 独立图集实例（空串键 = 默认链字体）。
+// 2026-11-16 起支持 Text.fontPath 每文本独立字体（v1 仅默认图集 → v1.1 多图集）
+std::unordered_map<std::string, std::unique_ptr<AtlasImpl>>& registry() {
+    static std::unordered_map<std::string, std::unique_ptr<AtlasImpl>> s;
     return s;
+}
+
+AtlasImpl& implFor(const std::string& fontPath) {
+    auto& reg = registry();
+    auto it = reg.find(fontPath);
+    if (it == reg.end())
+        it = reg.emplace(fontPath, std::make_unique<AtlasImpl>()).first;
+    AtlasImpl& im = *it->second;
+    if (im.path.empty() && !fontPath.empty())
+        im.path = fontPath;   // 首次创建时记录字体路径（空串键 = 默认链，保持不变）
+    im.ensureLoaded();
+    if (im.fallbackToDefault)
+        return implFor(std::string());  // 指定字体失败 → 转发默认图集（递归深度 1，默认图集自身不置此标志）
+    return im;
+}
+
+AtlasImpl& impl() {
+    return implFor(std::string());
 }
 
 }  // namespace
@@ -467,12 +504,22 @@ const Glyph* FontAtlas::glyph(uint32_t codepoint) {
     return impl().bake(codepoint);
 }
 
+const Glyph* FontAtlas::glyph(uint32_t codepoint, const std::string& fontPath) {
+    return implFor(fontPath).bake(codepoint);
+}
+
 uint32_t FontAtlas::textureId() {
     return impl().texId;
 }
 
+uint32_t FontAtlas::textureId(const std::string& fontPath) {
+    return implFor(fontPath).texId;
+}
+
 void FontAtlas::refreshMipmaps() {
-    impl().refreshMipmaps();
+    // 全部图集（默认 + 各指定字体）重建 mip 链——多图集下每 Canvas 预烘焙后统一刷新
+    for (auto& [key, im] : registry())
+        im->refreshMipmaps();
 }
 
 }  // namespace NovaEngine
