@@ -50,6 +50,7 @@ Wave 2 只读审查结论：**无 P0**；两条 P1 均已修复（meta 的 pak �
 - **Play 退出后层级被拍平（子对象变同级）已修复**：根因 `Scene::createGameObject(name, parent)` 只把新对象 push 进父级 children 列表、**从未设置 m_parent 指针**（GameObject.cpp:57-62 修复前）。后果：Hierarchy 面板按 children 列表显示为嵌套（看似正常），但 `parent()` 返回 nullptr → Play 快照序列化把 parent 写成 0 → 退出 Play 按快照还原时全部挂根。右键 Create Empty / Create Primitive 等走 createGameObject 的创建路径全部中招；拖拽重父子（setParent）不受影响。修复：push 进父级列表时同步 `raw->m_parent = parent`（一行）。回归验证：新增 tests/PlayCycleTest 无头测试（serialize→deserialize×5 + Play 帧循环往返 + 文件往返，全通过）。
 - **UI 文字全部乱码（数字/字母/汉字皆非其字）已修复**：根因 FontAtlas::bakeStb 把**字形索引 gi** 误传给三个期望「码点」的 stb API（`stbtt_GetCodepointBitmap` / `GetCodepointHMetrics` / `GetCodepointBox`）——这些函数内部会再执行一次 FindGlyphIndex，导致双重映射：烘焙出「码点值恰好等于字形索引」的另一个字形（对 msyh 的 cmap 而言几乎所有字符都错，含 ASCII）。gi 本应只用于缺字判断。修复：三个调用改传码点。验证：播放器帧缓冲读回逐字核对（"Click Me 123 ABC 中文测试" 数字/字母/汉字全部正确）。
 - **文字渲染成 2 倍大（看起来像乱码）已修复**：根因 kRefPx 在 FontAtlas.cpp 与 UIRenderer.cpp 各维护一份——参考高提升为 128px 时只改了前者，后者仍按 fontSize/64 排版 → 全部字形 2 倍大、间距 2 倍宽。修复：常量收敛为 FontAtlas::kRefPx（FontAtlas.h 内 static constexpr，唯一出处），两侧引用同一常量。验证：播放器帧缓冲读回（32px 文字宽度 358px 与字号匹配）。
+- **字形横向条纹/笔画错位/斜切已修复**：根因引擎从未设置 glPixelStorei(GL_UNPACK_ALIGNMENT,1)——OpenGL 默认 4 字节行对齐，而字形位图是宽度任意的 R8 单字节行：宽度非 4 倍数时每行读长被撑到 4 的倍数，行间逐行累积偏移 → 字形斜切、横条纹、笔画错位（用户截图 + 外部分析定位一致）。修复：FontAtlas::uploadRegion 子区域上传前显式 1 字节对齐、结束恢复默认。其余上传点（RGBA 4 字节像素、FLOAT 16 字节像素、图集整图 512²/1024²）天然 4 对齐不受影响。
 
 ## 新增缺口（2026-11-15，Docs Writer 通读代码发现，状态已更新）
 

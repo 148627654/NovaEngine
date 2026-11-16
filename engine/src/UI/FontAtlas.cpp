@@ -251,7 +251,12 @@ struct AtlasImpl {
         ensureTexture();
         if (!texId || w <= 0 || h <= 0) return;
         glBindTexture(GL_TEXTURE_2D, texId);
+        // 2026-11-16 修复：R8 字形位图行宽任意——OpenGL 默认 4 字节行对齐会把
+        // 每行读长撑到 4 的倍数（行间错位、逐行累积偏移 → 字形斜切/横条纹/
+        // 笔画错位）。子区域上传前必须显式 1 字节对齐，结束后恢复默认。
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
         glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, GL_RED, GL_UNSIGNED_BYTE, data);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
         glBindTexture(GL_TEXTURE_2D, 0);
     }
 
