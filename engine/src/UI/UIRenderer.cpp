@@ -387,6 +387,9 @@ void UIRenderer::render(const Scene& scene, int screenW, int screenH) {
         const Glyph* white = FontAtlas::glyph(kWhiteBlockCp);
         const uint32_t atlasTex = FontAtlas::textureId();
         if (!white || !atlasTex) continue;
+        // 预烘焙可能有新字形上传 → 重建 mip 链（MIN=GL_LINEAR_MIPMAP_LINEAR），
+        // 保证本 Canvas 本帧采样的是最新 mip（否则新字形用旧 mip/无 mip 发虚）
+        FontAtlas::refreshMipmaps();
 
         // per-texture 批（插入序即遍历序；同贴图内保持画家顺序）
         std::vector<uint32_t> bucketOrder;

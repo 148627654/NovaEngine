@@ -1,0 +1,116 @@
+{
+    "version": 4,
+    "name": "FontTest",
+    "environment": {
+        "skyColor": [0.10, 0.12, 0.20],
+        "ambientColor": [0.15, 0.15, 0.18],
+        "showGrid": false,
+        "fogColor": [0.10, 0.12, 0.20],
+        "skyMode": "Gradient",
+        "skyHorizonColor": [0.15, 0.16, 0.24],
+        "skyZenithColor": [0.10, 0.12, 0.20],
+        "skyCubemapPath": "",
+        "skyRotation": [0.0, 0.0],
+        "skyExposure": 1.0,
+        "postProcess": {
+            "enabled": false,
+            "bloomThreshold": 1.0,
+            "bloomIntensity": 0.5,
+            "bloomLevels": 5,
+            "exposure": 1.0
+        }
+    },
+    "editorCamera": {
+        "target": [0.0, 0.0, 0.0],
+        "distance": 8.0,
+        "yaw": 0.0,
+        "pitch": 0.0
+    },
+    "objects": [
+        {
+            "id": 10000000000000000001,
+            "name": "Main Camera",
+            "active": true,
+            "parent": 0,
+            "components": [
+                {
+                    "type": "Transform",
+                    "position": [0.0, 0.0, -10.0],
+                    "rotation": [1.0, 0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "Camera",
+                    "fov": 60.0,
+                    "near": 0.1,
+                    "far": 1000.0,
+                    "isMain": true
+                }
+            ]
+        },
+        {
+            "id": 10000000000000000002,
+            "name": "Canvas",
+            "active": true,
+            "parent": 0,
+            "components": [
+                {
+                    "type": "Transform",
+                    "position": [0.0, 0.0, 0.0],
+                    "rotation": [1.0, 0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "Canvas",
+                    "uiScale": 1.0
+                }
+            ]
+        },
+        {
+            "id": 10000000000000000003,
+            "name": "Text32",
+            "active": true,
+            "parent": 10000000000000000002,
+            "components": [
+                {
+                    "type": "Transform",
+                    "position": [0.0, 0.0, 0.0],
+                    "rotation": [1.0, 0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "Text",
+                    "text": "FontSize32 ABC 123 中文清晰度",
+                    "fontSize": 32.0,
+                    "color": [1.0, 1.0, 1.0, 1.0],
+                    "fontPath": "",
+                    "anchor": [0.5, 0.5],
+                    "offset": [0.0, -60.0]
+                }
+            ]
+        },
+        {
+            "id": 10000000000000000004,
+            "name": "Text24",
+            "active": true,
+            "parent": 10000000000000000002,
+            "components": [
+                {
+                    "type": "Transform",
+                    "position": [0.0, 0.0, 0.0],
+                    "rotation": [1.0, 0.0, 0.0, 0.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "Text",
+                    "text": "FontSize24 abc 456 测试小字",
+                    "fontSize": 24.0,
+                    "color": [1.0, 1.0, 1.0, 1.0],
+                    "fontPath": "",
+                    "anchor": [0.5, 0.5],
+                    "offset": [0.0, 60.0]
+                }
+            ]
+        }
+    ]
+}

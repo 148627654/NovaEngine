@@ -8,8 +8,10 @@
 //     AssetStream::readAllBytes 读入内存后 stbtt_InitFont；失败降级内置 5x7 ASCII
 //     位图字体（程序化 8 倍放大烘焙进同一图集），Logger::warn 提示。
 //  2) 按需烘焙：glyph(codepoint) 首次请求才光栅化；全部字形按固定参考像素高
-//     64px（kRefPx）烘焙，UIRenderer 按 fontSize/64 缩放排版——冻结头 glyph() 签名
-//     无字号参数，参考高固定是唯一可行方案（64px 对 CJK 细节与 2 倍放大都够用）。
+//     128px（kRefPx，2026-11-16 由 64 提升）烘焙，UIRenderer 按 fontSize/128 缩放排版
+//     ——冻结头 glyph() 签名无字号参数，参考高固定是唯一可行方案。纹理采样走
+//     GL_LINEAR_MIPMAP_LINEAR：每批烘焙后 refreshMipmaps() 重建 mip 链，
+//     小字号经 mip 降采样保持清晰（旧 GL_LINEAR 直降会发虚）。
 //  3) 图集 512² 起步，放满则 1024² 整体重建（旧 Glyph* 全部失效——规避方式：
 //     调用方每帧、每字形重新调 glyph()；UIRenderer 额外做“预烘焙 pass”保证同帧
 //     字形 UV 一致，见 UIRenderer.cpp 顶部注释）。1024² 再满：新字形返回 nullptr，
@@ -42,12 +44,15 @@ namespace {
 
 constexpr uint32_t kWhiteBlockCp = 0xFFFFFF;    // 内部保留：1x1 白块（纯色 Image/Button 共用）
 constexpr uint32_t kMetricsProbeCp = 0xFFFFFE;  // 内部保留：行高探针（零尺寸，只带 metrics）
-constexpr float kRefPx = 64.0f;                 // 全部字形按 64px 参考高烘焙
+// 2026-11-16：参考高 64→128px——配合 mipmap 链，小字号（默认 32px）经 mip 降采样
+// 不再发虚，大字号（≤128px）走 level 0 也清晰；图集容量下降（1024² 约 60 个 CJK）
+// 属可接受取舍（文本 UI 单屏字符数有限；满图集仍走既有 warn + 缺字回退路径）
+constexpr float kRefPx = 128.0f;                // 全部字形按 128px 参考高烘焙
 constexpr int kPad = 2;                         // 字形四周留 2px 空（线性过滤防邻字渗色）
 constexpr int kAtlasMax = 1024;                 // 图集上限（满则新字形缺失）
 
 // 内置降级字体：5x7 ASCII（32..126），每字节一列，bit r = 第 r 行（bit0 = 顶行）
-constexpr int kFontW = 5, kFontH = 7, kFontScale = 8;  // 放大 8 倍 → 40x56 参考字形
+constexpr int kFontW = 5, kFontH = 7, kFontScale = 16;  // 放大 16 倍 → 80x112 参考字形（kRefPx=128 对应）
 constexpr uint8_t kFont5x7[95][5] = {
     {0x00,0x00,0x00,0x00,0x00},  // ' '
     {0x00,0x00,0x5F,0x00,0x00},  // '!'
@@ -192,6 +197,7 @@ struct AtlasImpl {
     }
 
     // GL 纹理：R8 + 全通道 swizzle→RED（采样 texel=(r,r,r,r)，texel.a 即覆盖率）。
+    // MIN 过滤走 mipmap 线性（refreshMipmaps 每批重建）——小字号降采样不再发虚
     // glad 空指针守卫：GL 上下文未就绪时延后创建（UIRenderer::init 在上下文就绪后触发首次烘焙）
     void ensureTexture() {
         if (texId) return;
@@ -200,7 +206,7 @@ struct AtlasImpl {
         glBindTexture(GL_TEXTURE_2D, texId);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R, GL_RED);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_G, GL_RED);
@@ -217,6 +223,17 @@ struct AtlasImpl {
         glBindTexture(GL_TEXTURE_2D, texId);
         glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, GL_RED, GL_UNSIGNED_BYTE, data);
         glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    // mipmap 链重建（采样 MIN=GL_LINEAR_MIPMAP_LINEAR）：每批字形上传结束后调用
+    //（UIRenderer 每 Canvas 预烘焙 pass 后触发；绑定状态保存/恢复，不打扰调用方）
+    void refreshMipmaps() {
+        if (!texId || !glad_glGenerateMipmap) return;
+        GLint prev = 0;
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev);
+        glBindTexture(GL_TEXTURE_2D, texId);
+        glGenerateMipmap(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(prev));
     }
 
     void recreateTexture() {
@@ -439,6 +456,10 @@ const Glyph* FontAtlas::glyph(uint32_t codepoint) {
 
 uint32_t FontAtlas::textureId() {
     return impl().texId;
+}
+
+void FontAtlas::refreshMipmaps() {
+    impl().refreshMipmaps();
 }
 
 }  // namespace NovaEngine
