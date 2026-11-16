@@ -360,14 +360,18 @@ struct AtlasImpl {
         }
         const float scale = stbtt_ScaleForPixelHeight(&font, kRefPx);
 
+        // 2026-11-16 修复：GetCodepoint* 系列参数是「码点」（内部自会 FindGlyphIndex），
+        // 原实现误传字形索引 gi → 双重映射 → 烘焙出码点值恰好等于字形索引的错误字形
+        //（数字不是数字、字母不是字母、汉字不是汉字）。gi 仅用于缺字判断。
+        const int codepoint = static_cast<int>(cp);
         int w = 0, h = 0, xoff = 0, yoff = 0;
-        unsigned char* bmp = stbtt_GetCodepointBitmap(&font, scale, scale, gi, &w, &h, &xoff, &yoff);
+        unsigned char* bmp = stbtt_GetCodepointBitmap(&font, scale, scale, codepoint, &w, &h, &xoff, &yoff);
         if (!bmp) return nullptr;
 
         int advW = 0, lsb = 0;
-        stbtt_GetCodepointHMetrics(&font, gi, &advW, &lsb);
+        stbtt_GetCodepointHMetrics(&font, codepoint, &advW, &lsb);
         int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
-        stbtt_GetCodepointBox(&font, gi, &x0, &y0, &x1, &y1);
+        stbtt_GetCodepointBox(&font, codepoint, &x0, &y0, &x1, &y1);
 
         Glyph g{};
         // 布局 metrics 用包围盒（y 向上、相对基线）；位图与包围盒差亚像素级，忽略

@@ -15,6 +15,18 @@
             0.15000000596046448,
             0.18000000715255737
         ],
+        "fogColor": [
+            0.18000000715255737,
+            0.2199999988079071,
+            0.3499999940395355
+        ],
+        "postProcess": {
+            "bloomIntensity": 0.5,
+            "bloomLevels": 3,
+            "bloomThreshold": 1.0,
+            "enabled": false,
+            "exposure": 1.0
+        },
         "showGrid": true,
         "skyColor": [
             0.18000000715255737,
@@ -51,7 +63,7 @@
                         0.0,
                         1.0,
                         0.0,
-                        6.123233995736766e-17
+                        6.123234262925839e-17
                     ],
                     "scale": [
                         1.0,
@@ -148,8 +160,20 @@
                             0.20000000298023224
                         ],
                         "albedoMap": "",
+                        "alpha": 1.0,
+                        "blendMode": "Opaque",
+                        "emissionColor": [
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "emissionIntensity": 1.0,
+                        "emissionMap": "",
                         "metallic": 0.0,
-                        "roughness": 0.5
+                        "metallicMap": "",
+                        "normalMap": "",
+                        "roughness": 0.5,
+                        "roughnessMap": ""
                     },
                     "mesh": "assets/models/cube.obj",
                     "type": "MeshRenderer"
@@ -194,8 +218,20 @@
                             1.0
                         ],
                         "albedoMap": "",
+                        "alpha": 1.0,
+                        "blendMode": "Opaque",
+                        "emissionColor": [
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "emissionIntensity": 1.0,
+                        "emissionMap": "",
                         "metallic": 0.10000000149011612,
-                        "roughness": 0.4000000059604645
+                        "metallicMap": "",
+                        "normalMap": "",
+                        "roughness": 0.4000000059604645,
+                        "roughnessMap": ""
                     },
                     "mesh": "assets/models/cube.obj",
                     "type": "MeshRenderer"
@@ -204,7 +240,151 @@
             "id": 9988776655443322110,
             "name": "SmallCube",
             "parent": 12345678901234567890
+        },
+        {
+            "active": true,
+            "components": [
+                {
+                    "position": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "type": "Transform"
+                },
+                {
+                    "type": "Canvas",
+                    "uiScale": 1.0
+                }
+            ],
+            "id": 2671689366639059954,
+            "name": "GameObject",
+            "parent": 0
+        },
+        {
+            "active": true,
+            "components": [
+                {
+                    "position": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "type": "Transform"
+                },
+                {
+                    "anchor": [
+                        0.5,
+                        0.5
+                    ],
+                    "color": [
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "hoverColor": [
+                        0.8999999761581421,
+                        0.8999999761581421,
+                        0.8999999761581421,
+                        0.8999999761581421
+                    ],
+                    "offset": [
+                        0.0,
+                        0.0
+                    ],
+                    "pressedColor": [
+                        0.800000011920929,
+                        0.800000011920929,
+                        0.800000011920929,
+                        0.800000011920929
+                    ],
+                    "size": [
+                        100.0,
+                        100.0
+                    ],
+                    "slice9": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "type": "Button"
+                }
+            ],
+            "id": 15225689428441900525,
+            "name": "GameObject",
+            "parent": 2671689366639059954
+        },
+        {
+            "active": true,
+            "components": [
+                {
+                    "position": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "type": "Transform"
+                },
+                {
+                    "anchor": [
+                        0.5,
+                        0.5
+                    ],
+                    "color": [
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "fontPath": "",
+                    "fontSize": 32.0,
+                    "offset": [
+                        0.0,
+                        0.0
+                    ],
+                    "text": "123",
+                    "type": "Text"
+                }
+            ],
+            "id": 1296815534209265934,
+            "name": "GameObject",
+            "parent": 2671689366639059954
         }
     ],
-    "version": 3
+    "version": 4
 }
