@@ -51,6 +51,9 @@ Wave 2 只读审查结论：**无 P0**；两条 P1 均已修复（meta 的 pak �
 - **UI 文字全部乱码（数字/字母/汉字皆非其字）已修复**：根因 FontAtlas::bakeStb 把**字形索引 gi** 误传给三个期望「码点」的 stb API（`stbtt_GetCodepointBitmap` / `GetCodepointHMetrics` / `GetCodepointBox`）——这些函数内部会再执行一次 FindGlyphIndex，导致双重映射：烘焙出「码点值恰好等于字形索引」的另一个字形（对 msyh 的 cmap 而言几乎所有字符都错，含 ASCII）。gi 本应只用于缺字判断。修复：三个调用改传码点。验证：播放器帧缓冲读回逐字核对（"Click Me 123 ABC 中文测试" 数字/字母/汉字全部正确）。
 - **文字渲染成 2 倍大（看起来像乱码）已修复**：根因 kRefPx 在 FontAtlas.cpp 与 UIRenderer.cpp 各维护一份——参考高提升为 128px 时只改了前者，后者仍按 fontSize/64 排版 → 全部字形 2 倍大、间距 2 倍宽。修复：常量收敛为 FontAtlas::kRefPx（FontAtlas.h 内 static constexpr，唯一出处），两侧引用同一常量。验证：播放器帧缓冲读回（32px 文字宽度 358px 与字号匹配）。
 - **字形横向条纹/笔画错位/斜切已修复**：根因引擎从未设置 glPixelStorei(GL_UNPACK_ALIGNMENT,1)——OpenGL 默认 4 字节行对齐，而字形位图是宽度任意的 R8 单字节行：宽度非 4 倍数时每行读长被撑到 4 的倍数，行间逐行累积偏移 → 字形斜切、横条纹、笔画错位（用户截图 + 外部分析定位一致）。修复：FontAtlas::uploadRegion 子区域上传前显式 1 字节对齐、结束恢复默认。其余上传点（RGBA 4 字节像素、FLOAT 16 字节像素、图集整图 512²/1024²）天然 4 对齐不受影响。
+- **SceneSwitcher 验收脚本从未编译进构建已修复**：ROADMAP 验收物料 samples/SceneSwitcher.cpp 文件存在，但 samples/CMakeLists.txt 未列入 NovaScripts → 挂 SceneSwitcher 的场景反序列化时「未知组件类型，已跳过」、onStart 不执行、DDOL 从未设置——LoadScene E2E 验证首跑即暴露（DDOL 迁移 0 棵子树）。修复：CMakeLists 补 SceneSwitcher.cpp（一行）。教训：验收脚本本身必须先被构建。
+- **V0.3 遗留验收项像素级验证闭环（2026-11-16/17）**：Player 临时 --verify 驱动 + outLdrFbo 帧缓冲读回（读回产物与脚本已随验收删除，数字记录如下）：① 按钮 hover/pressed 颜色——真实 OS 光标悬停 + SendInput 点击，idle(78,141,229)/hover(103,166,254)/pressed(53,103,204)/移出还原，与设计色逐像素一致；② Bloom A/B——emission=3 立方体光晕环亮度 on=206.1 vs off=188.0（+18），ACES 高光滚降（253 vs 255），hdrSupported=true 16F 链实测。全部 12 项断言通过。
+- **材质库共享材质同步已像素级验证（2026-11-17）**：临时场景三立方体共享同一 .novamat（materialAsset 双轨）——材质 albedo 红 (1,0,0) 时三立方体实测全 (108,0,0) 红；仅改资产文件为绿 (0,1,0) 重跑，三立方体全 (0,108,0) 绿、天空不变——「改一处、多处同步」资产级成立（编辑器内实时刷新交互仍待人工）。
 
 ## 新增缺口（2026-11-15，Docs Writer 通读代码发现，状态已更新）
 
@@ -196,8 +199,8 @@ Wave 2 审查无 P0；两条 P1 已修复（见下段「已修复项」）。以
 
 **波 3 遗留 backlog**（已文档化，不阻塞）：
 
-1. **双 FBO resize/格式切换分支未经运行期验证**：代码路径已实现（尺寸或 hdr 模式变化全删重建），5s 冒烟未触发窗口 resize——**最终验收手动拉伸窗口 + 切换 pp.enabled 复核**。
-2. **LoadScene 端到端未验证**：demo 无脚本触发切换；init/shutdown 冒烟无崩溃——**最终验收挂临时脚本验证 DDOL 存活 + 退出 Play 快照恢复**。
+1. ~~**双 FBO resize/格式切换分支未经运行期验证**~~ **已验证（2026-11-16 像素级）**：Player 临时 --verify 驱动 4 次 glfwSetWindowSize（1600x900/800x600/1280x720）+ 2 次 pp.enabled 格式切换（RGBA8→16F→RGBA8，FBO 全删重建），全程无崩溃；最终帧读回 1280x720 画面正确（立方体 (103,67,56) 暖橙、天空非黑）。
+2. ~~**LoadScene 端到端未验证**~~ **已验证（2026-11-16，另修复 SceneSwitcher 未编译）**：Player --verify 驱动 + SceneSwitcher 脚本 E2E——失败路径 loadScene("NoSuchScene") 返回 false 不崩；切换 Second 后 DDOL 迁移 1 棵子树、VerifyHost 存活、onStart 重跑；切回时文件对象 ID 冲突按设计 warn + 重生成、DDOL 二次迁移存活；天空调性像素证据（Second 青 / 回切蓝）。退出 Play 快照恢复由 PlayCycleTest 回归覆盖（serialize→deserialize 往返 + Play 帧循环还原全通过）。
 3. **SceneManager 首次使用 assets/build.novabuild 缺失 warn**（良性，三处冒烟一致出现）。
 4. **bloom 链单方向降采样级**（stride-2）：依赖前级各向同性，高频细节略少于每级双向；视觉差异小（设计裁定，注释存档）。
 5. **PostProcess::resize 在 pp.enabled=false 时仍创建 bloom 纹理**（半分辨率 ×4 张 16F，内存可忽略）。
@@ -229,7 +232,7 @@ Wave 2 审查无 P0；两条 P1 已修复（见下段「已修复项」）。以
 3. **applyComponentJson 与 SerializationInternals 公共字段语义双处同步**：编辑器 include 路径约束导致的内联同构实现，升级须两边同步（源码注释互指）。
 4. **粗体近似**：override 字段「加粗」为金黄高亮 + `▶ ` 前缀（未加载粗体字体），后续加载粗体字体可升级。
 5. **v1 Apply 取舍**：实例新增对象以实例 ID 写入源；源中删除对象不传播回源。
-6. **波 3 遗留两项**继续有效：双 FBO resize 分支与 LoadScene 端到端留人工验收。
+6. ~~**波 3 遗留两项**~~ **已闭环（2026-11-16 像素级验证）**：双 FBO resize/格式切换与 LoadScene E2E（含 DDOL 迁移）均经 Player 验证驱动 + 帧缓冲读回通过（详见波 3 段）。
 
 **验证记录**：Debug 全量构建零错误零第一方警告（NovaEditor.exe 重链接）；**Release 全量构建零错误**（Jolt 首次 Release 编译，Release 双 exe 产出）；编辑器冒烟守卫 16 条通过无 PrefabManager 错误；Player 冒烟旋转正常。日志归档 build/smoke/w4f-*.log。
 
