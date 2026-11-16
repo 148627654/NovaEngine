@@ -171,18 +171,30 @@ struct AtlasImpl {
         // DevOps 修复：pixels 此前未分配（size=512 但 vector 为空），首次白块烘焙
         // pixels[...] 越界写 + glTexImage2D 读空缓冲 → 播放器启动挂死。此处按初始 512² 分配。
         pixels.assign(static_cast<size_t>(size) * size, 0);
-        std::vector<uint8_t> data;
-        if (AssetStream::readAllBytes("C:/Windows/Fonts/msyh.ttc", data) && !data.empty()) {
-            // TTC 集合：取第 0 面（微软雅黑）
+        // 2026-11-16：字体优先级链（用户要求更好看的默认字体）——
+        // Noto Sans SC（现代无衬线）→ 等线 DengXian → 微软雅黑 msyh。
+        // 首个加载成功的生效（.ttf 与 .ttc 统一走 GetFontOffsetForIndex，普通
+        // ttf 恒返回 0）；全部失败才降级内置 5x7 ASCII。生效字体打 info 日志。
+        static const char* kFontCandidates[] = {
+            "C:/Windows/Fonts/NotoSansSC-VF.ttf",
+            "C:/Windows/Fonts/Deng.ttf",
+            "C:/Windows/Fonts/msyh.ttc",
+        };
+        for (const char* path : kFontCandidates) {
+            std::vector<uint8_t> data;
+            if (!AssetStream::readAllBytes(path, data) || data.empty()) {
+                Logger::warn("[FontAtlas] 字体不存在，尝试下一个: {}", path);
+                continue;
+            }
             const int off = stbtt_GetFontOffsetForIndex(data.data(), 0);
             if (off >= 0 && stbtt_InitFont(&font, data.data(), off)) {
                 fontData = std::move(data);
+                Logger::info("[FontAtlas] 默认字体: {}", path);
                 return;
             }
-            Logger::warn("[FontAtlas] msyh.ttc 解析失败，降级内置 ASCII 位图字体");
-        } else {
-            Logger::warn("[FontAtlas] 无法加载 C:/Windows/Fonts/msyh.ttc，降级内置 ASCII 位图字体");
+            Logger::warn("[FontAtlas] 字体解析失败，尝试下一个: {}", path);
         }
+        Logger::warn("[FontAtlas] 无可用系统字体，降级内置 ASCII 位图字体");
         builtin = true;
     }
 
