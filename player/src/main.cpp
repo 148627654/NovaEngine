@@ -119,6 +119,11 @@ int main(int argc, char** argv) {
     // 2. 项目根 = exe 目录（AssetDatabase 相对路径锚点；AssetStream pak 降维锚点）
     AssetDatabase::setProjectRoot(exeDir);
 
+    // 2.5 文件日志 + 崩溃兜底（2026-11-16：<项目根>/Logs/NovaPlayer_<时间戳>.log；
+    //     terminate/SEH 时把原因写进日志文件再走默认处理）
+    Logger::installCrashHandlers();
+    Logger::initFileLog(exeDir / "Logs", "NovaPlayer");
+
     // 3. pak 挂载（默认 exe 同目录 *.novapak；存在才挂载）。
     //    须先于 Renderer::init：Renderer/SkyboxRenderer 初始化即经 AssetStream 加载 shader
     std::filesystem::path pakPath = args.pak;
@@ -250,5 +255,6 @@ int main(int argc, char** argv) {
     SkyboxRenderer::shutdown();
     Renderer::shutdown();
     Logger::info("[NovaPlayer] 退出");
+    Logger::shutdown();   // 关闭日志文件（逐行已落盘）
     return 0;
 }

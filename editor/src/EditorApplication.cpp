@@ -247,6 +247,7 @@ void EditorApplication::shutdown() {
     PostProcess::shutdown();     // V0.3-14 波 3：后处理 shader/ping-pong 纹理释放（GL 存活期、Renderer 之前）
     Renderer::shutdown();
     Logger::info("NovaEditor 退出");
+    Logger::shutdown();  // 关闭日志文件（逐行已落盘）
 }
 
 int EditorApplication::run() {

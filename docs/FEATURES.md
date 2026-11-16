@@ -806,6 +806,14 @@ NovaPlayer 内快捷键：**Esc** 退出（其余无）。
 - 编辑器守卫 16 条（16 个内置组件）验证通过；双 exe 冒烟通过
 - 待人工 GUI 验收：拖放实例化→字段高亮→Apply→其余实例同步→嵌套烘焙→Revert→undoFull 撤销；双 FBO 窗口拉伸；LoadScene 端到端
 
+## 15. 文件日志系统（2026-11-16）
+
+- **落盘位置**：`<项目根>/Logs/<应用名>_<YYYYMMDD_HHMMSS>.log`——编辑器 = `NovaEditor_*.log`（项目根 Logs/），播放器 = `NovaPlayer_*.log`（exe 目录 Logs/）；重名自动 `_1/_2` 递增，目录不存在自动创建（创建失败只 warn，不影响控制台/Console 面板输出）
+- **行格式**：`YYYY-MM-DD HH:MM:SS.mmm [级别] 内容`，与 stdout/OutputDebugString/Console 面板三通道同步输出；**逐行落盘**——崩溃时已写内容不丢
+- **崩溃兜底**：`Logger::installCrashHandlers()`（两 exe 启动时调用）——未捕获异常（std::terminate）与 SEH 未处理异常（访问违例等）都会把原因与异常码写进日志文件，再交还系统默认处理（崩溃对话框/WER）
+- **生命周期**：`Logger::initFileLog(dir, appName)` 启动时调用（重复调用=换新文件）；`Logger::shutdown()` 退出前调用（此后文件 sink 静默 no-op，Console 面板等其它 sink 不受影响）
+- **排查方式**：双击运行出 bug → 打开对应 Logs/ 下最新日志文件 → 从最后的 [Error]/[Warn]/异常记录倒查
+
 ---
 
 *本文档由文档 Agent 基于 editor/src 与 engine/src 的实际实现撰写。发现文档与代码不符时，以代码为准并欢迎更新本文件。*

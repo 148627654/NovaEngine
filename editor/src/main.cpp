@@ -61,6 +61,11 @@ int main() {
     AssetDatabase::setProjectRoot(std::filesystem::current_path());
     Logger::info("项目根目录: {}", AssetDatabase::projectRoot().string());
 
+    // 4.3 文件日志 + 崩溃兜底（2026-11-16：<项目根>/Logs/NovaEditor_<时间戳>.log——
+    //    双击运行出 bug 时从该文件查报错；terminate/SEH 时把原因写进日志再走默认处理）
+    Logger::installCrashHandlers();
+    Logger::initFileLog(AssetDatabase::projectRoot() / "Logs", "NovaEditor");
+
     // 4.5 场景管理（V0.3-12 波 3）：读盘 assets/build.novabuild（Build Settings 列表 =
     // Play 中 SceneManager::loadScene 的候选集）。必须在 setProjectRoot 之后（AssetStream
     // 按项目根解析）；缺失/损坏 → 空列表 + warn，不崩溃

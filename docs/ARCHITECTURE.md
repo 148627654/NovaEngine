@@ -1617,3 +1617,9 @@ static uint32_t renderSceneToOutput(const Scene& scene, const RenderCamera& fall
 
 **V0.3 总账**：立项 11 项（骨骼动画 V0.3-13 按用户裁定顺延 V0.5）代码交付全部完成——波 1（PBR+材质库）/波 2（物理+音频+UI+协程+事件）/波 3（后处理+场景管理）/波 4（Prefab）。**最终人工验收清单**（GUI 交互项，不阻塞）：Prefab 全链路（拖入→改值→Apply→同步→嵌套烘焙→Revert→undoFull）、删源不崩、双 FBO resize、LoadScene 端到端、画面总验收（PBR+阴影+天空+Bloom/Tonemap）、物理/音频/UI 各项目测、V0.2 全量回归。详见 ROADMAP §5.1。
 7. 波间热点文件（Scene.cpp/EditorApplication.cpp/SceneViewPanel.cpp/InspectorPanel.cpp）按「骨架先行」纪律执行
+## 23. 文件日志系统（2026-11-16，验收期用户需求）
+
+- **动机**：Logger 原仅 stdout/OutputDebugString/Console 面板——双击运行（无控制台）出 bug 无处可查；物理验收排障全程依赖 stdout 重定向，效率低且用户侧不可用。
+- **接口（冻结头 Logger.h）**：`initFileLog(dir, appName)` / `shutdown()` / `installCrashHandlers()`。实现为第四个 Sink（与 ConsolePanel 同通道）：<dir>/<appName>_<时间戳>.log，逐行 fflush 落盘（崩溃不丢），行格式 `YYYY-MM-DD HH:MM:SS.mmm [级别] 内容`；文件关闭后 sink 静默 no-op，不影响其它 sink。
+- **接线**：编辑器 main——setProjectRoot 后 `initFileLog(项目根/Logs, "NovaEditor")`；播放器 main——exeDir/Logs + "NovaPlayer"。两 exe 启动即 `installCrashHandlers()`（terminate 与 SEH 过滤器把原因/异常码写入日志后交还系统默认处理）。编辑器退出走 EditorApplication::shutdown 尾部、播放器 main 尾部调用 `Logger::shutdown()`。
+- **约定**：Logs/ 已入 .gitignore；文档已同步 FEATURES §15。
