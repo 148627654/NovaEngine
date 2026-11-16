@@ -100,6 +100,7 @@ int main() {
         return 1;
     }
 
+
     // 7. 应用主循环；run() 结束时内部调用 shutdown() 清理 ImGui 与 Renderer，
     //    窗口由 EditorApplication 析构最后释放（GL 上下文随窗口销毁）。
     NovaEditor::EditorApplication app(std::move(window));

@@ -78,7 +78,12 @@ inline void drawImageEditor(EditorContext& ctx, NovaEngine::Image* img, bool edi
 }
 
 inline void drawTextEditor(EditorContext& ctx, NovaEngine::Text* t, bool editMode) {
+    // 2026-11-16 修复：PushID("value") 隔离字段 ID——CollapsingHeader("Text") 与
+    // InputText("Text") 同栈同标签会算出同一 ImGui ID（header 不压栈），活动态被 header
+    // 每帧清除（光标闪没）。压一层 ID 后两者互不干扰，可见标签不变。
+    ImGui::PushID("value");
     if (ImGui::InputText("Text", &t->text)) ctx.markDirtyOnly();  // 输入中间帧只置脏
+    ImGui::PopID();
     uiDirtyOnEditEnd(ctx);
     if (ImGui::DragFloat("Font Size", &t->fontSize, 0.5f, 1.0f, 512.0f)) ctx.markDirtyOnly();
     uiDirtyOnEditEnd(ctx);
