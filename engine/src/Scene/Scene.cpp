@@ -53,9 +53,12 @@ GameObject* Scene::createGameObject(const std::string& name, GameObject* parent)
         raw->m_id = UUID::generate();
     m_objectById[raw->m_id] = raw;
 
-    if (parent != nullptr && parent->m_scene == this)
+    if (parent != nullptr && parent->m_scene == this) {
         parent->m_children.push_back(std::move(go));
-    else {
+        raw->m_parent = parent;   // 修复 2026-11-16：m_parent 必须同步设置——
+        // 否则 parent() 返回 nullptr，序列化快照把 parent 写成 0，
+        // Play 退出还原后子对象全部挂根（层级被拍平）
+    } else {
         if (parent != nullptr)
             Logger::warn("createGameObject：父级不属于当前场景，对象已挂到根层级");
         m_rootObjects.push_back(std::move(go));

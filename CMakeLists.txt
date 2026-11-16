@@ -13,3 +13,4 @@ add_subdirectory(engine)
 add_subdirectory(samples)
 add_subdirectory(editor)
 add_subdirectory(player)
+add_subdirectory(tests)  # 临时：PlayCycleTest（Play 进出往返层级回归，用后即删）

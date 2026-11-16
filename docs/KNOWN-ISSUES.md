@@ -45,6 +45,10 @@ Wave 2 只读审查结论：**无 P0**；两条 P1 均已修复（meta 的 pak �
 - **Explorer 拖拽导入**：链路代码原本完整（回调已接线），端到端 WM_DROPFILES 验证通过。若"没反应"：确认鼠标落在场景视口/资产面板区域内、且不在 Play 态（均有 warn 日志）。
 - **Play 旋转**：链路原本正确（每帧 scene->update(dt)），运行时验证 SpinningCube 持续旋转。旧构建可能造成误判；关键路径已加诊断日志。
 
+## 2026-11-16 功能排查修复记录（Debugger Agent）
+
+- **Play 退出后层级被拍平（子对象变同级）已修复**：根因 `Scene::createGameObject(name, parent)` 只把新对象 push 进父级 children 列表、**从未设置 m_parent 指针**（GameObject.cpp:57-62 修复前）。后果：Hierarchy 面板按 children 列表显示为嵌套（看似正常），但 `parent()` 返回 nullptr → Play 快照序列化把 parent 写成 0 → 退出 Play 按快照还原时全部挂根。右键 Create Empty / Create Primitive 等走 createGameObject 的创建路径全部中招；拖拽重父子（setParent）不受影响。修复：push 进父级列表时同步 `raw->m_parent = parent`（一行）。回归验证：新增 tests/PlayCycleTest 无头测试（serialize→deserialize×5 + Play 帧循环往返 + 文件往返，全通过）。
+
 ## 新增缺口（2026-11-15，Docs Writer 通读代码发现，状态已更新）
 
 1. Ctrl+D 复制是浅拷贝：serializeGameObject 不含子树，复制不跟随子物体（Delete 含子树，语义不对称）——**存在**
