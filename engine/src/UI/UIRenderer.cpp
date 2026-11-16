@@ -34,9 +34,9 @@
 // 一律基色，杜绝「退出 Play 后 hover 色残留」。
 //
 // == v1 已知限制（注释存档）==
-// - Text.fontPath 预留不生效（FontAtlas 冻结头仅默认图集）；字段序列化保留
 // - 不做字距（kern）；单行 + '\n' 换行；超宽不裁剪
 // - 图集满（1024²）后新字形缺失渲染（FontAtlas 已 warn 一次）
+// （Text.fontPath 已于 v1.1 生效：每字体独立图集）
 
 #include <NovaEngine/UI/UIRenderer.h>
 
@@ -88,6 +88,7 @@ bool s_disabled = false;      // init 失败降级 no-op：全部入口早退
 bool s_initialized = false;
 bool s_inputThisFrame = false;   // 本帧 processInput 已刷新按钮状态（render 消费后复位）
 glm::vec2 s_screenSize{0.0f};    // 最近一次 render 的目标分辨率（processInput 命中用）
+float s_dpiScale = 1.0f;         // HiDPI：uiScale 全局乘数（窗口逻辑→帧缓冲像素比；默认 1）
 
 std::shared_ptr<Shader> s_shader;
 uint32_t s_vao = 0, s_vbo = 0;
@@ -138,8 +139,9 @@ const Canvas* findCanvasAncestor(const GameObject* go) {
 
 float uiScaleOf(const GameObject* node) {
     const Canvas* c = findCanvasAncestor(node);
-    if (!c) return 1.0f;
-    return std::clamp(c->uiScale, 0.01f, 100.0f);
+    const float base = c ? std::clamp(c->uiScale, 0.01f, 100.0f) : 1.0f;
+    // HiDPI：× 窗口逻辑→帧缓冲像素比——UI 保持逻辑尺寸，物理像素下渲染更清晰
+    return base * s_dpiScale;
 }
 
 glm::vec2 anchorPoint(const glm::vec2& anchor, const glm::vec2& offset, float uiScale) {
@@ -323,6 +325,10 @@ void UIRenderer::init() {
         s_disabled = true;
         Logger::error("[UIRenderer] 字体图集纹理创建失败，UI 渲染降级为 no-op");
     }
+}
+
+void UIRenderer::setDpiScale(float scale) {
+    s_dpiScale = std::clamp(scale, 0.1f, 10.0f);
 }
 
 void UIRenderer::shutdown() {

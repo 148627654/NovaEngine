@@ -151,7 +151,13 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
     }
 
     // 游戏分辨率（V0.2-13，仅 Play 生效）：free = 面板尺寸；否则固定 (width,height)。
-    // 相机投影 aspect 用「目标分辨率」宽高比；FBO 实际尺寸 = 目标 × renderScale（0.5–2.0，取整）。
+    // 相机投影 aspect 用「目标分辨率」宽高比；FBO 实际尺寸 = 目标 × renderScale ×
+    // ImGui 帧缓冲缩放比（FBO → 物理像素；SCALE_TO_MONITOR 下该值恒 1，无额外放大）
+    const ImGuiIO& io = ImGui::GetIO();
+    const float fbScale = std::max(io.DisplayFramebufferScale.x, 1.0f);
+    // HiDPI（2026-11-16）：UI 逻辑尺寸倍率 = 显示器内容缩放（150% = 1.5），
+    // fontSize/offset 等保持逻辑尺寸、按 1.5 倍物理像素渲染（文字不再发虚）
+    UIRenderer::setDpiScale(std::max(ctx.displayContentScale, 1.0f));
     int targetW = static_cast<int>(vpSize.x), targetH = static_cast<int>(vpSize.y);
     if (playMode && !ctx.gameViewSettings.free) {
         targetW = std::max(1, ctx.gameViewSettings.width);
@@ -159,8 +165,8 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
     }
     const float renderScale =
         playMode ? std::clamp(ctx.gameViewSettings.renderScale, 0.5f, 2.0f) : 1.0f;
-    int w = std::max(1, static_cast<int>(std::round(targetW * renderScale)));
-    int h = std::max(1, static_cast<int>(std::round(targetH * renderScale)));
+    int w = std::max(1, static_cast<int>(std::round(targetW * renderScale * fbScale)));
+    int h = std::max(1, static_cast<int>(std::round(targetH * renderScale * fbScale)));
     if (playMode) {
         // Reviewer P2-4：Custom 分辨率 × renderScale 2.0 可达 16384² MSAA（数 GB 显存必挂），
         // 每维 clamp [16, 4096]（Edit 态尺寸即面板尺寸，不受影响）
@@ -278,13 +284,14 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
                      ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
         hovered = ImGui::IsItemHovered();
         // UI 输入（V0.3-3）：Play 态把鼠标从面板坐标经 letterbox fit-rect 换算到
-        // FBO 渲染分辨率坐标（w/h 即 UIRenderer::render 的布局空间）；Edit 态不处理。
-        // 仅悬停在游戏画面内时投递（工具栏/letterbox 黑边区域不算命中）。
+        // FBO 渲染分辨率坐标（w/h 即 UIRenderer::render 的布局空间；HiDPI 下
+        // 逻辑鼠标 × dpi 与物理 FBO 的换算在 w/dstSize 中自然抵消，公式不变）；
+        // Edit 态不处理。仅悬停在游戏画面内时投递（工具栏/letterbox 黑边不算命中）。
         if (hovered) {
-            const ImGuiIO& io = ImGui::GetIO();
+            const ImGuiIO& mio = ImGui::GetIO();
             const glm::vec2 mouseFbo(
-                (io.MousePos.x - (vpPos.x + offset.x)) * (static_cast<float>(w) / dstSize.x),
-                (io.MousePos.y - (vpPos.y + offset.y)) * (static_cast<float>(h) / dstSize.y));
+                (mio.MousePos.x - (vpPos.x + offset.x)) * (static_cast<float>(w) / dstSize.x),
+                (mio.MousePos.y - (vpPos.y + offset.y)) * (static_cast<float>(h) / dstSize.y));
             UIRenderer::processInput(*scene, mouseFbo, Input::isMouseDown(MouseButton::Left),
                                      Input::isMousePressed(MouseButton::Left));
         }

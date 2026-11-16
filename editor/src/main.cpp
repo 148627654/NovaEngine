@@ -14,6 +14,9 @@
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
 
+#include <GLFW/glfw3.h>  // glfwGetWindowContentScale（HiDPI 字体缩放）
+
+#include <algorithm>   // std::max（HiDPI 字体缩放）
 #include <filesystem>
 #include <memory>
 
@@ -81,12 +84,18 @@ int main() {
     // 默认字体 + 合并中文字体（msyh.ttc 不存在时回退纯默认字体，§11.9）
     // ImGui 1.93 新字体图集：目标字体显式基准字号 16px，合并字体同样显式 16px 才合法
     //（隐式字号目标 + 显式字号合并会触发 imgui_draw.cpp 的 MergeMode 断言）
+    // HiDPI（2026-11-16）：窗口按逻辑尺寸创建、帧缓冲随显示器缩放——字体按
+    // 内容缩放比放大烘焙（150% 显示器 = 24px 物理），否则 ImGui 面板文字在
+    // 高分屏上只有 2/3 大小。clamp ≥1 防未就绪时返回 0。
+    float contentScaleX = 1.0f, contentScaleY = 1.0f;
+    glfwGetWindowContentScale(window->nativeHandle(), &contentScaleX, &contentScaleY);
+    const float fontPx = 16.0f * std::max(1.0f, contentScaleX);
     ImFontConfig baseCfg{};
-    baseCfg.SizePixels = 16.0f;
+    baseCfg.SizePixels = fontPx;
     io.Fonts->AddFontDefault(&baseCfg);
     ImFontConfig fontCfg{};
     fontCfg.MergeMode = true;  // 合并进默认字体图集，避免双字体切换
-    if (!io.Fonts->AddFontFromFileTTF("C:/Windows/Fonts/msyh.ttc", 16.0f, &fontCfg,
+    if (!io.Fonts->AddFontFromFileTTF("C:/Windows/Fonts/msyh.ttc", fontPx, &fontCfg,
                                       io.Fonts->GetGlyphRangesChineseFull()))
         Logger::warn("中文字体加载失败（C:/Windows/Fonts/msyh.ttc），回退默认字体");
 

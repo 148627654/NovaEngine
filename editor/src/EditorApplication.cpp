@@ -291,6 +291,14 @@ void EditorApplication::update(float dt) {
     ImGui_ImplOpenGL3_NewFrame();
     ImGui::NewFrame();
 
+    // HiDPI（2026-11-16）：每帧同步显示器内容缩放（SCALE_TO_MONITOR 下
+    // ImGui FramebufferScale 恒 1，UI 逻辑尺寸倍率需独立来源）
+    {
+        float csx = 1.0f, csy = 1.0f;
+        glfwGetWindowContentScale(m_window->nativeHandle(), &csx, &csy);
+        m_context.displayContentScale = std::max(csx, 1.0f);
+    }
+
     // Docking 主区域；首帧用 DockBuilder 摆面板
     const ImGuiID dockspaceId = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
     if (m_firstFrame) {

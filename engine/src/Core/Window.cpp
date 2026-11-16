@@ -72,6 +72,10 @@ std::unique_ptr<Window> Window::create(const std::string& title, int width, int 
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    // HiDPI（2026-11-16）：窗口尺寸按「逻辑像素」创建，帧缓冲随显示器缩放
+    //（150% 显示器上 1280x720 逻辑 = 1920x1080 帧缓冲）——文字/UI 以物理分辨率
+    // 渲染，消除高分屏下发虚模糊；100% 显示器上此提示无效果
+    glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
 #ifdef __APPLE__
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif

@@ -72,6 +72,10 @@ public:
     };
     GameViewSettings gameViewSettings;
 
+    // HiDPI（2026-11-16）：显示器内容缩放（glfwGetWindowContentScale，150% = 1.5）。
+    // SceneView 用它做 UI 逻辑尺寸→物理像素的倍率（FBO 出图倍率另用 ImGui FramebufferScale）
+    float displayContentScale = 1.0f;
+
     bool followSelected = false;    // Play 相机跟随选中（V0.3-10 子集；SceneView 每帧应用，退出 Play 快照还原）
     bool stepRequested = false;     // Play+Paused 时推进一帧（F10 / Edit→Step）
     double playToastUntil = 0.0;    // 进入 Play 未保存 toast 截止时间戳（glfwGetTime 秒）

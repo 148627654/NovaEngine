@@ -193,6 +193,12 @@ int main(int argc, char** argv) {
         // HiDPI：Input 鼠标为窗口逻辑坐标，UI 渲染按帧缓冲尺寸——按缩放比换算（评审 P2-5）
         int winW = args.width, winH = args.height;
         glfwGetWindowSize(window->nativeHandle(), &winW, &winH);
+        // HiDPI（2026-11-16）：UI 全局缩放 = 显示器内容缩放（150% = 1.5）——GLFW
+        // SCALE_TO_MONITOR 下窗口/帧缓冲同倍放大，比值恒 1，须用内容缩放才能
+        // 把 fontSize 等逻辑尺寸映射到物理像素（文字按 1.5 倍物理分辨率渲染不发虚）
+        float csx = 1.0f, csy = 1.0f;
+        glfwGetWindowContentScale(window->nativeHandle(), &csx, &csy);
+        UIRenderer::setDpiScale(std::max(csx, 1.0f));
         glm::vec2 uiMouse = Input::mousePosition();
         if (winW > 0 && winH > 0)
             uiMouse = glm::vec2(uiMouse.x * static_cast<float>(fbW) / static_cast<float>(winW),
