@@ -46,8 +46,9 @@ constexpr uint32_t kWhiteBlockCp = 0xFFFFFF;    // 内部保留：1x1 白块（�
 constexpr uint32_t kMetricsProbeCp = 0xFFFFFE;  // 内部保留：行高探针（零尺寸，只带 metrics）
 // 2026-11-16：参考高 64→128px——配合 mipmap 链，小字号（默认 32px）经 mip 降采样
 // 不再发虚，大字号（≤128px）走 level 0 也清晰；图集容量下降（1024² 约 60 个 CJK）
-// 属可接受取舍（文本 UI 单屏字符数有限；满图集仍走既有 warn + 缺字回退路径）
-constexpr float kRefPx = 128.0f;                // 全部字形按 128px 参考高烘焙
+// 属可接受取舍（文本 UI 单屏字符数有限；满图集仍走既有 warn + 缺字回退路径）。
+// 常量唯一出处 = FontAtlas::kRefPx（FontAtlas.h），此处仅作内部别名
+constexpr float kRefPx = FontAtlas::kRefPx;     // 全部字形按 128px 参考高烘焙
 constexpr int kPad = 2;                         // 字形四周留 2px 空（线性过滤防邻字渗色）
 constexpr int kAtlasMax = 1024;                 // 图集上限（满则新字形缺失）
 

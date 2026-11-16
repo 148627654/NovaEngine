@@ -71,7 +71,9 @@ namespace {
 // 内部保留码点（与 FontAtlas.cpp 一一对应，冻结头无常量位——两侧注释互指）
 constexpr uint32_t kWhiteBlockCp = 0xFFFFFF;    // 1x1 白块（纯色 Image / Button 共用）
 constexpr uint32_t kMetricsProbeCp = 0xFFFFFE;  // 行高探针：y1=ascend、y0=descend（参考像素）
-constexpr float kRefPx = 64.0f;                 // FontAtlas 全部字形按 64px 参考高烘焙
+// 2026-11-16：与 FontAtlas 参考高必须一致——两侧曾各维护一份常量（64/128 不一致
+// 导致全部文字渲染成 2 倍大、看起来像乱码）；现统一引用 FontAtlas::kRefPx 唯一出处
+constexpr float kRefPx = FontAtlas::kRefPx;    // FontAtlas 全部字形按 128px 参考高烘焙
 
 // 顶点：屏幕像素（左上原点 Y 向下）+ 图集/贴图 UV + 直通色
 struct UIVertex {

@@ -15,6 +15,11 @@ struct Glyph {
 // 默认系统字体 msyh.ttc，失败降级内置 ASCII；含 1x1 白块（纯色 Image 共用同批）
 class FontAtlas {
 public:
+    // 字形参考像素高（唯一出处）：UIRenderer 排版缩放 = fontSize/kRefPx，
+    // 烘焙与排版两侧必须一致（2026-11-16 曾因 FontAtlas/UIRenderer 各自
+    // 维护一份 64/128 不一致导致全部文字 2 倍大，收敛为单一常量）
+    static constexpr float kRefPx = 128.0f;
+
     static FontAtlas& defaultAtlas();
     static const Glyph* glyph(uint32_t codepoint);   // 未找到返回 nullptr
     static uint32_t textureId();
