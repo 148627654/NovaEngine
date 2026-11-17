@@ -67,7 +67,11 @@ Wave 2 只读审查结论：**无 P0**；两条 P1 均已修复（meta 的 pak �
   - **归档越界观察**：ComponentRegistry.cpp link-guard 增补 Slider/ScrollView 两行（include + make_unique，注释带模块/Coder 标记）——整合者已按 UIRenderer 注释纪律同步，无越界问题。
   - **遗留 P2（本波不改，一句话理由）**：① 手柄热插拔首帧 pressed 边沿（连接帧已按住的按钮报 pressed）——语义可辩（连接帧即「按下」）；② InputMap warnedMissing 进程级 warn-once 作用域——契约未定；③ GLFW 扳机轴静止值 -1（|v|=1 不归零），绑扳机做轴时静止输出 -1——契约冻结语义，风险提示存档；④ SceneRenderer 分组 O(n²) 最坏退化（2000 互异 mesh+材质 ≈2M 次比较）——验收场景同 mesh 无问题，改 hash 分组风险大于收益；⑤ wrap=true Text 命中矩形含右侧空白区——冻结裁定；⑥ scrollOffset 钳制在 leave 执行有 1 帧越界滚动——可接受；⑦ drawInstanced 结束未恢复 GL_ARRAY_BUFFER 绑定——实践无害（后续调用均自行绑定）。
 - **字体图集扩容后新字形全灭已修复（2026-11-17，验收场景触发）**：根因 growTo1024→recreateTexture 用 glTexImage2D 重分配 512→1024 存储后未重建 mip 链——MIN 过滤为 GL_LINEAR_MIPMAP_LINEAR 时纹理立即 incomplete，之后所有 glTexSubImage2D（uploadRegion）静默失败 → 扩容之后烘焙的新字形全部落在零填充区域不可见（V05UITest 打开时中文量大触发扩容，中文全灭、仅扩容前的 ASCII/白块可见——按钮/血条正常、文字消失的诡异现象即此）。修复：recreateTexture 重传后立即 glGenerateMipmap；growTo1024 重摆期间置 rebuilding 旗标跳过逐字形上传（旧 512 纹理坐标越界无意义，整量重传兜底）。验证：播放器修复前后截屏对比（修复前文字为零星点、修复后标题/换行/滚动行全部清晰渲染）。附带：验收场景配色问题（白字白天空对比度差）非引擎 bug——V05UITest 已加半透明深色底板 + 深色文字。
-- **验收场景使用澄清（2026-11-17，非 bug）**：①「SaveCube 无法选中」= 拾取选择仅 Edit 态（设计），Play 态应经 Inspector 改 Transform 数值制造存档差异；② ScrollView 滚轮滚动仅 Play 态生效（Edit 态 UI 为纯预览不处理输入，设计）——引擎侧滚动经校准合成滚轮像素级验证通过（8 格滚轮滚动区 45431 像素变化）。
+- **验收场景使用澄清（2026-11-17，非 bug）**：①「SaveCube 无法选中」= 拾取选择仅 Edit 态（设计），Play 态应经 Inspector 改 Transform 数值制造存档差异；② ScrollView 滚轮滚动仅 Play 态生效（Edit 态 UI 为纯预览不处理输入，设计）——引擎侧滚动经校准合成滚轮像素级验证通过（8 格滚轮滚动区 45431 像素变化）。**（② 已被 2026-11-17 晚「Edit 态滚轮补强」修订：Edit 态悬停 ScrollView 也可滚轮滚动，仅点击/拖拽/存档仍 Play 专属，见 ARCHITECTURE §24.3.5-7。）**
+- **「场景保存后对象变少」= 用户 Del 操作，非引擎 bug（2026-11-17 日志取证）**：V05UITest 两次「丢失对象」事件（9 对象 / 15 对象）经逐条日志比对确认——用户在 Hierarchy 中选中对象按 Delete 删除（Del 删除选中为设计行为，含子树级联），期间夹杂 Ctrl+Z 部分撤销，随后 Ctrl+S 保存了删除结果。序列化/Play 快照/撤销系统全部无损（无头往返测试 19→19 通过）。**提示**：误删后应连续 Ctrl+Z 直到恢复，再 Ctrl+S。
+- **HiDPI 布局放大修复（2026-11-17）**：UI 布局原先「anchor×物理 FBO 尺寸 + offset×dpi 乘数」混用，150% 显示器上全部 UI 元素放大 1.5 倍溢出视口（V05UITest 验收暴露：背景板铺满视口、列表被切出屏幕外、标题画在屏幕外）。已修复为「布局逻辑像素、发射期统一乘 dpi」（UIRenderer 布局空间 = 物理/dpi，pushQuad/pushTri 唯一出口乘 dpi，命中输入入口反向换算），详见 ARCHITECTURE §24.3.5-8。
+- **ScrollView 外框补强（2026-11-17）**：v1 的 ScrollView 无背景/边框（纯裁剪窗口），场景里不可见、验收找不到滚动区域。新增 bgColor/borderColor/borderThickness 序列化字段（旧文件缺省 = 默认值，零警告），可视区绘制背景填充 + 四边描边（发射序先于子树 = 内容绘制其上）。
+- **V05UITest 场景布局修正（2026-11-17）**：标题原偏移 (0,-320) 在视口外（从未渲染）→ (0,-235) 入画；背景板 760×560 收缩为 700×520 留边距；控件列下移错开；滚动列表上移至 (250,-40)，行 0-6 初始可见、Row7+底部按钮滚动可见（验收「滚到底」路径完整）。
 
 ## 新增缺口（2026-11-15，Docs Writer 通读代码发现，状态已更新）
 

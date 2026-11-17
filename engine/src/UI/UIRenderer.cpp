@@ -112,8 +112,9 @@ constexpr size_t kInitialVboCapacity = 4096;  // 顶点数（682 quad）起步�
 bool s_disabled = false;      // init 失败降级 no-op：全部入口早退
 bool s_initialized = false;
 bool s_inputThisFrame = false;   // 本帧 processInput 已刷新按钮状态（render 消费后复位）
-glm::vec2 s_screenSize{0.0f};    // 最近一次 render 的目标分辨率（processInput 命中用）
-float s_dpiScale = 1.0f;         // HiDPI：uiScale 全局乘数（窗口逻辑→帧缓冲像素比；默认 1）
+glm::vec2 s_screenSize{0.0f};          // 最近一次 render 的布局空间（逻辑像素；= 物理 / dpi）
+glm::vec2 s_physicalScreenSize{0.0f};  // 最近一次 render 的物理目标（帧缓冲像素）
+float s_dpiScale = 1.0f;               // HiDPI：逻辑→物理像素比（发射期统一乘；默认 1）
 bool s_lastPointerConsumed = false;  // 最近一次 processInput 是否有交互组件消费（onClick/拖拽/滚动）
 
 std::shared_ptr<Shader> s_shader;
@@ -129,6 +130,9 @@ std::unordered_set<std::string> s_warnedSpritePaths;  // 加载失败仅 warn �
 void pushQuad(std::vector<UIVertex>& out, float x0, float y0, float x1, float y1,
               float u0, float v0, float u1, float v1, const glm::vec4& c) {
     // 顶点序 TL/TR/BL, TR/BR/BL（默认逆时针正面；本 pass 剔除关闭，绕向无关）
+    // HiDPI：布局坐标为逻辑像素，发射期统一 × dpi → 物理像素（顶点唯一出口）
+    const float k = s_dpiScale;
+    x0 *= k; y0 *= k; x1 *= k; y1 *= k;
     const UIVertex tl{x0, y0, u0, v0, c.r, c.g, c.b, c.a};
     const UIVertex tr{x1, y0, u1, v0, c.r, c.g, c.b, c.a};
     const UIVertex bl{x0, y1, u0, v1, c.r, c.g, c.b, c.a};
@@ -139,10 +143,12 @@ void pushQuad(std::vector<UIVertex>& out, float x0, float y0, float x1, float y1
 void pushTri(std::vector<UIVertex>& out, const glm::vec2& p0, const glm::vec2& t0,
              const glm::vec2& p1, const glm::vec2& t1, const glm::vec2& p2, const glm::vec2& t2,
              const glm::vec4& c) {
+    // HiDPI：布局坐标（逻辑）→ 物理像素（与 pushQuad 同策）
+    const float k = s_dpiScale;
     out.insert(out.end(), {
-        UIVertex{p0.x, p0.y, t0.x, t0.y, c.r, c.g, c.b, c.a},
-        UIVertex{p1.x, p1.y, t1.x, t1.y, c.r, c.g, c.b, c.a},
-        UIVertex{p2.x, p2.y, t2.x, t2.y, c.r, c.g, c.b, c.a}});
+        UIVertex{p0.x * k, p0.y * k, t0.x, t0.y, c.r, c.g, c.b, c.a},
+        UIVertex{p1.x * k, p1.y * k, t1.x, t1.y, c.r, c.g, c.b, c.a},
+        UIVertex{p2.x * k, p2.y * k, t2.x, t2.y, c.r, c.g, c.b, c.a}});
 }
 
 // 简易 UTF-8 解码：返回码点并前进；非法序列返回 U+FFFD 并前进 1（Text 含中文）
@@ -178,8 +184,10 @@ const Canvas* findCanvasAncestor(const GameObject* go) {
 float uiScaleOf(const GameObject* node) {
     const Canvas* c = findCanvasAncestor(node);
     const float base = c ? std::clamp(c->uiScale, 0.01f, 100.0f) : 1.0f;
-    // HiDPI：× 窗口逻辑→帧缓冲像素比——UI 保持逻辑尺寸，物理像素下渲染更清晰
-    return base * s_dpiScale;
+    // HiDPI（2026-11-17 修复）：uiScale 只含 Canvas 缩放——dpi 全局乘数移至发射期
+    //（pushQuad/pushTri 统一乘）。布局空间 = 逻辑像素（s_screenSize = 物理 / dpi），
+    // 否则 anchor×物理尺寸 与 offset×dpi 混用，150% 显示器上整个 UI 放大 1.5 倍溢出视口。
+    return base;
 }
 
 glm::vec2 anchorPoint(const glm::vec2& anchor, const glm::vec2& offset, float uiScale) {
@@ -552,6 +560,21 @@ void emitSlider(EmitCtx& ctx, const Slider& s, float us, const Glyph* white, uin
 // 滚动指示条（右侧/底部细条：显示内容比例与位置；纯视觉 v1 不可拖）
 constexpr float kScrollBarThickness = 4.0f;   // 逻辑像素
 const glm::vec4 kScrollBarColor{0.75f, 0.75f, 0.75f, 0.5f};
+
+// 可视区外框（V0.5 验收补强）：背景填充 + 四边描边。
+// 在 enter 回调发射（先于子树）→ 批内发射序靠前，内容绘制在其上。
+void emitScrollViewFrame(EmitCtx& ctx, const ScrollView& sv, float us, const glm::vec4& view,
+                         const Glyph* white, uint32_t atlasTex) {
+    if (view.z - view.x <= 0.0f || view.w - view.y <= 0.0f) return;
+    if (sv.bgColor.a > 0.001f)
+        emitRectQuad(ctx, "", sv.bgColor, view.x, view.y, view.z, view.w, white, atlasTex);
+    const float bt = std::max(sv.borderThickness, 0.0f) * us;
+    if (bt <= 0.0f || sv.borderColor.a <= 0.001f) return;
+    emitRectQuad(ctx, "", sv.borderColor, view.x, view.y, view.z, view.y + bt, white, atlasTex);
+    emitRectQuad(ctx, "", sv.borderColor, view.x, view.w - bt, view.z, view.w, white, atlasTex);
+    emitRectQuad(ctx, "", sv.borderColor, view.x, view.y, view.x + bt, view.w, white, atlasTex);
+    emitRectQuad(ctx, "", sv.borderColor, view.z - bt, view.y, view.z, view.w, white, atlasTex);
+}
 
 void emitScrollBars(EmitCtx& ctx, const ScrollView& sv, float us, const glm::vec4& view,
                     const Glyph* white, uint32_t atlasTex) {
@@ -984,7 +1007,8 @@ void UIRenderer::render(const Scene& scene, int screenW, int screenH) {
     const bool useInputState = s_inputThisFrame;  // Play 帧 processInput 已刷新
     s_inputThisFrame = false;                     // Edit 预览（无 processInput）走基色
     if (screenW <= 0 || screenH <= 0) return;
-    s_screenSize = glm::vec2(static_cast<float>(screenW), static_cast<float>(screenH));
+    s_physicalScreenSize = glm::vec2(static_cast<float>(screenW), static_cast<float>(screenH));
+    s_screenSize = s_physicalScreenSize / s_dpiScale;   // 布局空间 = 逻辑像素（HiDPI）
 
     // ---- 保存调用方 GL 状态（结束时逐一恢复；V0.5-13 +scissor）----
     GLint prevProgram = 0, prevVao = 0, prevArrayBuf = 0, prevTex = 0, prevTex0 = 0;
@@ -1072,6 +1096,9 @@ void UIRenderer::render(const Scene& scene, int screenW, int screenH) {
                            e.button);
             if (rectValid(e.slider))
                 emitSlider(ctx, *static_cast<Slider*>(e.sliderComp), us, white, atlasTex, e.slider);
+            if (rectValid(e.scrollView))
+                emitScrollViewFrame(ctx, *static_cast<ScrollView*>(e.scrollViewComp), us,
+                                    e.scrollView, white, atlasTex);
         };
         const UIWalkLeaveFn leave = [&](const GameObject* node, const UIWalkState& nodeCtx,
                                         const UIWalkState& childCtx, const ContentBox& box) {
@@ -1113,11 +1140,12 @@ void UIRenderer::render(const Scene& scene, int screenW, int screenH) {
             glBindTexture(GL_TEXTURE_2D, k.tex);
             if (k.clip >= 0) {   // ScrollView scissor（y 翻转：布局左上原点 → GL 左下原点）
                 const glm::vec4 r = clipRects[static_cast<size_t>(k.clip)];
+                const float dpi = s_dpiScale;
                 glEnable(GL_SCISSOR_TEST);
-                glScissor(static_cast<GLint>(std::floor(r.x)),
-                          static_cast<GLint>(std::floor(s_screenSize.y - r.w)),
-                          static_cast<GLsizei>(std::ceil(r.z - r.x)),
-                          static_cast<GLsizei>(std::ceil(r.w - r.y)));
+                glScissor(static_cast<GLint>(std::floor(r.x * dpi)),
+                          static_cast<GLint>(std::floor(s_physicalScreenSize.y - r.w * dpi)),
+                          static_cast<GLsizei>(std::ceil((r.z - r.x) * dpi)),
+                          static_cast<GLsizei>(std::ceil((r.w - r.y) * dpi)));
             } else {
                 glDisable(GL_SCISSOR_TEST);
             }
@@ -1151,6 +1179,7 @@ void UIRenderer::processInput(const Scene& scene, const glm::vec2& mouse, bool l
         return;
     }
     s_inputThisFrame = true;
+    const glm::vec2 m = mouse / s_dpiScale;   // 物理 FBO 坐标 → 逻辑布局坐标（HiDPI）
 
     // 1. 全部交互状态整体复位（随后仅冒泡链上的组件重算，链外一律复位——
     //    修复旧实现「遍历全部 Button 各自命中」的重叠多置位缺陷）
@@ -1172,7 +1201,7 @@ void UIRenderer::processInput(const Scene& scene, const glm::vec2& mouse, bool l
             s_activeDrag = {};   // 场景已切换/GO 已销毁重建：丢弃捕获
         } else if (leftDown) {
             s_activeDrag.slider->m_dragging = true;
-            updateSliderFromPointer(*s_activeDrag.slider, s_activeDrag.rect, mouse);
+            updateSliderFromPointer(*s_activeDrag.slider, s_activeDrag.rect, m);
             s_lastPointerConsumed = true;   // 拖拽中即消费（Play 中 UI 优先于场景拾取）
             return;
         } else {
@@ -1183,7 +1212,7 @@ void UIRenderer::processInput(const Scene& scene, const glm::vec2& mouse, bool l
     // 3. 命中 winner = 最上层 UI 元素（hitTest 与渲染同一布局公式；顺带重算 contentSize）
     UIHitResult hit;
     std::vector<UIChainEntry> chain;
-    if (!hitTestWithChain(scene, mouse, hit, chain)) {
+    if (!hitTestWithChain(scene, m, hit, chain)) {
         s_lastPointerConsumed = false;   // 指针未落在任何 UI 上：无消费
         return;
     }
@@ -1194,20 +1223,20 @@ void UIRenderer::processInput(const Scene& scene, const glm::vec2& mouse, bool l
     for (auto it = chain.rbegin(); it != chain.rend() && !consumed; ++it) {
         const UIChainEntry& e = *it;
         if (e.button &&
-            deliverButton(*static_cast<Button*>(e.button), e.buttonRect, mouse, leftDown,
+            deliverButton(*static_cast<Button*>(e.button), e.buttonRect, m, leftDown,
                           leftPressed)) {
             consumed = true;
             break;
         }
         if (e.slider &&
-            deliverSliderStart(*static_cast<Slider*>(e.slider), e.sliderRect, mouse,
+            deliverSliderStart(*static_cast<Slider*>(e.slider), e.sliderRect, m,
                                leftPressed)) {
             s_activeDrag = {&scene, e.go->id(), static_cast<Slider*>(e.slider), e.sliderRect};
             consumed = true;
             break;
         }
         if (e.scrollView &&
-            deliverScrollView(*static_cast<ScrollView*>(e.scrollView), e.scrollViewRect, mouse)) {
+            deliverScrollView(*static_cast<ScrollView*>(e.scrollView), e.scrollViewRect, m)) {
             consumed = true;
             break;
         }
@@ -1215,12 +1244,31 @@ void UIRenderer::processInput(const Scene& scene, const glm::vec2& mouse, bool l
     s_lastPointerConsumed = consumed;
 }
 
+bool UIRenderer::processWheelInput(const Scene& scene, const glm::vec2& mouse) {
+    // Edit 态滚轮（V0.5 验收补强，2026-11-17）：仅投递 ScrollView 滚动——Button/Slider
+    // 不参与（Edit 预览不可点按，保持「预览不挡拾取」裁定）。滚轮被 ScrollView 消费
+    // 时返回 true，调用方据此抑制编辑器相机缩放（否则同一 tick 相机与列表一起动）。
+    // 命中/冒泡与 processInput 同一实现（hitTestWithChain 顺带重算 contentSize，钳制新鲜）。
+    if (s_disabled) return false;
+    if (s_screenSize.x <= 0.0f || s_screenSize.y <= 0.0f) return false;  // render 未运行过
+    const glm::vec2 m = mouse / s_dpiScale;   // 物理 FBO 坐标 → 逻辑布局坐标（HiDPI）
+    UIHitResult hit;
+    std::vector<UIChainEntry> chain;
+    if (!hitTestWithChain(scene, m, hit, chain)) return false;
+    for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+        if (it->scrollView &&
+            deliverScrollView(*static_cast<ScrollView*>(it->scrollView), it->scrollViewRect, m))
+            return true;
+    }
+    return false;
+}
+
 bool UIRenderer::hitTest(const Scene& scene, const glm::vec2& mouse, UIHitResult& out) {
     out = {};
     if (s_disabled) return false;
     if (s_screenSize.x <= 0.0f || s_screenSize.y <= 0.0f) return false;  // render 未运行过
     std::vector<UIChainEntry> chain;
-    return hitTestWithChain(scene, mouse, out, chain);
+    return hitTestWithChain(scene, mouse / s_dpiScale, out, chain);   // 物理 → 逻辑（HiDPI）
 }
 
 bool UIRenderer::isPointerOverUI(const Scene& scene, const glm::vec2& mouse) {

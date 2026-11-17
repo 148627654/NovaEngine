@@ -12,7 +12,9 @@ namespace NovaEditor {
 class EditorCamera {
 public:
     // 每帧输入处理（仅在视口悬停或交互进行中由 SceneView 调用）
-    void update(float dt, const glm::vec2& viewportPos, const glm::vec2& viewportSize);
+    // uiConsumedWheel：本帧 UI（ScrollView）已消费滚轮 → 跳过相机缩放（Edit 态 UI 滚轮优先）
+    void update(float dt, const glm::vec2& viewportPos, const glm::vec2& viewportSize,
+                bool uiConsumedWheel = false);
 
     // F 聚焦：只改 target/distance，不动 pitch/yaw（无插值，mini 简化）
     void focus(const glm::vec3& target, float distance);

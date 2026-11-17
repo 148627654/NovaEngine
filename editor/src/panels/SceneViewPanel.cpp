@@ -276,13 +276,21 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
         ImGui::Image((ImTextureID)(intptr_t)outTex, vpSize,
                      ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
         hovered = ImGui::IsItemHovered();
-        // Edit 态 UI 纯预览提示（V0.5-13 验收体验）：场景含 Canvas 时提示交互/存档需进 Play，
-        // 避免「Save Game 灰显、滚轮无效」被误判为 bug（拾取选择本就仅 Edit 态可用）
+        // Edit 态滚轮（V0.5 验收补强）：悬停视口内时投递 UI 滚轮（仅 ScrollView 滚动；
+        // 消费则抑制相机缩放）。Edit 态 FBO 与面板 1:1，鼠标换算无需 letterbox。
+        m_uiConsumedWheel = false;
+        if (hovered) {
+            const ImGuiIO& mio = ImGui::GetIO();
+            const glm::vec2 mouseFbo(mio.MousePos.x - vpPos.x, mio.MousePos.y - vpPos.y);
+            m_uiConsumedWheel = UIRenderer::processWheelInput(*scene, mouseFbo);
+        }
+        // Edit 态 UI 预览提示（V0.5-13 验收体验）：场景含 Canvas 时提示点击/存档需进 Play
+        //（滚轮滚动 Edit 态已可用；拾取选择本就仅 Edit 态可用）
         if (!scene->findComponents<Canvas>().empty()) {
             ImGui::GetWindowDrawList()->AddText(
                 ImVec2(vpPos.x + 8.0f, vpPos.y + vpSize.y - 30.0f),
                 IM_COL32(255, 210, 90, 255),
-                "Edit 态 UI 为纯预览——滚动/点击/Save Game 请 Ctrl+P 进 Play");
+                "Edit 态：滚轮可滚 ScrollView；点击/Save Game 请 Ctrl+P 进 Play");
         }
     } else {
         const float fitScale = std::min(1.0f, std::min(vpSize.x / targetW, vpSize.y / targetH));
@@ -320,10 +328,11 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
         m_gizmo->update(ctx, vpPosF, vpSizeF);
     }
 
-    // 编辑器相机输入（gizmo 拖拽期间抑制；鼠标离开视口后若仍在拖拽则继续）
+    // 编辑器相机输入（gizmo 拖拽期间抑制；鼠标离开视口后若仍在拖拽则继续；
+    // Edit 态 UI 滚轮已消费时跳过相机缩放——列表与相机不争抢同一 tick）
     const bool gizmoActive = m_gizmo && m_gizmo->isUsing();
     if (editMode && !gizmoActive && (windowHovered || camera.isInteracting()))
-        camera.update(Time::deltaTime(), vpPosF, vpSizeF);
+        camera.update(Time::deltaTime(), vpPosF, vpSizeF, m_uiConsumedWheel);
 
     // 射线-AABB 拾取（位移阈值 3px、Ctrl 加选、gizmo 悬停抑制；仅 Edit 态）
     handlePicking(ctx, camera, vpPosF, vpSizeF, hovered);

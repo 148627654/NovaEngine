@@ -1995,6 +1995,11 @@ public:
     bool scrollVertical = true;
     float scrollSensitivity = 20.0f;     // 滚轮每格像素（Input::scrollDelta 消费）
     glm::vec2 scrollOffset{0.0f};        // 像素（正 = 内容向右/下移）；序列化（位置记忆）
+    // 可视区外框（验收补强，2026-11-17）：背景填充 + 描边——无外框的纯裁剪窗口
+    // 在场景里不可见，验收者找不到滚动区域；旧文件缺字段走默认值。
+    glm::vec4 bgColor{0.10f, 0.11f, 0.13f, 0.85f};
+    glm::vec4 borderColor{0.42f, 0.45f, 0.52f, 1.0f};
+    float borderThickness = 1.5f;        // 逻辑像素
 
     glm::vec2 contentSize() const;       // 内容包围盒（渲染期重算：子物体 UI rect 并集；脚本查询）
 
@@ -2004,7 +2009,7 @@ public:
 }
 ```
 
-行为：UIRenderer 渲染该 Canvas 时，ScrollView 子树的 quad 在 scissor（可视区矩形，嵌套 ScrollView 取交集）内裁剪绘制；滚动指示条（右侧/底部细条，显示内容比例与位置，纯视觉 v1 不可拖）。processInput：滚轮（Input::scrollDelta × scrollSensitivity）滚动指针下冒泡链最近的 ScrollView；scrollOffset 钳制 [0, max(0, contentSize - viewSize)]（按轴）。子物体仍按普通 UI 布局（v1 不做内容自动重排——内容布局由创作者摆放，滚动仅平移视口）。
+行为：UIRenderer 渲染该 Canvas 时，先绘制可视区外框（bgColor 背景填充 + borderColor 四边描边，发射序先于子树 = 内容绘制其上；enter 回调发射、节点 ctx 裁剪），ScrollView 子树的 quad 在 scissor（可视区矩形，嵌套 ScrollView 取交集）内裁剪绘制；滚动指示条（右侧/底部细条，显示内容比例与位置，纯视觉 v1 不可拖）。processInput：滚轮（Input::scrollDelta × scrollSensitivity）滚动指针下冒泡链最近的 ScrollView；scrollOffset 钳制 [0, max(0, contentSize - viewSize)]（按轴）。子物体仍按普通 UI 布局（v1 不做内容自动重排——内容布局由创作者摆放，滚动仅平移视口）。
 
 ### 24.3.5 命中、冒泡与「Play 中 UI 优先于场景拾取」（UI/UIRenderer.h 追加）
 
@@ -2037,11 +2042,13 @@ class UIRenderer {
 4. 仅冒泡链上的交互组件更新 m_hovered/m_pressed/m_dragging 等状态，链外组件一律复位（旧实现多按钮重叠各自置位的缺陷一并修正）。
 5. 时序契约不变（§14.3）：Player 在 scene.update 前调用、编辑器 SceneView 渲染期调用；Edit 态不调 processInput → UI 预览不挡场景拾取（只在 Play 中「UI 优先」）。
 6. ScrollView 滚轮在 processInput 内读 Input::scrollDelta()（UI → Core 依赖合法），既有签名不变。
+7. **Edit 态滚轮例外（验收补强，2026-11-17）**：`UIRenderer::processWheelInput(scene, mouse)`——命中/冒泡与 processInput 同一实现，但仅投递 ScrollView 滚动（Button/Slider 不参与，保持「预览不挡拾取」）。消费返回 true，编辑器据此跳过本帧相机缩放（EditorCamera::update 第四参 uiConsumedWheel）。Play 行为不变。
+8. **HiDPI 布局裁定（2026-11-17 修复）**：布局空间 = 逻辑像素（`s_screenSize = 物理 FBO / dpiScale`），dpi 全局乘数只在顶点发射期统一乘（pushQuad/pushTri 唯一出口）；命中输入（processInput/processWheelInput/hitTest）入口把物理 FBO 坐标 ÷ dpiScale 转回逻辑。此前 anchor×物理尺寸 与 offset×dpi 混用，150% 显示器上整个 UI 放大 1.5 倍溢出视口（V05UITest 验收暴露）。
 
 ### 24.3.6 序列化键名（场景 JSON，version 4 不变）
 
 - Slider：`"type":"Slider", "value":0.5, "minValue":0.0, "maxValue":1.0, "wholeNumbers":false, "backgroundColor":[r,g,b,a], "fillColor":[...], "handleColor":[...], "fillThickness":6.0, "handleSize":[16.0,24.0], "anchor":[0.5,0.5], "offset":[0.0,0.0], "size":[200.0,30.0], "backgroundSpritePath":"", "fillSpritePath":"", "handleSpritePath":""`
-- ScrollView：`"type":"ScrollView", "anchor":[...], "offset":[...], "size":[...], "scrollHorizontal":false, "scrollVertical":true, "scrollSensitivity":20.0, "scrollOffset":[0.0,0.0]`
+- ScrollView：`"type":"ScrollView", "anchor":[...], "offset":[...], "size":[...], "scrollHorizontal":false, "scrollVertical":true, "scrollSensitivity":20.0, "scrollOffset":[0.0,0.0], "bgColor":[r,g,b,a], "borderColor":[r,g,b,a], "borderThickness":1.5`（验收补强字段，缺省 = 默认外框，读旧文件零警告）
 - Image 追加：`"fillType":"None"|"Horizontal"|"Vertical"|"Radial90"|"Radial180"|"Radial360", "fillAmount":1.0, "fillClockwise":true`（缺省 = 旧行为；未知字符串 warn 回退 None）
 - Text 追加：`"wrap":false, "wrapWidth":0.0, "hAlign":"Left"|"Center"|"Right"`（缺省 = 旧行为；未知字符串 warn 回退 Left）
 

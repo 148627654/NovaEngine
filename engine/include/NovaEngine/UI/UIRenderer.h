@@ -23,6 +23,9 @@ public:
     static void render(const Scene& scene, int screenW, int screenH);
     // Play 输入：鼠标（已换算游戏分辨率坐标）→ 矩形命中 → Button hover/press + onClick 边沿触发
     static void processInput(const Scene& scene, const glm::vec2& mouse, bool leftDown, bool leftPressed);
+    // Edit 态滚轮（V0.5 验收补强）：仅 ScrollView 滚动（Button/Slider 不参与）；
+    // 消费返回 true——调用方据此抑制编辑器相机缩放
+    static bool processWheelInput(const Scene& scene, const glm::vec2& mouse);
     // 2026-11-16 新增（HiDPI 适配，增量接口）：uiScale 全局乘数 =
     // 窗口逻辑→帧缓冲像素比（150% 显示器 = 1.5）。调用方每帧在 render 之前设置
     //（编辑器 SceneView 用 ImGui FramebufferScale；播放器用 fbW/winW）。默认 1.0。

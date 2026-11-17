@@ -28,11 +28,13 @@ glm::vec3 upVector(const EditorCamera& cam) {
 
 }  // namespace
 
-void EditorCamera::update(float dt, const glm::vec2&, const glm::vec2& viewportSize) {
+void EditorCamera::update(float dt, const glm::vec2&, const glm::vec2& viewportSize,
+                          bool uiConsumedWheel) {
     using namespace NovaEngine;
 
-    // 滚轮缩放：速度按 distance 缩放（远时快、近时慢）
-    const float scroll = Input::scrollDelta().y;
+    // 滚轮缩放：速度按 distance 缩放（远时快、近时慢）。
+    // Edit 态 UI 滚轮优先（V0.5 验收补强）：ScrollView 已消费本帧滚轮 → 相机不动
+    const float scroll = uiConsumedWheel ? 0.0f : Input::scrollDelta().y;
     if (scroll != 0.0f) {
         distance *= std::exp(-scroll * 0.12f);
         distance = std::clamp(distance, 0.1f, 1000.0f);

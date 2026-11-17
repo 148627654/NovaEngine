@@ -26,3 +26,6 @@ assets/.novacache/
 # 运行日志（2026-11-16 文件日志功能）
 Logs/
 atlas.raw
+
+# 游戏存档（运行时产物）
+saves/

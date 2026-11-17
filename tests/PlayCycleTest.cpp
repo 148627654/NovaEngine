@@ -139,6 +139,33 @@ int main() {
         }
     }
 
+    // 真实验收场景往返（排查 V05UITest 保存后 ScrollList 子项丢失）
+    {
+        std::printf("\n[真实场景 V05UITest 往返]\n");
+        auto countObjects = [](const Scene& s) {
+            int n = 0;
+            s.forEachObject([&n](GameObject*) { ++n; });
+            return n;
+        };
+        Scene real("Real");
+        if (!SceneSerializer::loadFromFile(real, R"(C:\Users\guoyu\Desktop\NovaEngine\assets\scenes\V05UITest.nova.json)")) {
+            std::printf("  [FAIL] 加载 V05UITest 失败\n");
+            return 1;
+        }
+        CHECK(countObjects(real) == 19, "加载后对象数 = 19");
+        const std::string snap = SceneSerializer::serialize(real);
+        SceneSerializer::deserialize(real, snap);
+        CHECK(countObjects(real) == 19, "serialize→deserialize 后对象数 = 19");
+        const std::string file = "V05UITest_rt_tmp.nova.json";
+        SceneSerializer::saveToFile(real, file);
+        Scene fresh("Fresh2");
+        SceneSerializer::loadFromFile(fresh, file);
+        const int n2 = countObjects(fresh);
+        std::printf("  [info] 文件往返后对象数 = %d（期望 19）\n", n2);
+        std::remove(file.c_str());
+        CHECK(n2 == 19, "文件往返后对象数 = 19");
+    }
+
     std::printf("\n%s（失败 %d 项）\n", g_failures == 0 ? "全部通过" : "存在失败", g_failures);
     return g_failures == 0 ? 0 : 1;
 }

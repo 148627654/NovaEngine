@@ -1,6 +1,7 @@
 #pragma once
 #include <nlohmann/json_fwd.hpp>
 #include <glm/vec2.hpp>
+#include <glm/vec4.hpp>
 #include "../Scene/Component.h"
 
 namespace NovaEngine {
@@ -17,6 +18,11 @@ public:
     bool scrollVertical = true;
     float scrollSensitivity = 20.0f;     // 滚轮每格像素（Input::scrollDelta 消费）
     glm::vec2 scrollOffset{0.0f};        // 像素（正 = 内容向右/下移）；序列化（位置记忆）
+    // 可视区外框（V0.5 验收补强）：背景填充 + 描边——无外框的纯裁剪窗口在场景里不可见，
+    // 验收者找不到滚动区域。旧文件缺字段走默认值（序列化往返无损）。
+    glm::vec4 bgColor{0.10f, 0.11f, 0.13f, 0.85f};
+    glm::vec4 borderColor{0.42f, 0.45f, 0.52f, 1.0f};
+    float borderThickness = 1.5f;        // 逻辑像素
 
     glm::vec2 contentSize() const;       // 内容包围盒（渲染期重算：子物体 UI rect 并集；脚本查询）
 
