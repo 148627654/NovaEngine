@@ -162,6 +162,7 @@ struct AtlasImpl {
     bool loaded = false;
     bool builtin = false;         // 降级内置 5x7 字体模式
     bool warnedFull = false;
+    bool rebuilding = false;      // growTo1024 重摆期间逐字形上传跳过（recreateTexture 整量重传）
     uint32_t texId = 0;
     stbtt_fontinfo font{};                       // 仅 !builtin 有效
     std::vector<uint8_t> fontData;               // 字体文件字节（stbtt 内部指针需存活）
@@ -248,6 +249,7 @@ struct AtlasImpl {
     }
 
     void uploadRegion(int x, int y, int w, int h, const uint8_t* data) {
+        if (rebuilding) return;   // 重建期间像素只进 CPU 缓冲（recreateTexture 统一重传）
         ensureTexture();
         if (!texId || w <= 0 || h <= 0) return;
         glBindTexture(GL_TEXTURE_2D, texId);
@@ -277,6 +279,11 @@ struct AtlasImpl {
         glBindTexture(GL_TEXTURE_2D, texId);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, size, size, 0, GL_RED, GL_UNSIGNED_BYTE,
                      pixels.data());
+        // 关键（2026-11-17 修复）：重分配存储会删除全部旧 mip 层——MIN 过滤为
+        // GL_LINEAR_MIPMAP_LINEAR 时纹理立即 incomplete，后续所有 glTexSubImage2D
+        // 静默失败 → 扩容之后烘焙的新字形全部不可见（用户报障：场景打开后文字
+        // 全灭，仅扩容前已烘焙的 ASCII/白块可见）。重传后立即重建 mip 链恢复完整。
+        glGenerateMipmap(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, 0);
     }
 
@@ -296,12 +303,14 @@ struct AtlasImpl {
         pixels.assign(static_cast<size_t>(size) * size, 0);
         cursorX = cursorY = kPad;
         rowHeight = 0;
+        rebuilding = true;   // 重摆期间 bake 的逐字形上传跳过（旧 512 纹理坐标越界无意义）
         const auto old = std::move(glyphs);
         glyphs.clear();
         for (const auto& [cp, g] : old) {
             (void)g;
             bake(cp);  // 重新光栅化 + 摆放（失败仅丢失该字形，见 bake）
         }
+        rebuilding = false;
         recreateTexture();
         return true;
     }

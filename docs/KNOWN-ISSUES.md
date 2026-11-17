@@ -66,6 +66,8 @@ Wave 2 只读审查结论：**无 P0**；两条 P1 均已修复（meta 的 pak �
   - **验证**：Debug 全量构建零错误零第一方警告（4 target）；PlayCycleTest 全部通过（失败 0 项）；NovaPlayer 冒烟（demo 加载 + InputMap 4 动作 2 轴 + SpinningCube 旋转，0 [Error]）；NovaEditor 冒烟（场景打开 + 初始化完成，0 [Error]）；CLI `--headless --import --quit` 退出码 0（成功 3 / 失败 0）；退出码 2 参数错误 stderr+日志双通道实测通过。日志归档 Logs/（gitignore）。
   - **归档越界观察**：ComponentRegistry.cpp link-guard 增补 Slider/ScrollView 两行（include + make_unique，注释带模块/Coder 标记）——整合者已按 UIRenderer 注释纪律同步，无越界问题。
   - **遗留 P2（本波不改，一句话理由）**：① 手柄热插拔首帧 pressed 边沿（连接帧已按住的按钮报 pressed）——语义可辩（连接帧即「按下」）；② InputMap warnedMissing 进程级 warn-once 作用域——契约未定；③ GLFW 扳机轴静止值 -1（|v|=1 不归零），绑扳机做轴时静止输出 -1——契约冻结语义，风险提示存档；④ SceneRenderer 分组 O(n²) 最坏退化（2000 互异 mesh+材质 ≈2M 次比较）——验收场景同 mesh 无问题，改 hash 分组风险大于收益；⑤ wrap=true Text 命中矩形含右侧空白区——冻结裁定；⑥ scrollOffset 钳制在 leave 执行有 1 帧越界滚动——可接受；⑦ drawInstanced 结束未恢复 GL_ARRAY_BUFFER 绑定——实践无害（后续调用均自行绑定）。
+- **字体图集扩容后新字形全灭已修复（2026-11-17，验收场景触发）**：根因 growTo1024→recreateTexture 用 glTexImage2D 重分配 512→1024 存储后未重建 mip 链——MIN 过滤为 GL_LINEAR_MIPMAP_LINEAR 时纹理立即 incomplete，之后所有 glTexSubImage2D（uploadRegion）静默失败 → 扩容之后烘焙的新字形全部落在零填充区域不可见（V05UITest 打开时中文量大触发扩容，中文全灭、仅扩容前的 ASCII/白块可见——按钮/血条正常、文字消失的诡异现象即此）。修复：recreateTexture 重传后立即 glGenerateMipmap；growTo1024 重摆期间置 rebuilding 旗标跳过逐字形上传（旧 512 纹理坐标越界无意义，整量重传兜底）。验证：播放器修复前后截屏对比（修复前文字为零星点、修复后标题/换行/滚动行全部清晰渲染）。附带：验收场景配色问题（白字白天空对比度差）非引擎 bug——V05UITest 已加半透明深色底板 + 深色文字。
+- **验收场景使用澄清（2026-11-17，非 bug）**：①「SaveCube 无法选中」= 拾取选择仅 Edit 态（设计），Play 态应经 Inspector 改 Transform 数值制造存档差异；② ScrollView 滚轮滚动仅 Play 态生效（Edit 态 UI 为纯预览不处理输入，设计）——引擎侧滚动经校准合成滚轮像素级验证通过（8 格滚轮滚动区 45431 像素变化）。
 
 ## 新增缺口（2026-11-15，Docs Writer 通读代码发现，状态已更新）
 
