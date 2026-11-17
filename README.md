@@ -107,6 +107,7 @@ docs/      架构 / 功能 / 路线图文档
 - ✅ V0.3:PBR 材质库 / 物理 / 音频 / 运行时 UI / 协程事件 / 后处理 / 场景管理 / Prefab
 - ⏳ V0.5「发布能力与规模内容」:LOD / IBL / SSAO / 粒子 / 地形 / 动画状态机 / 2D / 热重载
 - ⏳ V1.0「商业独立游戏发布级」:Profiler / 多场景流式 / Shader Graph / CI / 示例游戏
+- 🔭 V2.0「领域扩展」(展望):皮肤系统 / Decal 贴花 / 贴图热重载 · URDF/STEP 机器人仿真(关节/传感器/headless 加速)
 
 详见 [docs/ROADMAP.md](docs/ROADMAP.md)。
 
