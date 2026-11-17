@@ -1,0 +1,116 @@
+{
+    "name": "Cube",
+    "root": {
+        "active": true,
+        "children": [
+            {
+                "active": true,
+                "children": [],
+                "components": [
+                    {
+                        "position": [
+                            1.5,
+                            0.0,
+                            0.0
+                        ],
+                        "rotation": [
+                            0.0,
+                            0.0,
+                            0.0,
+                            1.0
+                        ],
+                        "scale": [
+                            0.4000000059604645,
+                            0.4000000059604645,
+                            0.4000000059604645
+                        ],
+                        "type": "Transform"
+                    },
+                    {
+                        "material": {
+                            "albedo": [
+                                1.0,
+                                1.0,
+                                1.0
+                            ],
+                            "albedoMap": "",
+                            "alpha": 1.0,
+                            "blendMode": "Opaque",
+                            "emissionColor": [
+                                0.0,
+                                0.0,
+                                0.0
+                            ],
+                            "emissionIntensity": 1.0,
+                            "emissionMap": "",
+                            "metallic": 0.10000000149011612,
+                            "metallicMap": "",
+                            "normalMap": "",
+                            "roughness": 0.4000000059604645,
+                            "roughnessMap": ""
+                        },
+                        "mesh": "assets/models/cube.obj",
+                        "type": "MeshRenderer"
+                    }
+                ],
+                "id": 9988776655443322110,
+                "name": "SmallCube"
+            }
+        ],
+        "components": [
+            {
+                "position": [
+                    0.0,
+                    1.0,
+                    0.0
+                ],
+                "rotation": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0
+                ],
+                "scale": [
+                    1.0,
+                    1.0,
+                    1.0
+                ],
+                "type": "Transform"
+            },
+            {
+                "material": {
+                    "albedo": [
+                        0.8999999761581421,
+                        0.3499999940395355,
+                        0.20000000298023224
+                    ],
+                    "albedoMap": "",
+                    "alpha": 1.0,
+                    "blendMode": "Opaque",
+                    "emissionColor": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "emissionIntensity": 1.0,
+                    "emissionMap": "",
+                    "metallic": 0.0,
+                    "metallicMap": "",
+                    "normalMap": "",
+                    "roughness": 0.5,
+                    "roughnessMap": ""
+                },
+                "mesh": "assets/models/cube.obj",
+                "type": "MeshRenderer"
+            },
+            {
+                "enabled": true,
+                "speed": 30.0,
+                "type": "SpinningCube"
+            }
+        ],
+        "id": 12345678901234567890,
+        "name": "Cube"
+    },
+    "version": 1
+}

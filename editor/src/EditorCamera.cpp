@@ -58,7 +58,11 @@ void EditorCamera::update(float dt, const glm::vec2&, const glm::vec2& viewportS
         target += upVector(*this) * delta.y * wpp;
     }
 
-    // WASD 平移（沿相机平面；Shift 加速）
+    // WASD 平移（沿相机平面；Shift 加速）——须按住右键（Unity flythrough 同款）。
+    // 2026-11-17 修复：W/E/R 已被 gizmo 模式切换占用，裸按（视口悬停即生效）
+    // 会边切位移模式边把镜头推飞（用户报障「W 位移整个镜头会移动」）。
+    // 右键拖拽旋转 + WASD 飞行组合保持不变。
+    if (!Input::isMouseDown(MouseButton::Right)) return;
     float speed = distance * 0.3f;
     if (Input::isKeyDown(Key::LeftShift) || Input::isKeyDown(Key::RightShift)) speed *= 3.0f;
     const glm::vec3 fwd = forward();

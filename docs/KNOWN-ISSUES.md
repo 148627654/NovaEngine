@@ -54,6 +54,7 @@ Wave 2 只读审查结论：**无 P0**；两条 P1 均已修复（meta 的 pak �
 - **SceneSwitcher 验收脚本从未编译进构建已修复**：ROADMAP 验收物料 samples/SceneSwitcher.cpp 文件存在，但 samples/CMakeLists.txt 未列入 NovaScripts → 挂 SceneSwitcher 的场景反序列化时「未知组件类型，已跳过」、onStart 不执行、DDOL 从未设置——LoadScene E2E 验证首跑即暴露（DDOL 迁移 0 棵子树）。修复：CMakeLists 补 SceneSwitcher.cpp（一行）。教训：验收脚本本身必须先被构建。
 - **V0.3 遗留验收项像素级验证闭环（2026-11-16/17）**：Player 临时 --verify 驱动 + outLdrFbo 帧缓冲读回（读回产物与脚本已随验收删除，数字记录如下）：① 按钮 hover/pressed 颜色——真实 OS 光标悬停 + SendInput 点击，idle(78,141,229)/hover(103,166,254)/pressed(53,103,204)/移出还原，与设计色逐像素一致；② Bloom A/B——emission=3 立方体光晕环亮度 on=206.1 vs off=188.0（+18），ACES 高光滚降（253 vs 255），hdrSupported=true 16F 链实测。全部 12 项断言通过。
 - **材质库共享材质同步已像素级验证（2026-11-17）**：临时场景三立方体共享同一 .novamat（materialAsset 双轨）——材质 albedo 红 (1,0,0) 时三立方体实测全 (108,0,0) 红；仅改资产文件为绿 (0,1,0) 重跑，三立方体全 (0,108,0) 绿、天空不变——「改一处、多处同步」资产级成立（编辑器内实时刷新交互仍待人工）。
+- **gizmo 拖拽失效已修复（2026-11-17，三层根因）**：用户报障「拖彩色箭头没反应、W 切位移模式镜头飞走」。诊断日志（[GizmoDiag]）逐层定位三层缺陷：① EditorCamera 的 WASD 相机平移无右键门槛，与 gizmo 的 W/E/R 快捷键冲突（按 W 边切模式边推镜头）——修复：WASD 须按住右键（Unity flythrough 同款，FEATURES §3.2 已同步）；② ImGuizmo 上游 CanActivate() 要求点击瞬间 !IsAnyItemHovered()，而 SceneView 的 FBO 画面经 ImGui::Image 铺满视口恒为 hovered 项——修复：Manipulate 前临时清零 g.HoveredId、调用后立即恢复（视口 Image 的 IsItemHovered 已在更早处读取，无副作用）；③ 编辑器从未调用 ImGuizmo::BeginFrame()（上游 README 规定的每帧一次调用）——mbOverGizmoHotspot 逐帧状态无复位，鼠标首次悬停手柄后永久粘死，激活路径恒短路（IsOver=true 但 IsUsing 恒 false）。修复：ImGui::NewFrame 后每帧调用。教训：11-15 的 gizmo 验证只证明了「绘制+悬停+切换」、未证明「拖拽生效」，交互验收必须真拖真看（用户实测拖拽通过）。
 
 ## 新增缺口（2026-11-15，Docs Writer 通读代码发现，状态已更新）
 

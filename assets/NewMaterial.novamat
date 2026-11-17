@@ -1,0 +1,26 @@
+{
+    "material": {
+        "albedo": [
+            0.9107692241668701,
+            0.12050178647041321,
+            0.12050178647041321
+        ],
+        "albedoMap": "",
+        "alpha": 1.0,
+        "blendMode": "Opaque",
+        "emissionColor": [
+            0.0,
+            0.0,
+            0.0
+        ],
+        "emissionIntensity": 1.0,
+        "emissionMap": "",
+        "metallic": 0.0,
+        "metallicMap": "",
+        "normalMap": "",
+        "roughness": 0.6000000238418579,
+        "roughnessMap": ""
+    },
+    "name": "NewMaterial",
+    "version": 1
+}

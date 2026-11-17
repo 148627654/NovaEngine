@@ -14,6 +14,7 @@
 
 #include <imgui.h>
 #include <imgui_internal.h>   // DockBuilder* API（ImGui 1.90+ 从 imgui.h 移入 internal）
+#include <ImGuizmo.h>
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
 
@@ -290,6 +291,12 @@ void EditorApplication::update(float dt) {
     ImGui_ImplGlfw_NewFrame();
     ImGui_ImplOpenGL3_NewFrame();
     ImGui::NewFrame();
+    // ImGuizmo 标准用法（README）：每帧 BeginFrame 一次——内部复位
+    // mbOverGizmoHotspot 等逐帧状态（该状态无 BeginFrame 时一旦悬停过手柄
+    // 即永久粘死 → HandleTranslation/Scale/Rotation 的激活路径恒短路，
+    // 2026-11-17 用户报障「拖箭头没反应」，[GizmoDiag] 定位）；
+    // 每视口随后 SetDrawlist + SetRect + Manipulate（SceneViewPanel 内已按此调用）。
+    ImGuizmo::BeginFrame();
 
     // HiDPI（2026-11-16）：每帧同步显示器内容缩放（SCALE_TO_MONITOR 下
     // ImGui FramebufferScale 恒 1，UI 逻辑尺寸倍率需独立来源）

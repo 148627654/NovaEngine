@@ -3,6 +3,7 @@
 #include "EditorContext.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>   // [TEMP-DIAG] GizmoDiag 读 HoveredWindow/_OwnerName
 #include <ImGuizmo.h>
 
 #include <NovaEngine/Core/Input.h>
@@ -195,9 +196,20 @@ void GizmoController::update(EditorContext& ctx, const glm::vec2& viewportPos, c
     // 矩阵直接传 glm::value_ptr，无需转置：ImGuizmo 的 float[16] 与 glm/OpenGL
     // 同为列主序内存布局（内部按行向量约定计算，与列主序输入恰好互相抵消）。
     // 显式转置会破坏平移并触发 "behind camera" 检测，令 gizmo 被静默裁掉不显示。
+    // ImGuizmo 上游 CanActivate() 要求「点击瞬间 !ImGui::IsAnyItemHovered()」——
+    // SceneView 的 FBO 画面经 ImGui::Image 铺满视口，鼠标悬停视口时该 Image 恒为
+    // hovered 项（IsAnyItemHovered 恒真）→ 手柄按下永远无法激活拖拽（IsOver=true
+    // 但 IsUsing 恒 false；2026-11-17 用户报障「拖箭头没反应」，[GizmoDiag] 定位）。
+    // 绕行：仅当 gizmo 被悬停时，Manipulate 前临时清零 g.HoveredId、调用后立即恢复——
+    // 不影响同帧其它 ImGui 项（视口 Image 的 IsItemHovered 已在更早处读取；
+    // 窗口级 IsWindowHovered 走 HoveredWindow 路径不受影响）。
+    ImGuiContext& ig = *ImGui::GetCurrentContext();
+    const ImGuiID savedHoveredId = ig.HoveredId;
+    if (ImGuizmo::IsOver()) ig.HoveredId = 0;
     ImGuizmo::Manipulate(glm::value_ptr(m_view), glm::value_ptr(m_projection),
                          toImGuizmoOperation(m_operation), toImGuizmoMode(m_space),
                          glm::value_ptr(matrix), deltaMatrix, snapOn ? snap : nullptr);
+    ig.HoveredId = savedHoveredId;
 
     if (ImGuizmo::IsUsing()) {
         if (objects.size() == 1) {
