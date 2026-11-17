@@ -337,6 +337,29 @@ bool Packager::buildPlayer(const fs::path& sceneJsonPath, const fs::path& output
     }
     if (ec) Logger::warn("遍历着色器目录中断: {}", ec.message());
 
+    // 3.6 assets/input/ 全目录 *.novainput（V0.5-11）：Player 启动后
+    // InputMap::load 经 AssetStream 读 pak 内配置。目录不存在 = 尚无输入配置 →
+    // 仅提示（Player 内置默认绑定兜底），不视为失败
+    const fs::path inputDir = projectRoot / "assets" / "input";
+    if (fs::is_directory(inputDir, ec)) {
+        for (fs::recursive_directory_iterator it(
+                 inputDir, fs::directory_options::skip_permission_denied, ec),
+             end;
+             !ec && it != end; it.increment(ec)) {
+            if (!it->is_regular_file(ec)) { ec.clear(); continue; }
+            std::string name = it->path().filename().string();
+            std::transform(name.begin(), name.end(), name.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (!name.empty() && name.front() == '.') continue;  // 隐藏文件
+            if (!name.ends_with(".novainput")) continue;
+            const std::string rel = toPakRel(it->path(), projectRoot);
+            if (!rel.empty()) files.emplace(rel, it->path());
+        }
+        if (ec) Logger::warn("遍历输入配置目录中断: {}", ec.message());
+    } else {
+        Logger::info("assets/input/ 不存在，打包不含输入绑定配置（Player 使用内置默认绑定）");
+    }
+
     // 4. 缺失资源：逐条报错并失败（不带到运行时）
     if (!missing.empty()) {
         for (const auto& m : missing)

@@ -12,6 +12,8 @@
 #include <NovaEngine/Scene/Rigidbody.h>
 #include <NovaEngine/Scene/Text.h>
 #include <NovaEngine/Scene/Transform.h>
+#include <NovaEngine/UI/Slider.h>
+#include <NovaEngine/UI/ScrollView.h>
 #include <NovaEngine/Core/Logger.h>
 #include <algorithm>
 
@@ -74,6 +76,8 @@ std::unique_ptr<Component> ComponentRegistry::create(const std::string& typeName
         (void)std::make_unique<CapsuleCollider>(owner);// V0.3-1（Coder A 波 2 物理）
         (void)std::make_unique<MeshCollider>(owner);   // V0.3-1（Coder A 波 2 物理）
         (void)std::make_unique<PrefabInstance>(owner); // V0.3-9（Coder B 波 4 Prefab）
+        (void)std::make_unique<Slider>(owner);         // V0.5-13（c3 UI 控件）
+        (void)std::make_unique<ScrollView>(owner);     // V0.5-13（c3 UI 控件）
     }
 
     auto& map = entries();

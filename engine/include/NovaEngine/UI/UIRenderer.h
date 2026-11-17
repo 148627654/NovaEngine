@@ -4,6 +4,14 @@
 namespace NovaEngine {
 
 class Scene;
+class GameObject;
+class Component;
+
+// 指针命中结果（最上层 UI 元素；Image/Text 也参与命中 = 不透明覆盖语义）
+struct UIHitResult {
+    GameObject* gameObject = nullptr;   // 命中组件所在 GO
+    Component* component = nullptr;     // 命中的 UI 组件（Image/Text/Button/Slider/ScrollView）
+};
 
 // 运行时 UI 批处理渲染（V0.3-3）：单动态 VBO（每帧 map 顶点），per-atlas 批 →
 // 每 Canvas 一 draw call；深度测试关、混合开、正交投影。零 ImGui 依赖。
@@ -19,6 +27,15 @@ public:
     // 窗口逻辑→帧缓冲像素比（150% 显示器 = 1.5）。调用方每帧在 render 之前设置
     //（编辑器 SceneView 用 ImGui FramebufferScale；播放器用 fbW/winW）。默认 1.0。
     static void setDpiScale(float scale);
+
+    // ---- V0.5-13 追加（命中 / 冒泡 /「Play 中 UI 优先于场景拾取」）----
+    // 最上层命中：全部 UI 元素 rect（与 render 同一布局公式）中 DFS 画家序最后命中者
+    static bool hitTest(const Scene& scene, const glm::vec2& mouse, UIHitResult& out);
+    // 任一 UI 元素覆盖该点（「UI 优先于场景拾取」的引擎侧判定入口）
+    static bool isPointerOverUI(const Scene& scene, const glm::vec2& mouse);
+    // 最近一次 processInput 是否有交互组件消费（onClick/拖拽/滚动）——调用方据此抑制
+    // 场景拾取/其它指针行为（编辑器 SceneView Play 分支接线见 §24.5）
+    static bool lastPointerConsumed();
 };
 
 }  // namespace NovaEngine

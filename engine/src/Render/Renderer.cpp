@@ -23,11 +23,21 @@ struct RenderItem {
 };
 std::vector<RenderItem> s_queue;
 
+// ===== 实例化批队列（V0.5-14：submitInstanced 入队，endFrame 在 opaque 普通项之后、
+// transparent 之前统一绘制；每批一次 glDrawElementsInstanced）=====
+struct InstancedBatch {
+    std::shared_ptr<Mesh> mesh;
+    Material material;
+    std::vector<glm::mat4> models;
+};
+std::vector<InstancedBatch> s_instancedQueue;
+
 // ===== 全局 GL 状态 =====
 bool s_initialized = false;
 
 uint32_t s_cameraUbo = 0;   // CameraBlock（binding 0：mat4 uViewProj + vec4 uCamPos）
 std::shared_ptr<Shader> s_blinnPhong;
+std::shared_ptr<Shader> s_blinnPhongInstanced;   // 实例化着色器（V0.5-14）；失败置 nullptr，批次静默不绘制
 std::shared_ptr<Shader> s_gridShader;
 std::shared_ptr<Shader> s_outlineShader;
 std::shared_ptr<Shader> s_shadowShader;   // 阴影深度 pass（V0.2-6）；加载失败置 nullptr，不崩溃
@@ -41,8 +51,8 @@ ShadowCameraParams s_shadowParams;    // 本帧阴影参数（drawShadowPass 记
 bool s_shadowActive = false;          // 本帧是否有可用阴影（beginFrame 重置）
 
 // ===== 帧统计计数器（V0.2-11；beginFrame 清零，endFrame 结算到 s_last*）=====
-uint32_t s_drawCalls = 0;           // 主 pass 绘制次数（队列项 + grid + outline 每次 2 遍）
-uint32_t s_submitted = 0;           // submit() 次数
+uint32_t s_drawCalls = 0;           // 主 pass 绘制次数（队列项 + 实例化批 + grid + outline 每次 2 遍）
+uint32_t s_submitted = 0;           // 提交数（submit() 次数 + 实例化实例数；≈ 可见数口径，V0.5-14）
 uint32_t s_tris = 0;                // 主 pass 累计三角形数（indexCount/3）
 uint32_t s_shadowDrawCalls = 0;     // 阴影 pass 项数（不计入 s_drawCalls）
 uint32_t s_lastDrawCalls = 0;
@@ -50,6 +60,9 @@ uint32_t s_lastSubmittedCount = 0;
 uint32_t s_lastTriangleCount = 0;
 uint32_t s_lastShadowItemCount = 0;
 uint32_t s_lastTransparentCount = 0;   // 上一帧透明队列项数（V0.2-8）
+uint32_t s_lastCulledCount = 0;             // 上一帧剔除项数（V0.5-14）
+uint32_t s_lastInstancedDrawCalls = 0;      // 上一帧实例化 draw call 数（V0.5-14）
+uint32_t s_lastInstancedInstanceCount = 0;  // 上一帧实例化累计实例数（V0.5-14）
 
 uint32_t s_gridVao = 0;
 uint32_t s_gridVbo = 0;
@@ -63,6 +76,11 @@ DirectionalLightData s_light;
 
 // V0.3-14：后处理链 HDR 模式开关（uGamma=0 触发 shader 直通分支；由 SceneRenderer 每帧设置）
 bool s_linearOutput = false;
+
+// V0.5-14：视锥剔除开关（默认 true）与本帧剔除计数（SceneRenderer 经 markCulled 上报，
+// beginFrame 清零、endFrame 结算到 s_lastCulledCount）
+bool s_frustumCullingEnabled = true;
+uint32_t s_culled = 0;
 
 // 网格地面配色：雾色已参数化（drawGrid(fogColor) 由 Scene::fogColor 传入，V0.2-5）
 const glm::vec3 kGridLineColor(0.55f, 0.55f, 0.60f);
@@ -195,6 +213,12 @@ void Renderer::init() {
     // 内置着色器（相对项目根路径；编辑器运行目录 = 项目根，见 ARCHITECTURE.md §9.4）
     s_blinnPhong = Shader::createFromFiles("assets/shaders/blinn_phong.vert",
                                            "assets/shaders/blinn_phong.frag");
+    // 实例化着色器（V0.5-14）：blinn_phong_instanced.vert + 复用 blinn_phong.frag；
+    // 失败只记错误并置空，实例化批静默不绘制（不崩溃，与阴影着色器同一降级策略）
+    s_blinnPhongInstanced = Shader::createFromFiles("assets/shaders/blinn_phong_instanced.vert",
+                                                    "assets/shaders/blinn_phong.frag");
+    if (!s_blinnPhongInstanced)
+        Logger::error("[Renderer] 实例化着色器加载失败，实例化批次不绘制（不崩溃）");
     s_gridShader = Shader::createFromFiles("assets/shaders/grid.vert", "assets/shaders/grid.frag");
     s_outlineShader = Shader::createFromFiles("assets/shaders/outline.vert",
                                               "assets/shaders/outline.frag");
@@ -231,10 +255,12 @@ void Renderer::init() {
 void Renderer::shutdown() {
     if (!s_initialized) return;
     s_queue.clear();
+    s_instancedQueue.clear();
     if (s_gridVao) { glDeleteVertexArrays(1, &s_gridVao); s_gridVao = 0; }
     if (s_gridVbo) { glDeleteBuffers(1, &s_gridVbo); s_gridVbo = 0; }
     if (s_cameraUbo) { glDeleteBuffers(1, &s_cameraUbo); s_cameraUbo = 0; }
     s_blinnPhong.reset();
+    s_blinnPhongInstanced.reset();
     s_gridShader.reset();
     s_outlineShader.reset();
     s_shadowMap.destroy();
@@ -278,6 +304,7 @@ void Renderer::beginFrame(const RenderCamera& camera, const DirectionalLightData
     s_submitted = 0;
     s_tris = 0;
     s_shadowDrawCalls = 0;
+    s_culled = 0;   // V0.5-14：本帧剔除计数（SceneRenderer 遍历上报，endFrame 结算）
 
     // 每帧填充 CameraBlock UBO
     s_viewProj = camera.projection * camera.view;
@@ -297,6 +324,26 @@ void Renderer::submit(std::shared_ptr<Mesh> mesh, const Material& material,
     if (!mesh) return;
     s_queue.push_back(RenderItem{std::move(mesh), material, modelMatrix});
     ++s_submitted;
+}
+
+void Renderer::submitInstanced(std::shared_ptr<Mesh> mesh, const Material& material,
+                               const std::vector<glm::mat4>& modelMatrices) {
+    if (!mesh || modelMatrices.empty()) return;
+    s_instancedQueue.push_back(InstancedBatch{std::move(mesh), material, modelMatrices});
+    // 提交数按实例累计（≈ 可见数口径；draw call 数按批计，endFrame 结算）
+    s_submitted += static_cast<uint32_t>(modelMatrices.size());
+}
+
+void Renderer::setFrustumCullingEnabled(bool enabled) {
+    s_frustumCullingEnabled = enabled;
+}
+
+bool Renderer::frustumCullingEnabled() {
+    return s_frustumCullingEnabled;
+}
+
+void Renderer::markCulled() {
+    ++s_culled;
 }
 
 void Renderer::drawShadowPass(const ShadowCameraParams& shadow,
@@ -346,6 +393,8 @@ void Renderer::drawShadowPass(const ShadowCameraParams& shadow,
 
 void Renderer::endFrame() {
     uint32_t transparentCount = 0;
+    uint32_t instancedDrawCalls = 0;      // 本帧实例化批数（V0.5-14，结算到 s_lastInstancedDrawCalls）
+    uint32_t instancedInstances = 0;      // 本帧实例化累计实例数
     if (s_initialized) {
         // 裁定 2：stable_partition 按 blendMode 分两段——opaque 在前、transparent 在后
         const auto transparentBegin = std::stable_partition(
@@ -373,41 +422,64 @@ void Renderer::endFrame() {
             // 否则选中物体会以 drawOutline 的默认材质显示、真实材质被深度测试拒绝
             glDepthFunc(GL_LEQUAL);
 
-            // opaque 照旧绘制（深度照写）
+            // opaque 普通项照旧绘制（深度照写）
             for (auto it = s_queue.begin(); it != transparentBegin; ++it) {
                 setBlinnPhongUniforms(s_blinnPhong, it->material, it->model);
                 it->mesh->draw();
                 s_tris += it->mesh->indexCount() / 3;
                 ++s_drawCalls;
             }
-
-            // transparent：标准 alpha 混合 + 禁深度写（深度仍测试，保证被 opaque 正确遮挡）
-            if (transparentCount > 0) {
-                glEnable(GL_BLEND);
-                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-                glDepthMask(GL_FALSE);
-                for (auto it = transparentBegin; it != s_queue.end(); ++it) {
-                    setBlinnPhongUniforms(s_blinnPhong, it->material, it->model);
-                    it->mesh->draw();
-                    s_tris += it->mesh->indexCount() / 3;
-                    ++s_drawCalls;
-                }
-                glDepthMask(GL_TRUE);
-                glDisable(GL_BLEND);
-            }
-
-            glDepthFunc(GL_LESS);
         }
+
+        // ===== V0.5-14 实例化批：opaque 普通项之后、transparent 之前；深度 LEQUAL 同普通 opaque =====
+        // 着色器复用 blinn_phong.frag + 实例矩阵属性（uModel 由属性替代，setBlinnPhongUniforms 的
+        // uModel 设置因该 uniform 不存在被安全跳过）；着色器缺失时批次静默跳过（不崩溃）
+        if (s_blinnPhongInstanced && !s_instancedQueue.empty()) {
+            s_blinnPhongInstanced->bind();
+            glDepthFunc(GL_LEQUAL);
+            for (const InstancedBatch& batch : s_instancedQueue) {
+                if (!batch.mesh || batch.models.empty()) continue;
+                setBlinnPhongUniforms(s_blinnPhongInstanced, batch.material, glm::mat4(1.0f));
+                batch.mesh->drawInstanced(batch.models);
+                s_tris += (batch.mesh->indexCount() / 3) *
+                          static_cast<uint32_t>(batch.models.size());
+                ++s_drawCalls;   // 每批计 1 draw call
+                ++instancedDrawCalls;
+                instancedInstances += static_cast<uint32_t>(batch.models.size());
+            }
+        }
+
+        // transparent：标准 alpha 混合 + 禁深度写（深度仍测试，保证被 opaque 正确遮挡）
+        if (s_blinnPhong && transparentCount > 0) {
+            s_blinnPhong->bind();
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glDepthMask(GL_FALSE);
+            for (auto it = transparentBegin; it != s_queue.end(); ++it) {
+                setBlinnPhongUniforms(s_blinnPhong, it->material, it->model);
+                it->mesh->draw();
+                s_tris += it->mesh->indexCount() / 3;
+                ++s_drawCalls;
+            }
+            glDepthMask(GL_TRUE);
+            glDisable(GL_BLEND);
+        }
+
+        glDepthFunc(GL_LESS);
     }
 
     s_queue.clear();
+    s_instancedQueue.clear();
 
-    // 结算上一帧统计（V0.2-11）：last* 访问器返回的都是上一帧值（透明项数同一结算点）
+    // 结算上一帧统计（V0.2-11；V0.5-14 追加剔除/实例化三项）：last* 访问器返回的都是上一帧值
     s_lastDrawCalls = s_drawCalls;
     s_lastSubmittedCount = s_submitted;
     s_lastTriangleCount = s_tris;
     s_lastShadowItemCount = s_shadowDrawCalls;
     s_lastTransparentCount = transparentCount;
+    s_lastCulledCount = s_culled;
+    s_lastInstancedDrawCalls = instancedDrawCalls;
+    s_lastInstancedInstanceCount = instancedInstances;
 }
 
 void Renderer::drawGrid(const glm::vec3& fogColor) {
@@ -509,12 +581,15 @@ void Renderer::drawLines(const std::vector<glm::vec3>& positions, const glm::vec
     ++s_drawCalls;
 }
 
-// ===== 统计访问器（V0.2-11）：返回上一帧结算值 =====
+// ===== 统计访问器（V0.2-11；V0.5-14 追加三行）：返回上一帧结算值 =====
 
 uint32_t Renderer::lastDrawCalls() { return s_lastDrawCalls; }
 uint32_t Renderer::lastSubmittedCount() { return s_lastSubmittedCount; }
 uint32_t Renderer::lastTriangleCount() { return s_lastTriangleCount; }
 uint32_t Renderer::lastShadowItemCount() { return s_lastShadowItemCount; }
 uint32_t Renderer::lastTransparentCount() { return s_lastTransparentCount; }
+uint32_t Renderer::lastCulledCount() { return s_lastCulledCount; }
+uint32_t Renderer::lastInstancedDrawCalls() { return s_lastInstancedDrawCalls; }
+uint32_t Renderer::lastInstancedInstanceCount() { return s_lastInstancedInstanceCount; }
 
 }  // namespace NovaEngine

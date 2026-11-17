@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "actions": {
+    "Jump": [
+      {"key": "Space"},
+      {"gamepadButton": "A"}
+    ],
+    "Submit": [
+      {"key": "Enter"}
+    ],
+    "Cancel": [
+      {"key": "Escape"}
+    ],
+    "Pause": [
+      {"key": "P"}
+    ]
+  },
+  "axes": {
+    "Horizontal": [
+      {"negativeKey": "A", "positiveKey": "D"},
+      {"gamepadAxis": "LeftX"}
+    ],
+    "Vertical": [
+      {"negativeKey": "S", "positiveKey": "W"},
+      {"gamepadAxis": "LeftY", "gamepadScale": -1.0}
+    ]
+  }
+}

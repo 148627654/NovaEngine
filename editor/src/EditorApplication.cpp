@@ -8,6 +8,7 @@
 #include "panels/ConsolePanel.h"
 #include "panels/EnvironmentPanel.h"
 #include "panels/HierarchyPanel.h"
+#include "panels/InputBindingsPanel.h"
 #include "panels/InspectorPanel.h"
 #include "panels/SceneViewPanel.h"
 #include "panels/StatsPanel.h"
@@ -217,6 +218,11 @@ void EditorApplication::init() {
     buildSettingsPanel->open = false;
     m_buildSettingsPanel = buildSettingsPanel.get();
     m_panels.push_back(std::move(buildSettingsPanel));
+    // Input Bindings（V0.5-11，第 9 面板）：默认关，File → Input Bindings… 打开；dock 底部 Tab
+    auto inputBindingsPanel = std::make_unique<InputBindingsPanel>();
+    inputBindingsPanel->open = false;
+    m_inputBindingsPanel = inputBindingsPanel.get();
+    m_panels.push_back(std::move(inputBindingsPanel));
 
     // 默认加载示例场景（不存在则保持空场景）
     const std::filesystem::path demo =
@@ -229,6 +235,10 @@ void EditorApplication::init() {
     }
     // 压 Undo 基线（demo 加载路径内已压，此处兜底统一；clear 语义 = 清空两栈再压基线）
     m_context.undoRedo.clear(SceneSerializer::serialize(*m_scene, -1));
+
+    // 输入绑定（V0.5-11）：项目根/assets/input/default.novainput。失败仅 warn 不阻断
+    //（InputMap::load 内部已记 warn，内置默认绑定兜底；可经 File → Input Bindings… 配置）
+    InputMap::load(AssetDatabase::projectRoot() / "assets" / "input" / "default.novainput");
 
     Logger::info("NovaEditor 初始化完成");
 }
@@ -254,11 +264,16 @@ void EditorApplication::shutdown() {
 int EditorApplication::run() {
     using namespace NovaEngine;
     init();
+    if (m_quitAfterInit) {   // V0.5-2 CLI --quit：init 完成后立即退出（CI 冒烟）
+        shutdown();
+        return 0;
+    }
     while (!m_window->shouldClose() && !m_exitRequested) {
         m_window->pollEvents();  // GLFW 事件 → Input 原始状态 + 拖放回调队列
         Time::beginFrame();
         Stats::beginFrame();     // 帧首（V0.2-11：独立于 Time 的 steady_clock 计时）
         Input::beginFrame();
+        InputMap::beginFrame();  // V0.5-11：每帧一次，紧跟 Input::beginFrame 之后（契约 §24.5）
         update(Time::deltaTime());
         render();
         Stats::endFrame();       // 帧末（swapBuffers 前结算入 120 帧环形历史）
@@ -361,6 +376,9 @@ void EditorApplication::update(float dt) {
 
     // 未保存确认模态（V0.2-2）：Save 失败不关模态；ESC/X 视作 Cancel
     showSaveConfirmModal();
+    // 存档槽模态（V0.5-12）：Play 态 Save Game / Load Game
+    showSaveGameModal();
+    showLoadGameModal();
 
     updateWindowTitle();  // 每帧：场景名 + 脏标记 *
 
@@ -401,6 +419,7 @@ void EditorApplication::buildDockLayout(ImGuiID dockspaceId) {
     ImGui::DockBuilderDockWindow("Console", dockBottom);
     ImGui::DockBuilderDockWindow("Assets", dockBottom);
     ImGui::DockBuilderDockWindow("Stats", dockBottom);
+    ImGui::DockBuilderDockWindow("Input Bindings", dockBottom);  // V0.5-11：底部 Tab
     ImGui::DockBuilderDockWindow("Scene", dockMain);
     ImGui::DockBuilderFinish(dockspaceId);
 }
@@ -425,6 +444,21 @@ void EditorApplication::showMainMenu() {
             ImGui::Separator();
             // V0.5-1：一键打包（Play 态禁用；无当前场景路径时点击后提示先保存）
             if (ImGui::MenuItem("Build Player...", nullptr, false, editMode)) buildPlayer();
+            ImGui::Separator();
+            // 存档（V0.5-12）：仅 Play 态可用（Save/Load 作用于运行期场景）
+            // 打开时缓存一次槽列表（模态期间不每帧扫盘刷日志）
+            if (ImGui::MenuItem("Save Game", nullptr, false, !editMode)) {
+                m_saveGameSlots = SaveGame::listSlots();
+                m_showSaveGameModal = true;
+            }
+            if (ImGui::MenuItem("Load Game", nullptr, false, !editMode)) {
+                m_saveGameSlots = SaveGame::listSlots();
+                m_showLoadGameModal = true;
+            }
+            ImGui::Separator();
+            // 输入绑定面板（V0.5-11）：仅 Edit 态可用（Play 中绑定改动即时生效但配置编辑约定在 Edit）
+            if (ImGui::MenuItem("Input Bindings...", nullptr, false, editMode))
+                if (m_inputBindingsPanel) m_inputBindingsPanel->open = true;
             ImGui::Separator();
             if (ImGui::MenuItem("Exit", nullptr)) requestExit();  // 与窗口关闭同流（判脏弹模态）
             ImGui::EndMenu();
@@ -593,6 +627,8 @@ void EditorApplication::exitPlayMode() {
     m_context.paused = false;
     m_context.playSnapshot.clear();
     m_context.playToastUntil = 0.0;                     // toast 仅 Play 态显示，退出即失效
+    m_showSaveGameModal = false;                        // 存档模态仅 Play 态：退出即关闭
+    m_showLoadGameModal = false;
     m_context.sceneDirty = m_context.m_playEntryDirty;  // 还原进 Play 前脏状态（修复 7.2-4）
     applyEditorCameraFromScene();
     std::erase_if(m_context.selectedIds,
@@ -752,6 +788,106 @@ void EditorApplication::showSaveConfirmModal() {
         m_pendingAction = PendingAction::None;
         m_pendingOpenPath.clear();
     }
+}
+
+void EditorApplication::showSaveGameModal() {
+    using namespace NovaEngine;
+    if (!m_showSaveGameModal) return;
+
+    ImGui::OpenPopup("Save Game");
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing,
+                            ImVec2(0.5f, 0.5f));
+    bool stayOpen = true;
+    if (ImGui::BeginPopupModal("Save Game", &stayOpen,
+                               ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDocking)) {
+        ImGui::TextUnformatted("选择存档槽位（1-8）：");
+        ImGui::Separator();
+        // 槽元数据（打开模态时缓存一次：浅校验合法槽带 valid=true + scene/时间戳/游戏时间）
+        const std::vector<SaveSlotInfo>& slots = m_saveGameSlots;
+        for (int slot = 1; slot <= 8; ++slot) {
+            const SaveSlotInfo* info = nullptr;
+            for (const SaveSlotInfo& s : slots)
+                if (s.slot == slot) { info = &s; break; }
+            const std::string label = [&]() -> std::string {
+                if (info && info->valid)
+                    return "槽 " + std::to_string(slot) + "：" +
+                           (info->scenePath.empty() ? std::string("(未知场景)")
+                                                    : info->scenePath) +
+                           "（" + std::to_string(static_cast<int>(info->playTimeSeconds)) + " 秒）";
+                if (info && !info->valid) return "槽 " + std::to_string(slot) + "：（损坏/版本不支持）";
+                return "槽 " + std::to_string(slot) + "：（空）";
+            }();
+            ImGui::TextUnformatted(label.c_str());
+            ImGui::SameLine(ImGui::GetContentRegionAvail().x - 72.0f);
+            ImGui::PushID(slot);
+            if (ImGui::Button("Save", ImVec2(72.0f, 0.0f))) {
+                // 覆盖式保存（原子写）；playTime 编辑器侧不跟踪传 0
+                if (SaveGame::save(*m_scene, slot, m_context.currentScenePath.string())) {
+                    Logger::info("已保存到槽 {}", slot);
+                    m_showSaveGameModal = false;
+                }
+            }
+            ImGui::PopID();
+        }
+        ImGui::Separator();
+        if (ImGui::Button("关闭")) m_showSaveGameModal = false;
+        ImGui::EndPopup();
+    }
+    if (!stayOpen) m_showSaveGameModal = false;   // ESC / 右上角 X：关闭模态
+}
+
+void EditorApplication::showLoadGameModal() {
+    using namespace NovaEngine;
+    if (!m_showLoadGameModal) return;
+
+    ImGui::OpenPopup("Load Game");
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing,
+                            ImVec2(0.5f, 0.5f));
+    bool stayOpen = true;
+    if (ImGui::BeginPopupModal("Load Game", &stayOpen,
+                               ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDocking)) {
+        ImGui::TextUnformatted("选择存档槽位读取（1-8）：");
+        ImGui::Separator();
+        const std::vector<SaveSlotInfo>& slots = m_saveGameSlots;   // 打开模态时缓存一次
+        for (int slot = 1; slot <= 8; ++slot) {
+            const SaveSlotInfo* info = nullptr;
+            for (const SaveSlotInfo& s : slots)
+                if (s.slot == slot) { info = &s; break; }
+            const bool valid = info != nullptr && info->valid;
+            const std::string label = [&]() -> std::string {
+                if (valid)
+                    return "槽 " + std::to_string(slot) + "：" +
+                           (info->scenePath.empty() ? std::string("(未知场景)")
+                                                    : info->scenePath) +
+                           "（" + std::to_string(static_cast<int>(info->playTimeSeconds)) + " 秒）";
+                if (info && !info->valid) return "槽 " + std::to_string(slot) + "：（损坏/版本不支持）";
+                return "槽 " + std::to_string(slot) + "：（空）";
+            }();
+            ImGui::TextUnformatted(label.c_str());
+            ImGui::SameLine(ImGui::GetContentRegionAvail().x - 72.0f);
+            ImGui::PushID(slot);
+            if (!valid) ImGui::BeginDisabled();   // 空/损坏槽：Load 置灰
+            if (ImGui::Button("Load", ImVec2(72.0f, 0.0f))) {
+                // 读档原地重建同一 Scene（对象 ID 保持）；失败 valid=false 且场景不变
+                const SaveSlotInfo result = SaveGame::load(*m_scene, slot);
+                if (result.valid) {
+                    // 清理失效选中 ID（对象 ID 保持，正常情况下选中集全部有效）
+                    std::erase_if(m_context.selectedIds,
+                                  [this](uint64_t id) { return m_scene->findGameObject(id) == nullptr; });
+                    Logger::info("已从槽 {} 读取存档", slot);
+                    m_showLoadGameModal = false;
+                } else {
+                    Logger::warn("槽 {} 读取失败（文件缺失/损坏/版本不支持），场景保持不变", slot);
+                }
+            }
+            if (!valid) ImGui::EndDisabled();
+            ImGui::PopID();
+        }
+        ImGui::Separator();
+        if (ImGui::Button("关闭")) m_showLoadGameModal = false;
+        ImGui::EndPopup();
+    }
+    if (!stayOpen) m_showLoadGameModal = false;   // ESC / 右上角 X：关闭模态
 }
 
 void EditorApplication::processPendingAction() {

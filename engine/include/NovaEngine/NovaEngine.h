@@ -3,6 +3,7 @@
 
 #include <NovaEngine/Core/Window.h>
 #include <NovaEngine/Core/Input.h>
+#include <NovaEngine/Core/InputMap.h>
 #include <NovaEngine/Core/Time.h>
 #include <NovaEngine/Core/Logger.h>
 #include <NovaEngine/Core/UUID.h>
@@ -64,6 +65,10 @@
 
 #include <NovaEngine/UI/FontAtlas.h>
 #include <NovaEngine/UI/UIRenderer.h>
+#include <NovaEngine/UI/Slider.h>
+#include <NovaEngine/UI/ScrollView.h>
+
+#include <NovaEngine/SaveGame/SaveGame.h>
 
 #include <NovaEngine/Serialization/PrefabSerializer.h>
 #include <NovaEngine/Serialization/SceneSerializer.h>

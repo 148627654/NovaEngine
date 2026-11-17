@@ -32,6 +32,10 @@ public:
                            const glm::vec4& clearColor);    // 清屏 + 填充每帧 UBO
     static void submit(std::shared_ptr<Mesh> mesh, const Material& material,
                        const glm::mat4& modelMatrix);       // 入队，不立即绘制
+    // 入队实例化批（V0.5-14）：endFrame 中在 opaque 普通项之后、transparent 之前统一绘制；
+    // 批内矩阵按一次 glDrawElementsInstanced 提交（1 draw call）
+    static void submitInstanced(std::shared_ptr<Mesh> mesh, const Material& material,
+                                const std::vector<glm::mat4>& modelMatrices);
     static void drawGrid(const glm::vec3& fogColor = glm::vec3(0.18f, 0.22f, 0.35f));  // 内置网格着色器（约 40x40m，主次线；雾色参数化 V0.2-5）
     static void drawOutline(std::shared_ptr<Mesh> mesh, const glm::mat4& modelMatrix,
                             const glm::vec3& color);        // stencil 两遍描边，立即绘制
@@ -57,6 +61,14 @@ public:
     static uint32_t lastTransparentCount(); // 上一帧透明队列项数（V0.2-8）
     // 调试线框（V0.3-1 物理碰撞体）：positions 为顶点对序列（a,b 成对）；3D pass 后绘制
     static void drawLines(const std::vector<glm::vec3>& positions, const glm::vec3& color);
+
+    // ===== V0.5-14 视锥剔除 + 实例化统计 =====
+    static void setFrustumCullingEnabled(bool enabled);   // 默认 true；false 时遍历行为与波 4 基线一致
+    static bool frustumCullingEnabled();
+    static void markCulled();                             // 剔除计数 +1（SceneRenderer 剔除遍历上报）
+    static uint32_t lastCulledCount();                    // 上一帧剔除项数
+    static uint32_t lastInstancedDrawCalls();             // 上一帧实例化 draw call 数（批数）
+    static uint32_t lastInstancedInstanceCount();         // 上一帧实例化累计实例数
 };
 
 }  // namespace NovaEngine

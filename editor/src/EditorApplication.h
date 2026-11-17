@@ -8,6 +8,8 @@
 #include "GizmoController.h"
 #include "Panel.h"
 
+#include <NovaEngine/SaveGame/SaveGame.h>   // SaveSlotInfo：存档槽模态打开时缓存一次
+
 namespace NovaEngine {
 class Window;
 class Scene;
@@ -16,6 +18,7 @@ class Scene;
 namespace NovaEditor {
 
 class BuildSettingsPanel;
+class InputBindingsPanel;
 class StatsPanel;
 
 // 应用外壳（§2.9 + §3.1）：主循环编排 / docking 布局 / Play 状态切换 / 外部拖放分发 / 文件菜单 /
@@ -26,6 +29,9 @@ public:
     ~EditorApplication();
 
     int run();   // init → 主循环 → shutdown
+
+    // --quit（V0.5-2 CLI）：init 完成后立即退出主循环（CI 冒烟用；任务已由 main 先行执行）
+    void setQuitAfterInit(bool v) { m_quitAfterInit = v; }
 
 private:
     // 未保存确认挂起动作（V0.2-2 §4.2）
@@ -47,6 +53,8 @@ private:
     bool saveSceneAs();
     void buildPlayer();                       // File 菜单「Build Player…」（V0.5-1：目录选择 → Packager 打包）
     void showSaveConfirmModal();              // Save / Don't Save / Cancel 三按钮（Save 失败不关模态）
+    void showSaveGameModal();                 // V0.5-12：槽 1–8 简版模态（listSlots 元数据 → SaveGame::save）
+    void showLoadGameModal();                 // V0.5-12：槽 1–8 列表（valid 标记 → SaveGame::load）
     void processPendingAction();              // 模态决议后执行挂起动作
     void requestExit();                       // 窗口关闭拦截与 File→Exit 统一出口
     void undoScene();
@@ -64,6 +72,7 @@ private:
     std::vector<std::unique_ptr<Panel>> m_panels;
     StatsPanel* m_statsPanel = nullptr;       // F8 开关；View 菜单经 m_panels 循环自动包含
     BuildSettingsPanel* m_buildSettingsPanel = nullptr;  // File → Build Settings… 打开（V0.3-12 波 3）
+    InputBindingsPanel* m_inputBindingsPanel = nullptr;  // File → Input Bindings… 打开（V0.5-11）
     GizmoController m_gizmo;
     std::vector<std::filesystem::path> m_pendingDrops;  // GLFW 拖放回调写入，update 末尾消费
     bool m_firstFrame = true;
@@ -73,6 +82,14 @@ private:
     std::filesystem::path m_pendingOpenPath;  // OpenScene 挂起时暂存路径
     bool m_showSaveConfirm = false;
     bool m_exitRequested = false;
+
+    // V0.5-12 存档槽模态（Save Game / Load Game；Play 态可用，File 菜单入口）
+    bool m_showSaveGameModal = false;
+    bool m_showLoadGameModal = false;
+    // 槽列表缓存：菜单点击打开模态时缓存一次（模态期间不每帧扫盘刷日志）
+    std::vector<NovaEngine::SaveSlotInfo> m_saveGameSlots;
+    // V0.5-2 CLI --quit：init 完成后立即退出（main 设置）
+    bool m_quitAfterInit = false;
 };
 
 }  // namespace NovaEditor

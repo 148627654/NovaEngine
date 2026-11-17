@@ -1625,3 +1625,584 @@ static uint32_t renderSceneToOutput(const Scene& scene, const RenderCamera& fall
 - **接口（冻结头 Logger.h）**：`initFileLog(dir, appName)` / `shutdown()` / `installCrashHandlers()`。实现为第四个 Sink（与 ConsolePanel 同通道）：<dir>/<appName>_<时间戳>.log，逐行 fflush 落盘（崩溃不丢），行格式 `YYYY-MM-DD HH:MM:SS.mmm [级别] 内容`；文件关闭后 sink 静默 no-op，不影响其它 sink。
 - **接线**：编辑器 main——setProjectRoot 后 `initFileLog(项目根/Logs, "NovaEditor")`；播放器 main——exeDir/Logs + "NovaPlayer"。两 exe 启动即 `installCrashHandlers()`（terminate 与 SEH 过滤器把原因/异常码写入日志后交还系统默认处理）。编辑器退出走 EditorApplication::shutdown 尾部、播放器 main 尾部调用 `Logger::shutdown()`。
 - **约定**：Logs/ 已入 .gitignore；文档已同步 FEATURES §15。
+
+---
+
+# V0.5 波 1 契约（2026-11-17 冻结）
+
+> 范围：补 V0.2-9（InputMap，路线图遗留）+ V0.5-11（手柄输入）+ V0.5-12（存档系统）+ V0.5-13（UI 系统增强）+ V0.5-14（性能优化包）+ V0.5-2（命令行批处理，整合者）。
+> 分工：c1 InputMap+手柄 / c2 存档 / c3 UI 增强 / c4 性能优化包四线并行；编辑器侧全部（含 CLI）归整合者。
+> 本节号承接 V0.3 增补（§12–§23），新增 §24 一章；每节含：文件落点、公共签名（头文件级）、序列化键名、验收要点。
+
+## 24.0 总则：所有权分区、跨目录特例与冻结头总清单
+
+**文件所有权严格分区（并行安全前提）**：
+
+| 线 | 目录 | 新增/修改文件 |
+|---|---|---|
+| c1 | engine/include/NovaEngine/Core/、engine/src/Core/ | 新增 InputMap.h/.cpp；修改 Input.h/.cpp（仅追加手柄段，既有键鼠签名零变更） |
+| c2 | engine/include/NovaEngine/SaveGame/、engine/src/SaveGame/ | 新增 SaveGame.h/.cpp（新模块目录） |
+| c3 | engine/include/NovaEngine/UI/、engine/src/UI/ | 新增 Slider.h/.cpp、ScrollView.h/.cpp；修改 UIRenderer.h/.cpp |
+| c3 特例 | engine/include/NovaEngine/Scene/、engine/src/Scene/ | 仅修改 Image.h/.cpp、Text.h/.cpp（fill/wrap/hAlign 追加字段）——既有 UI 组件落在 Scene/ 的波 1 唯一跨目录特例；Scene/ 其余文件一律不动 |
+| c4 | engine/include/NovaEngine/Render/、engine/src/Render/ | 新增 Frustum.h/.cpp；修改 Mesh.h/.cpp、Renderer.h/.cpp、Material.h；新增 assets/shaders/blinn_phong_instanced.vert（复用 blinn_phong.frag） |
+| c4 特例 | engine/include/NovaEngine/Scene/、engine/src/Scene/ | 仅修改 SceneRenderer.h/.cpp（渲染遍历接入剔除/实例化）——遍历点所在文件的跨目录特例 |
+| 整合者 | editor/、player/、assets/input/ | §24.5 清单 |
+
+**合波纪律**：
+1. 上表之外的文件（Scene.cpp/SceneSerializer.cpp/Scene.h/SerializationInternals.h/samples/ 等）任何 Coder 不得触碰；新组件接入序列化零改动 SceneSerializer（ComponentRegistry 按名分发 + NE_REGISTER_COMPONENT 自注册）。
+2. `engine/include/NovaEngine/NovaEngine.h` 伞头由整合者合波时统一追加 4 行 include（Core/InputMap.h、SaveGame/SaveGame.h、UI/Slider.h、UI/ScrollView.h）——避免四线同时改同一行。
+3. 无新第三方库、Dependencies.cmake 零改动；engine/CMakeLists.txt 为 GLOB_RECURSE（新 .cpp 自动收录）；editor/CMakeLists.txt 显式清单由整合者补 InputBindingsPanel.cpp。
+4. 场景 JSON schema version 保持 4（纯增量）：新组件按 type 名分发、旧版读取 warn 跳过；Image/Text 新字段缺省兜底。旧文件往返无损。
+5. 内置组件数 16 → 18（+Slider/+ScrollView）；编辑器守卫与序列化回归清单同步更新为 18 条（整合者）。
+6. 新资产类型两个（version 均从 1 起）：assets/input/*.novainput（输入绑定）、saves/slot<N>.novasave（存档）。
+
+**冻结头变更总清单（总表；签名见各子节）**：
+1. Core/Input.h：+GamepadButton/GamepadAxis 枚举、+Input 手柄查询 9 方法、+kMaxGamepads（追加式，旧签名不变）
+2. Core/InputMap.h：新增（全静态类 InputMap + InputBinding/AxisBinding）
+3. SaveGame/SaveGame.h：新增（SaveGame + SaveSlotInfo）
+4. UI/Slider.h、UI/ScrollView.h：新增组件
+5. Scene/Image.h：+ImageFillType 枚举、+fillType/fillAmount/fillClockwise（追加式）
+6. Scene/Text.h：+TextHAlign 枚举、+wrap/wrapWidth/hAlign（追加式）
+7. UI/UIRenderer.h：+UIHitResult、+hitTest/isPointerOverUI/lastPointerConsumed（追加式）
+8. Render/Frustum.h：新增
+9. Render/Mesh.h：+drawInstanced（追加式）
+10. Render/Renderer.h：+submitInstanced/setFrustumCullingEnabled/frustumCullingEnabled/lastCulledCount/lastInstancedDrawCalls/lastInstancedInstanceCount（追加式）
+11. Render/Material.h：+operator==（实例化分组键，追加式）
+12. Scene/SceneRenderer.h：签名不变（内部遍历改造）
+13. assets/shaders/blinn_phong_instanced.vert：新增
+
+---
+
+## 24.1 InputMap + 手柄（c1，V0.2-9 补课 + V0.5-11）
+
+**文件落点**：`engine/include/NovaEngine/Core/InputMap.h`（新增）、`engine/src/Core/InputMap.cpp`（新增）、`engine/include/NovaEngine/Core/Input.h`（追加手柄段）、`engine/src/Core/Input.cpp`（手柄轮询实现）。
+
+### 24.1.1 Input.h 手柄段（追加，既有键鼠接口零变更）
+
+```cpp
+// engine/include/NovaEngine/Core/Input.h（追加部分）
+namespace NovaEngine {
+// 手柄枚举值域与 GLFW_GAMEPAD_BUTTON_* / GLFW_GAMEPAD_AXIS_* 一致
+//（Input.cpp 内 static_assert 校验，与 Key/MouseButton 同纪律）
+enum class GamepadButton : int32_t {
+    A = 0, B, X, Y, LeftBumper, RightBumper, Back, Start, Guide,
+    LeftThumb, RightThumb, DPadUp, DPadRight, DPadDown, DPadLeft, Count
+};
+enum class GamepadAxis : int32_t {
+    LeftX = 0, LeftY, RightX, RightY, LeftTrigger, RightTrigger, Count
+};
+
+class Input {
+    // ...既有键鼠成员保持不变...
+    static constexpr int kMaxGamepads = 4;
+    static bool isGamepadConnected(int j = 0);            // j = 手柄序号
+    static int connectedGamepadCount();
+    static const char* gamepadName(int j = 0);            // 未连接 nullptr
+    static bool isGamepadButtonDown(GamepadButton b, int j = 0);
+    static bool isGamepadButtonPressed(GamepadButton b, int j = 0);   // 本帧边沿
+    static bool isGamepadButtonReleased(GamepadButton b, int j = 0);
+    static float gamepadAxis(GamepadAxis a, int j = 0);   // -1..1，死区已应用
+    static void setGamepadDeadzone(float d);              // 默认 0.15，钳制 [0,1)
+};
+}
+```
+
+**Input.cpp 实现要点**：
+- beginFrame 内（放在 `glfwGetCurrentContext()` 判定之外——手柄查询不依赖窗口）轮询 `GLFW_JOYSTICK_1..GLFW_JOYSTICK_4`：`glfwJoystickIsGamepad` 为真 → `glfwGetGamepadState` 映射到边沿快照数组（g_gpButtonDown/Prev[4][15]、g_gpAxes[4][6]）；连接/断开状态变化各打一次 info/warn 日志（含设备名）。
+- 断开时全部状态清零（防按键粘连）；`glfwJoystickPresent` 但非 gamepad 映射设备（第三方手柄）→ 连接可见（name 有效）、按钮/轴恒 0、warn 一次。
+- 轴死区在 gamepadAxis 读取时应用（|v| < deadzone → 0）。
+
+### 24.1.2 InputMap.h（新增，全静态）
+
+```cpp
+// engine/include/NovaEngine/Core/InputMap.h
+namespace NovaEngine {
+
+// 动作绑定条目（键鼠/手柄源；JSON 可序列化）
+struct InputBinding {
+    Key key = Key::Unknown;                    // 键盘源（Unknown = 不参与）
+    MouseButton mouseButton = MouseButton::Left;
+    bool useMouseButton = false;               // true = 鼠标源参与
+    GamepadButton gamepadButton = GamepadButton::A;
+    bool useGamepadButton = false;             // true = 手柄源参与
+    int gamepadIndex = 0;                      // 手柄序号
+    bool ctrl = false, shift = false, alt = false;   // 修饰键（按住才生效；手柄源忽略修饰）
+};
+
+// 轴绑定条目：键盘正负键 + 可选手柄轴
+struct AxisBinding {
+    Key negativeKey = Key::Unknown;            // Unknown = 无
+    Key positiveKey = Key::Unknown;
+    GamepadAxis gamepadAxis = GamepadAxis::LeftX;
+    bool useGamepadAxis = false;
+    float gamepadScale = 1.0f;                 // 乘数（负 = 反向）
+    bool ctrl = false, shift = false, alt = false;
+};
+
+class InputMap {
+public:
+    static void beginFrame();     // 每帧一次，紧跟 Input::beginFrame 之后（editor/player 主循环接线，见 §24.5）
+
+    // 配置（.novainput JSON；失败 = Logger::warn + 保留旧表；首启无文件 = 内置默认绑定）
+    static bool load(const std::filesystem::path& path);
+    static bool save(const std::filesystem::path& path);
+    static void clear();          // 清空全部动作/轴（换项目时由编辑器调用）
+
+    // 脚本查询（Play 中 onUpdate 内调用；语义见下）
+    static bool hasAction(const std::string& name);
+    static bool getAction(const std::string& name);        // 按住（任意源）
+    static bool getActionDown(const std::string& name);    // 本帧按下边沿
+    static bool getActionUp(const std::string& name);      // 本帧松开边沿
+    static float getAxis(const std::string& name);         // -1..1；缺失 warn 一次返回 0
+
+    // 绑定管理（编辑器 InputBindingsPanel 用；改动即时生效）
+    static const std::vector<std::string>& actionNames();
+    static const std::vector<std::string>& axisNames();
+    static void addAction(const std::string& name);        // 重名 warn + 忽略
+    static void removeAction(const std::string& name);
+    static void addAxis(const std::string& name);          // 重名 warn + 忽略
+    static void removeAxis(const std::string& name);
+    static void setActionBindings(const std::string& name, const std::vector<InputBinding>& b);
+    static void setAxisBindings(const std::string& name, const std::vector<AxisBinding>& b);
+    static const std::vector<InputBinding>& actionBindings(const std::string& name);
+    static const std::vector<AxisBinding>& axisBindings(const std::string& name);
+
+    // 键名 ↔ 枚举（绑定面板下拉与 JSON 读写共用）
+    static std::string keyName(Key k);
+    static Key keyFromName(const std::string& name);       // 未知返回 Key::Unknown
+    static std::string gamepadButtonName(GamepadButton b);
+    static GamepadButton gamepadButtonFromName(const std::string& name);
+    static std::string gamepadAxisName(GamepadAxis a);
+    static GamepadAxis gamepadAxisFromName(const std::string& name);
+};
+
+}
+```
+
+**语义裁定（冻结）**：
+- 动作边沿：任一绑定（键盘源 = key 或 useMouseButton；手柄源 = useGamepadButton）满足「本帧按下 + 修饰键满足」→ getActionDown 为真；getActionUp 对称；getAction = 任一绑定按住且修饰满足。
+- 轴值：全部绑定各自求值（键盘 = (正键?1:0)-(负键?1:0)；手柄 = gamepadAxis × gamepadScale，经 Input 全局死区后），取绝对值最大者（并列取绑定列表中靠前者）；修饰键不满足的绑定按 0 计。
+- 缺失动作/轴：getAction* 返回 false、getAxis 返回 0，同名只 warn 一次（内部集合记录）。
+- 内置默认绑定（load 失败/未调用时生效，保证「无手柄回退键鼠」开箱可用）：
+  - 轴 Horizontal：A/D + LeftX；轴 Vertical：S/W + LeftY(scale=-1)
+  - 动作 Jump：Space + 手柄 A；Submit：Enter；Cancel：Escape；Pause：P
+- load 语义 = 整表替换（内部先 clear 再按 JSON 建表）。手柄热插拔无需 InputMap 感知（Input 每帧轮询）。
+
+### 24.1.3 序列化键名（.novainput，version 1）
+
+```json
+{
+  "version": 1,
+  "actions": {
+    "Jump": [
+      { "key": "Space" },
+      { "gamepadButton": "A" },
+      { "key": "F", "ctrl": true }
+    ]
+  },
+  "axes": {
+    "Horizontal": [
+      { "negativeKey": "A", "positiveKey": "D" },
+      { "gamepadAxis": "LeftX", "gamepadScale": 1.0 }
+    ],
+    "Vertical": [
+      { "negativeKey": "S", "positiveKey": "W" },
+      { "gamepadAxis": "LeftY", "gamepadScale": -1.0 }
+    ]
+  }
+}
+```
+
+- key/gamepadButton 键名 = 枚举成员名字符串（"A".."Z"、"Num0".."Num9"、"F1".."F12"、"Space"、"Escape"、"Enter"、"Tab"、"Backspace"、"Insert"、"Delete"、"Right"/"Left"/"Down"/"Up"、"PageUp"/"PageDown"/"Home"/"End"、"LeftShift"/"LeftControl"/"LeftAlt"/"RightShift"/"RightControl"/"RightAlt"）；mouseButton 键名 = "Left"/"Right"/"Middle"（出现即启用鼠标源）。
+- 缺省字段：ctrl/shift/alt=false、gamepadIndex=0、gamepadScale=1.0、negativeKey/positiveKey 缺省=无。
+- 每条 binding 至少含 key、mouseButton 或 gamepadButton 之一（多源并存 = 任一按下即触发）；未知键名 → warn + 跳过该条；未知动作/轴名 → warn + 忽略该条目；非法 JSON → load 返回 false。
+- 读取经 AssetStream（pak 内配置可读）；save 写盘（编辑器侧用）。
+
+### 24.1.4 验收要点（c1）
+
+1. engine 全量编译零错误零警告；枚举 ↔ GLFW static_assert 通过。
+2. 无手柄：脚本 `getAxis("Horizontal")` 按 A/D 返回 ±1、`getActionDown("Jump")` 按 Space 边沿触发。
+3. 热插拔：插 Xbox 手柄 → info 日志（含名字）；左摇杆驱动 Horizontal/Vertical（死区生效、scale 方向正确）；A 键触发 Jump；拔出 → warn 日志、状态清零无粘连、键鼠回退即时生效；反复插拔不崩溃。
+4. 绑定窗口（整合者）改 WASD→方向键即时生效并持久化（.novainput 往返无损）。
+5. 缺失动作 getAxis/getActionDown 各 warn 一次、不崩溃；手写畸形 .novainput 加载失败保留旧绑定。
+6. 第三方无映射手柄：连接可见、输入全 0、warn 一次（不崩溃）。
+7. samples/ 本波不动（V0.2-9「示例脚本迁移」验收项顺延至后续波，风险清单注明）。
+
+---
+
+## 24.2 SaveGame 存档系统（c2，V0.5-12）
+
+**文件落点**：`engine/include/NovaEngine/SaveGame/SaveGame.h`（新增模块目录）、`engine/src/SaveGame/SaveGame.cpp`。
+
+```cpp
+// engine/include/NovaEngine/SaveGame/SaveGame.h
+namespace NovaEngine {
+
+// 槽元数据（编辑器槽列表/读档返回值）
+struct SaveSlotInfo {
+    int slot = 0;
+    bool valid = false;                 // 文件存在且 version 校验通过
+    std::string scenePath;              // 存档时的场景资产相对路径（可为空）
+    double timestampSeconds = 0.0;      // 存档时刻（system_clock）
+    float playTimeSeconds = 0.0f;       // 调用方提供的游戏内计时
+};
+
+class SaveGame {
+public:
+    static constexpr int kCurrentSaveVersion = 1;
+    // 目录：默认 <AssetDatabase::projectRoot()>/saves（编辑器=项目根/saves、Player=exe 目录/saves）
+    static void setSaveDirectory(const std::filesystem::path& dir);   // 可覆盖（如 %APPDATA%）
+    static std::filesystem::path saveDirectory();
+    static std::filesystem::path slotPath(int slot);   // <dir>/slot<slot>.novasave
+
+    // 存档（Play 中调用）：复用 SceneSerializer::serialize 产出场景 JSON（与 Play 快照同一代码路径）。
+    // 原子写：先写 slot<N>.novasave.tmp 再 rename 覆盖；失败 Logger::error 返回 false
+    static bool save(const Scene& scene, int slot, const std::string& scenePath,
+                     float playTimeSeconds = 0.0f);
+    // 读档（Play 中调用）：SceneSerializer::deserialize 原地重建同一 Scene 对象
+    //（对象 ID 保持 → 外部 Scene*/选中集/按 ID 引用全部有效；脚本持有的裸 GameObject*
+    // 需重取——与 LoadScene 同约束）。失败（文件缺失/损坏/未来版本）返回 valid=false，
+    // 场景保持不变，不崩溃
+    static SaveSlotInfo load(Scene& target, int slot);
+    // 槽列表（编辑器面板用）：目录扫描 + 浅校验（JSON 合法 + version ≤ 当前 + snapshot 为场景对象（含 objects 数组））
+    static std::vector<SaveSlotInfo> listSlots();     // 按 slot 升序
+    static bool deleteSlot(int slot);                 // 失败 Logger::warn
+    static bool slotExists(int slot);
+};
+
+}
+```
+
+**实现要点**：
+- 依赖方向：SaveGame → Serialization + Scene + Assets（projectRoot）+ Core；不引入任何新头依赖。
+- .novasave 结构见键名节；snapshot 节点直接内嵌 `SceneSerializer::serialize(scene)` 的 JSON（dump 成对象保存，load 时 dump 回字符串交给 deserialize）。
+- 目录不存在时 save 自动 create_directories；写盘走 std::ofstream path 重载（中文路径安全）。
+- version 校验：文件 version > kCurrentSaveVersion → Logger::warn「存档来自更新版本」+ valid=false（未来存档拒绝）；version 缺失按 0 处理（尽力加载 + warn）。
+- 浅校验（2026-11-17 Review 修复）：snapshot 必须含 "objects" 数组键（真存档必为 SceneSerializer 产物），缺键按损坏处理——防止 {"snapshot":{}} 等非场景 JSON 经 deserialize 把场景清空为合法空场景。
+
+### 24.2.1 序列化键名（.novasave，version 1）
+
+```json
+{
+  "version": 1,
+  "scene": "assets/scenes/demo.nova.json",
+  "timestamp": 1732000000.0,
+  "playTimeSeconds": 123.4,
+  "snapshot": { ...SceneSerializer 场景 JSON（version 4，键名同 §5/§16）... }
+}
+```
+
+### 24.2.2 验收要点（c2）
+
+1. Play 中 Save(slot 1) 生成 saves/slot1.novasave；改 Transform/脚本字段/active 后 Load(slot 1) 恢复原状态；对象 ID 不变（选中集/按 ID 引用有效）。
+2. save→load→save 二次往返字段无损；多槽（1/2/3）互不干扰。
+3. 手改半截 JSON：listSlots 标 valid=false、load 不崩溃且场景保持不变、error 日志可查。
+4. version=2 伪造文件：load 拒绝 + warn（未来版本保护）。
+5. 退出 Play 快照恢复不受存档影响（存档只读场景、不落 Play 快照）。
+6. 只读目录 save 失败：返回 false + error 日志，不崩溃。
+
+---
+
+## 24.3 UI 控件集增强（c3，V0.5-13）
+
+**文件落点**：
+- 新增 `engine/include/NovaEngine/UI/Slider.h` + `engine/src/UI/Slider.cpp`
+- 新增 `engine/include/NovaEngine/UI/ScrollView.h` + `engine/src/UI/ScrollView.cpp`
+- 修改 `engine/include/NovaEngine/Scene/Image.h` + `engine/src/Scene/Image.cpp`（fill 三字段，追加式）
+- 修改 `engine/include/NovaEngine/Scene/Text.h` + `engine/src/Scene/Text.cpp`（wrap/wrapWidth/hAlign，追加式）
+- 修改 `engine/include/NovaEngine/UI/UIRenderer.h` + `engine/src/UI/UIRenderer.cpp`（命中/冒泡/裁剪/fill/wrap 渲染）
+- 两个新组件 .cpp 末尾 `NE_REGISTER_COMPONENT(Slider)` / `NE_REGISTER_COMPONENT(ScrollView)`（内置组件 16→18，Inspector Add Component 经 ComponentRegistry::builtinNames 自动出现——InspectorPanel 已消费该列表，无需改该路径）
+
+### 24.3.1 Image fill 类型（Scene/Image.h 追加）
+
+```cpp
+enum class ImageFillType { None, Horizontal, Vertical, Radial90, Radial180, Radial360 };
+
+// Image 类追加三个字段（旧场景缺省 = None/1.0/true，行为零变化）
+ImageFillType fillType = ImageFillType::None;
+float fillAmount = 1.0f;        // 0..1，越界钳制；None 时忽略
+bool fillClockwise = true;      // Radial 方向
+```
+
+渲染语义（UIRenderer::emitImage 扩展）：fill = UV 裁切（保持贴图比例，不等比拉伸）——Horizontal 裁右（u∈[0,fill]）、Vertical 裁上（v∈[0,fill]，自底填充）、Radial 自顶部顺时针扇形（Radial90 顶点在右上角，180/360 按象限网格近似）；纯色白块同样裁 UV。9-slice 与 fill 共存：先 fill 后 slice（fillAmount 极小导致尺寸 < 边距和时退化单 quad——沿用现有退化规则）。
+
+### 24.3.2 Text 换行与水平对齐（Scene/Text.h 追加）
+
+```cpp
+enum class TextHAlign { Left, Center, Right };
+
+// Text 类追加三个字段（缺省 = false/0/Left，旧行为逐像素一致）
+bool wrap = false;              // 按 wrapWidth 折行（按码点断行，CJK 安全；保留 '\n'）
+float wrapWidth = 0.0f;         // 逻辑像素；<=0 时取当前 Canvas 屏幕宽
+TextHAlign hAlign = TextHAlign::Left;
+```
+
+排版语义：wrap=true 时逐行测量（码点 advance 累加超宽即断）；hAlign 对每行相对 wrapWidth（wrap=true）或相对文本块最宽行（wrap=false）做左/中/右对齐（anchor 仍为排版原点）。按码点断行不存在超宽单字。
+
+### 24.3.3 Slider 组件（UI/Slider.h 新增）
+
+```cpp
+// engine/include/NovaEngine/UI/Slider.h
+namespace NovaEngine {
+// 横向滑条（V0.5-13 v1：横向；纵向列后续）。轨道 = size 矩形，手柄沿 X 滑动
+class Slider : public Component {
+public:
+    explicit Slider(GameObject* owner);
+
+    // 视觉
+    std::string backgroundSpritePath;   // 空 = 纯色背景
+    std::string fillSpritePath;         // 空 = 纯色填充
+    std::string handleSpritePath;       // 空 = 纯色手柄
+    glm::vec4 backgroundColor{0.15f, 0.15f, 0.15f, 1.0f};
+    glm::vec4 fillColor{0.9f, 0.9f, 0.9f, 1.0f};
+    glm::vec4 handleColor{1.0f};
+    float fillThickness = 6.0f;         // 轨道/填充条厚度（逻辑像素，垂直居中）
+    glm::vec2 handleSize{16.0f, 24.0f}; // 手柄尺寸
+    glm::vec2 anchor{0.5f}, offset{0.0f}, size{200.0f, 30.0f};   // 布局（与 Button 同公式）
+
+    // 语义
+    float minValue = 0.0f, maxValue = 1.0f;
+    float value = 0.5f;                 // 序列化；钳制 [min,max]
+    bool wholeNumbers = false;          // true = 值取整
+    std::function<void(float)> onValueChanged;   // 脚本回调：拖拽中值变化即触发（连续）
+
+    bool dragging() const;              // 运行期查询
+
+    void onSerialize(nlohmann::json& out) const override;
+    void onDeserialize(const nlohmann::json& in) override;
+
+    // ---- 运行期输入状态（非序列化，同 Button::m_* 裁定）----
+    bool m_dragging = false;            // processInput 维护
+};
+}
+```
+
+行为：processInput 冒泡链命中 Slider 时，左键按下即开始拖拽（按下瞬间手柄跳到指针 X）；拖拽中 value 随指针位置线性映射并触发 onValueChanged（连续）；松开结束。value 写回由 UIRenderer 直接改组件字段（Inspector live edit 语义一致）。
+
+### 24.3.4 ScrollView 组件（UI/ScrollView.h 新增）
+
+```cpp
+// engine/include/NovaEngine/UI/ScrollView.h
+namespace NovaEngine {
+// 滚动容器（V0.5-13 v1）：内容 = 直接子物体（GameObject 子树）的 UI 组件；
+// 可视区 = anchor/offset/size 矩形；渲染期 scissor 裁剪；滚轮滚动
+class ScrollView : public Component {
+public:
+    explicit ScrollView(GameObject* owner);
+
+    glm::vec2 anchor{0.5f}, offset{0.0f}, size{300.0f, 200.0f};   // 可视区
+    bool scrollHorizontal = false;
+    bool scrollVertical = true;
+    float scrollSensitivity = 20.0f;     // 滚轮每格像素（Input::scrollDelta 消费）
+    glm::vec2 scrollOffset{0.0f};        // 像素（正 = 内容向右/下移）；序列化（位置记忆）
+
+    glm::vec2 contentSize() const;       // 内容包围盒（渲染期重算：子物体 UI rect 并集；脚本查询）
+
+    void onSerialize(nlohmann::json& out) const override;
+    void onDeserialize(const nlohmann::json& in) override;
+};
+}
+```
+
+行为：UIRenderer 渲染该 Canvas 时，ScrollView 子树的 quad 在 scissor（可视区矩形，嵌套 ScrollView 取交集）内裁剪绘制；滚动指示条（右侧/底部细条，显示内容比例与位置，纯视觉 v1 不可拖）。processInput：滚轮（Input::scrollDelta × scrollSensitivity）滚动指针下冒泡链最近的 ScrollView；scrollOffset 钳制 [0, max(0, contentSize - viewSize)]（按轴）。子物体仍按普通 UI 布局（v1 不做内容自动重排——内容布局由创作者摆放，滚动仅平移视口）。
+
+### 24.3.5 命中、冒泡与「Play 中 UI 优先于场景拾取」（UI/UIRenderer.h 追加）
+
+```cpp
+// engine/include/NovaEngine/UI/UIRenderer.h（追加部分）
+namespace NovaEngine {
+// 指针命中结果（最上层 UI 元素；Image/Text 也参与命中 = 不透明覆盖语义）
+struct UIHitResult {
+    GameObject* gameObject = nullptr;   // 命中组件所在 GO
+    Component* component = nullptr;     // 命中的 UI 组件（Image/Text/Button/Slider/ScrollView）
+};
+
+class UIRenderer {
+    // ...既有成员不变...
+    // 最上层命中：全部 UI 元素 rect（与 render 同一布局公式）中 DFS 画家序最后命中者
+    static bool hitTest(const Scene& scene, const glm::vec2& mouse, UIHitResult& out);
+    // 任一 UI 元素覆盖该点（「UI 优先于场景拾取」的引擎侧判定入口）
+    static bool isPointerOverUI(const Scene& scene, const glm::vec2& mouse);
+    // 最近一次 processInput 是否有交互组件消费（onClick/拖拽/滚动）——调用方据此抑制
+    // 场景拾取/其它指针行为（编辑器 SceneView Play 分支接线见 §24.5）
+    static bool lastPointerConsumed();
+};
+}
+```
+
+**processInput 冒泡裁定（冻结，替换现有「遍历全部 Button 各自命中」逻辑）**：
+1. 命中 winner = hitTest（最上层 UI 元素；指针未落在任何 UI 上 → 全部交互状态复位，lastPointerConsumed=false）。
+2. 从 winner GO 起沿 GameObject 父链向上，找最近的交互组件（Button/Slider/ScrollView）：找到即交付本帧输入（Button hover/press/onClick 边沿；Slider 拖拽；ScrollView 滚轮），交付结果决定 consumed（Button 按下/点击边沿、Slider 拖拽中、ScrollView 本帧滚轮生效均算消费）。
+3. 首个交互组件未消费（如悬停无操作）→ 继续向父链更上层找下一个交互组件（事件冒泡）；已消费 → 停。
+4. 仅冒泡链上的交互组件更新 m_hovered/m_pressed/m_dragging 等状态，链外组件一律复位（旧实现多按钮重叠各自置位的缺陷一并修正）。
+5. 时序契约不变（§14.3）：Player 在 scene.update 前调用、编辑器 SceneView 渲染期调用；Edit 态不调 processInput → UI 预览不挡场景拾取（只在 Play 中「UI 优先」）。
+6. ScrollView 滚轮在 processInput 内读 Input::scrollDelta()（UI → Core 依赖合法），既有签名不变。
+
+### 24.3.6 序列化键名（场景 JSON，version 4 不变）
+
+- Slider：`"type":"Slider", "value":0.5, "minValue":0.0, "maxValue":1.0, "wholeNumbers":false, "backgroundColor":[r,g,b,a], "fillColor":[...], "handleColor":[...], "fillThickness":6.0, "handleSize":[16.0,24.0], "anchor":[0.5,0.5], "offset":[0.0,0.0], "size":[200.0,30.0], "backgroundSpritePath":"", "fillSpritePath":"", "handleSpritePath":""`
+- ScrollView：`"type":"ScrollView", "anchor":[...], "offset":[...], "size":[...], "scrollHorizontal":false, "scrollVertical":true, "scrollSensitivity":20.0, "scrollOffset":[0.0,0.0]`
+- Image 追加：`"fillType":"None"|"Horizontal"|"Vertical"|"Radial90"|"Radial180"|"Radial360", "fillAmount":1.0, "fillClockwise":true`（缺省 = 旧行为；未知字符串 warn 回退 None）
+- Text 追加：`"wrap":false, "wrapWidth":0.0, "hAlign":"Left"|"Center"|"Right"`（缺省 = 旧行为；未知字符串 warn 回退 Left）
+
+### 24.3.7 验收要点（c3）
+
+1. 设置菜单（Slider+Button+ScrollView 同屏）在 16:9 面板/1920x1080/1280x720 三档下布局正确（目测）。
+2. Play 中点击 UI 不穿透触发场景选择（isPointerOverUI/lastPointerConsumed 接线后：覆盖按钮/图片区域点击，场景侧无任何拾取/交互发生）；点击 UI 外区域行为与波 4 一致。
+3. fill 血条：脚本改 fillAmount 当帧更新；Horizontal/Vertical/Radial 三型目测正确。
+4. Text：中文折行正确、Left/Center/Right 对齐正确、\n 保留；wrap=false 旧文本渲染逐像素不变（回归）。
+5. Slider：拖拽连续触发 onValueChanged、松手停；wholeNumbers 取整；序列化往返无损；Edit 预览与 Play 渲染一致。
+6. ScrollView：滚轮滚动、内容 scissor 裁剪（超出可视区不可见）、scrollOffset 序列化往返、嵌套 ScrollView 不越界。
+7. 冒泡：子 Image 覆盖父 Button → 父 Button 仍收到点击（透明冒泡）；子 Button 覆盖父 Button → 仅子触发（消费阻断）。
+8. 内置组件数 18：Inspector Add Component 下拉出现 Slider/ScrollView；旧场景（含 Image/Text 旧字段）打开零警告变化。
+
+---
+
+## 24.4 性能优化包（c4，V0.5-14）
+
+**文件落点**：
+- 新增 `engine/include/NovaEngine/Render/Frustum.h` + `engine/src/Render/Frustum.cpp`（纯数学，仅 GLM）
+- 修改 `engine/include/NovaEngine/Render/Mesh.h` + `engine/src/Render/Mesh.cpp`（drawInstanced）
+- 修改 `engine/include/NovaEngine/Render/Renderer.h` + `engine/src/Render/Renderer.cpp`（submitInstanced/剔除开关/统计）
+- 修改 `engine/include/NovaEngine/Render/Material.h`（operator==）
+- 修改 `engine/include/NovaEngine/Scene/SceneRenderer.h` + `engine/src/Scene/SceneRenderer.cpp`（遍历接入剔除 + 实例化分组）
+- 新增 `assets/shaders/blinn_phong_instanced.vert`（复制 blinn_phong.vert + 实例矩阵属性；复用 blinn_phong.frag；Packager 收 assets/shaders 全目录自动进 pak）
+
+### 24.4.1 Frustum（新增）
+
+```cpp
+// engine/include/NovaEngine/Render/Frustum.h
+namespace NovaEngine {
+// 视锥剔除（V0.5-14）：Gribb-Hartmann 从 viewProj 提取 6 平面，法线朝锥体外
+class Frustum {
+public:
+    static Frustum fromViewProj(const glm::mat4& viewProj);
+    bool intersects(const AABB& worldAabb) const;   // true = 部分或完全在内（可渲染）
+private:
+    glm::vec4 m_planes[6];                          // 内部归一化
+};
+}
+```
+
+### 24.4.2 剔除接入（SceneRenderer 内部遍历）
+
+- renderSceneInternal 的 forEachObject 遍历中：对每个带 MeshRenderer 的 GO 先算世界 AABB（局部 AABB 的 8 角点经 worldMatrix 变换取包围盒——含非均匀缩放精确性），`frustum.intersects` 为 false → 跳过 submit 与阴影收集（计数 +1）。
+- frustum 由 renderCam（view × projection）构造；网格地面/天空/描边（drawOutline 由编辑器单独提交）不受剔除影响；阴影 pass 项随可见集自然剔除。
+- 开关：`Renderer::setFrustumCullingEnabled(bool)`（默认 true）；关闭后遍历行为与波 4 基线逐帧一致（回归 A/B）。
+- 正交相机（V0.5-10 未来）：Gribb-Hartmann 对正交投影同样成立（w 行平面退化为平行面），无需特判。
+
+### 24.4.3 静态网格实例化
+
+**Material.h 追加**：`bool operator==(const Material&) const = default;`（逐字段比较，含贴图指针/资产指针/blendMode——分组键用）。
+
+**Mesh.h 追加**：
+```cpp
+// 实例化绘制（V0.5-14）：懒建 per-Mesh instanced VAO（复用 VBO/EBO + 实例矩阵 VBO，
+// attrib location 4..7 mat4、divisor 1）；每次调用上传矩阵后 glDrawElementsInstanced。
+// models 为空 no-op；GL 细节全部封装于 Mesh.cpp（公共头无泄漏）
+void drawInstanced(const std::vector<glm::mat4>& models) const;
+```
+
+**Renderer.h 追加**：
+```cpp
+static void submitInstanced(std::shared_ptr<Mesh> mesh, const Material& material,
+                            const std::vector<glm::mat4>& modelMatrices);  // 入队实例化批
+static void setFrustumCullingEnabled(bool enabled);   // 默认 true
+static bool frustumCullingEnabled();
+static uint32_t lastCulledCount();                // 上一帧剔除项数
+static uint32_t lastInstancedDrawCalls();         // 上一帧实例化 draw call 数
+static uint32_t lastInstancedInstanceCount();     // 上一帧实例化累计实例数
+```
+
+**SceneRenderer 遍历分组（冻结算法）**：
+1. 遍历收集 (mesh, material, world) 三元组（剔除后）；
+2. 按 (mesh 指针, material) 分组（material 用 operator==）；
+3. 每组 ≥2 个实例 → `Renderer::submitInstanced`（批上限 512 个矩阵，超出拆批）；恰 1 个 → 普通 `Renderer::submit`；
+4. 仅 opaque 段实例化：blendMode==AlphaBlend 的项一律走普通 submit（透明段保持视距排序语义，禁实例化）；
+5. 阴影 pass 不实例化（保持现状，单独计数）。
+
+**Renderer endFrame 顺序（冻结）**：opaque 普通项（现有排序）→ 实例化批 → transparent（现有排序）。实例化绘制经 s_blinnPhongInstanced shader（blinn_phong_instanced.vert + 复用 blinn_phong.frag，uniform 绑定与 setBlinnPhongUniforms 完全一致 + 实例矩阵属性）；深度 LEQUAL 同普通 opaque；统计 s_tris += indexCount/3 × 实例数、s_drawCalls += 1/批。
+
+**统计接线**：beginFrame 清零，endFrame 结算到 s_lastCulledCount/s_lastInstanced*；StatsPanel（整合者）新增三行显示；Render 段开销约束 < 0.5ms（Release，统计层验证）。
+
+### 24.4.4 验收要点（c4）
+
+1. 2000 个同 mesh+材质立方体场景（统计层）：剔除+实例化后 draw calls < 20、提交数 ≈ 可见数；Release 60 FPS（对照 ROADMAP V0.5-14 的 30→60FPS 目标）。
+2. 剔除无漏绘：相机缓慢旋转一周目测边缘无物体闪出/闪没；背对场景时 lastSubmittedCount 显著下降、lastCulledCount 与之对应。
+3. 开关回归：setFrustumCullingEnabled(false) 后行为与波 4 基线一致（A/B）。
+4. 透明物体：交叉半透明平面排序无变化（实例化禁用验证：全透明场景 lastInstancedDrawCalls==0）。
+5. 阴影：剔除后阴影轮廓与可见集一致（无幽灵阴影）。
+6. 非均匀缩放/旋转物体剔除无漏绘（8 角点 AABB 精确性）；缩放出视锥的物体被剔除。
+7. 描边/网格/天空不受影响；Demo 场景帧统计无回退。
+8. 统计：StatsPanel 显示 Culled/Instanced draws/Instances 三行且数值与直觉一致。
+
+---
+
+## 24.5 命令行批处理 + 编辑器接线清单（整合者，V0.5-2 + 波 1 全部编辑器侧）
+
+### 24.5.1 CLI 契约（editor/src/main.cpp）
+
+```
+NovaEditor.exe                                   # 无参数 = 原 GUI 模式，行为零变化
+NovaEditor.exe --headless [--import] [--build --scene <path> --out <dir>] [--quit]
+```
+
+| 参数 | 语义 |
+|---|---|
+| `--headless` | 无窗口批处理模式：Window::create 后立即 glfwHideWindow（保留 GL 上下文——Renderer::init 依赖；不初始化 ImGui/面板/EditorApplication），任务完成即退出（等价隐含 --quit） |
+| `--import` | 全量导入：扫描 assets/ 下全部模型（.obj/.fbx/.gltf/.glb/.dae）与贴图（.png/.jpg/.jpeg/.bmp/.tga/.hdr），逐资产 AssetDatabase::importModel / getTexture 生成二进制缓存；日志汇总「成功 N / 失败 M」；M>0 → 退出码 1 |
+| `--build` | 打包：复用 Packager::buildPlayer(scene, outDir)（无 UI 依赖，直接调用）；`--scene` 缺省 "assets/scenes/demo.nova.json"；`--out` 缺省 `<项目根>/dist` |
+| `--quit` | 交互模式启动后立即退出（CI 冒烟用） |
+
+- 退出码：0 成功；1 任务失败（导入有失败/打包失败）；2 参数错误（未知参数/缺值）——stderr + Logs 文件双通道有错误日志。
+- `--import/--build` 不带 `--headless` 时：先执行任务再进入 GUI（与 Unity -batchmode 行为对齐；v1 允许）。
+- 可复现性：Packager 已保证 pak 内文件 map 排序确定性（同输入两次 build 产物逐字节一致——验收项）。
+- 风险备案：headless 依赖隐藏窗口 GL 上下文（无 GPU 的 CI 环境可能创建失败 → 退出码 2 + error 日志）；纯 CPU 导入 API（engine/Assets 新接口）如需支持列后续波，届时 Architect 再裁定。
+
+### 24.5.2 编辑器接线清单（整合者逐项核对）
+
+1. **SceneViewPanel.cpp（Play UI 拦截）**：Play 分支保留 processInput 调用（hovered 时）；新增——`UIRenderer::lastPointerConsumed()` 为真时跳过其余任何指针处理并加注释守护「Play 中 UI 优先于场景拾取」（当前 Play 无场景拾取，此接线为 V0.5-10 2D 与未来拾取预留 + 验收守护）；Edit 分支不调 hitTest（UI 预览不挡拾取）。
+2. **EditorApplication.cpp 菜单**：
+   - File → 「Save Game」（Play 态可用）：弹槽选择（1–8 简版模态，显示 listSlots 元数据）→ `SaveGame::save(*m_scene, slot, m_context.currentScenePath)`。
+   - File → 「Load Game」（Play 态可用）：列 listSlots（valid 标记）→ `SaveGame::load(*m_scene, slot)`。
+   - File → 「Input Bindings...」（Edit 态可用）：打开 InputBindingsPanel。
+   - run()：`Input::beginFrame()` 后追加 `InputMap::beginFrame()`。
+   - init()：`InputMap::load(项目根/assets/input/default.novainput)`（失败 warn 不阻断——内置默认绑定兜底）。
+3. **main.cpp**：§24.5.1 CLI 解析与 headless 分支（headless 不触碰 EditorApplication；GUI 模式零变化）。
+4. **Packager.cpp**：资源收集加一条——`assets/input/` 全目录 *.novainput 进 pak（Player 内 InputMap::load 读 pak 经 AssetStream）。
+5. **editor/CMakeLists.txt**：显式源清单补 `src/panels/InputBindingsPanel.cpp`（若 CLI 拆独立文件则一并补）。
+6. **InspectorPanel.cpp 新控件编辑**（复用 UIWidgets.h 模式，改动走脏标记漏斗 + Undo）：
+   - Image：+Fill Type 下拉 / Fill Amount 滑条(0–1) / Fill Clockwise 勾选；
+   - Text：+Wrap 勾选 / Wrap Width 数值 / HAlign 下拉；
+   - Slider：value/min/max/wholeNumbers/三色/thickness/handleSize/size/anchor/offset/三 sprite 路径；
+   - ScrollView：size/anchor/offset/scroll 双开关/sensitivity。
+7. **InputBindingsPanel.cpp（简版，View 菜单 + dock 底部 Tab）**：
+   - 顶部：配置路径（assets/input/default.novainput）+ Reload/Save 按钮；
+   - 动作列表（增删）+ 选中动作的绑定列表（每行：源类型下拉 Key/MouseButton/GamepadButton + 键位下拉（keyName 全表）+ 修饰键勾选 + 删除；「Listen」录制模式 v1 省略）；
+   - 轴列表（增删）+ 选中轴的绑定列表（negativeKey/positiveKey/gamepadAxis/gamepadScale）；
+   - 修改即时调 InputMap::setActionBindings/setAxisBindings；Save 调 InputMap::save（目录不存在自动创建）。
+8. **player/src/main.cpp**：`Input::beginFrame()` 后追加 `InputMap::beginFrame()`；场景加载后 `InputMap::load("assets/input/default.novainput")`（pak 内读取，失败内置默认）。
+9. **NovaEngine.h 伞头**：追加 `#include <NovaEngine/Core/InputMap.h>`、`<NovaEngine/SaveGame/SaveGame.h>`、`<NovaEngine/UI/Slider.h>`、`<NovaEngine/UI/ScrollView.h>` 四行（合波时统一做，防四线冲突）。
+10. **StatsPanel.cpp**：新增 Culled / Instanced draws / Instances 三行（Renderer::lastCulledCount/lastInstancedDrawCalls/lastInstancedInstanceCount）。
+11. **守卫与回归**：内置组件数 16→18，编辑器守卫与序列化回归清单同步（Slider/ScrollView 各一条）。
+
+### 24.5.3 波 1 整体验收（合波后）
+
+- 四线合并构建：Debug 全量零错误零第一方警告；两 exe 冒烟（编辑器守卫 18 条 + Player 场景加载）。
+- CLI：`NovaEditor.exe --headless --import --build --quit` 全链路退出码 0；删坏一个资产后重跑退出码 1；两次 build 产物可复现。
+- 全量回归 V0.2/V0.3 验收清单（尤其：Play 快照恢复、序列化往返、UI 批渲染、后处理双路径）。
+- Release 构建通过；统计层数字随波记录（draw calls/帧时间回归证据）。
+
+---
+
+## 24.6 波 1 风险（给 DevOps/Reviewer）
+
+1. 跨目录特例（§24.0 表）：c3 改 Scene/Image.h+Text.h、c4 改 Scene/SceneRenderer.cpp——合并时按上表 git diff 核对，越界即回退。
+2. InputMap::beginFrame 接线遗漏 → getActionDown 恒 false：验收清单首项即查（editor run() + player main 两处）。
+3. 实例化 VAO 懒建 + 每帧矩阵上传：验证 2000 实例下 GL 状态无泄漏（绑定恢复）；透明段禁实例化的判定点 = blendMode。
+4. blinn_phong_instanced.vert 与 blinn_phong.vert 需同 uniform 约定（setBlinnPhongUniforms 共用）——shader 改一处另一处同步（评审对照）。
+5. headless 隐藏窗口：CI 无 GPU 环境风险（§24.5.1 备案）；--import 依赖现有 GPU 上传路径（importModel 创建 GPU Mesh）。
+6. 存档目录 Player 下 = exe 目录/saves：只读介质写失败只 warn/error 不崩溃（契约已含）；后续 setSaveDirectory 到 %APPDATA%。
+7. samples/ 本波不动：V0.2-9 的「示例脚本迁移到 InputMap」验收项顺延；波 1 验收以引擎 API + 绑定面板为准。
+8. schema version 保持 4 的取舍：新组件/新字段对旧读取器 = warn 跳过/缺省兜底；若波内出现破坏性变更必须即时回报 Architect 重议 version。
+9. UIRenderer 命中公式必须与 render 共用同一布局 helper（hitTest 与绘制 rect 不一致 = 点击漂移）——评审重点。

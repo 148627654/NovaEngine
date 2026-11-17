@@ -299,6 +299,12 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
     const bool windowHovered = ImGui::IsWindowHovered();
     const glm::vec2 vpPosF(vpPos.x, vpPos.y), vpSizeF(vpSize.x, vpSize.y);
 
+    // Play 中 UI 优先于场景拾取（§24.5 接线守护）：UIRenderer::lastPointerConsumed()
+    // 为真（本帧 UI 交互组件消费了指针——onClick/拖拽/滚动）时，跳过其余任何指针处理。
+    // 当前 Play 无场景拾取，此接线为 V0.5-10 2D 与未来拾取预留 + 验收守护；
+    // Edit 分支不调 hitTest（UI 预览不挡拾取）。processInput 已在上方 Play 分支调用。
+    const bool uiConsumedPointer = playMode && UIRenderer::lastPointerConsumed();
+
     // gizmo（ImGui::Image 之后绘制进前景 drawlist，覆盖在视口之上）
     if (editMode && m_gizmo) {
         m_gizmo->setCamera(renderCam.view, renderCam.projection);
@@ -319,8 +325,9 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
 
     // 接受资产拖放（AssetBrowser → SceneView；落点 = 射线与 y=0 平面交点）
     // 注意：目标注册不依赖 hovered（与 HierarchyPanel 一致）——拖拽过程中 IsItemHovered
-    // 可能因 gizmo 手柄/重叠窗口误判为 false，导致目标未注册、payload 被 ImGui 丢弃
-    if (ImGui::BeginDragDropTarget()) {
+    // 可能因 gizmo 手柄/重叠窗口误判为 false，导致目标未注册、payload 被 ImGui 丢弃。
+    // Play 中 UI 消费指针的帧跳过（uiConsumedPointer，见上方守护注释）。
+    if (!uiConsumedPointer && ImGui::BeginDragDropTarget()) {
         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(DragDrop::kAssetPayload)) {
             const std::filesystem::path srcPath(std::string(static_cast<const char*>(payload->Data)));
             Logger::info("视口收到拖放资产: {}", srcPath.string());

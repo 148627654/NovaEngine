@@ -21,6 +21,17 @@ enum class Key : int32_t {
 
 enum class MouseButton : int32_t { Left = 0, Right = 1, Middle = 2 };
 
+// 手柄按钮，值域与 GLFW_GAMEPAD_BUTTON_* 一致（Input.cpp 内 static_assert 校验，与 Key/MouseButton 同纪律）
+enum class GamepadButton : int32_t {
+    A = 0, B, X, Y, LeftBumper, RightBumper, Back, Start, Guide,
+    LeftThumb, RightThumb, DPadUp, DPadRight, DPadDown, DPadLeft, Count
+};
+
+// 手柄轴，值域与 GLFW_GAMEPAD_AXIS_* 一致
+enum class GamepadAxis : int32_t {
+    LeftX = 0, LeftY, RightX, RightY, LeftTrigger, RightTrigger, Count
+};
+
 class Input {
 public:
     static void beginFrame();                       // 每帧一次：快照边沿状态（须在 pollEvents 之后调用）
@@ -33,6 +44,17 @@ public:
     static glm::vec2 mousePosition();               // 窗口逻辑坐标（左上原点）
     static glm::vec2 mouseDelta();
     static glm::vec2 scrollDelta();
+
+    // ===== 手柄（V0.5-11 追加；beginFrame 内自动轮询 GLFW_JOYSTICK_1..4）=====
+    static constexpr int kMaxGamepads = 4;          // 最多同时轮询的手柄数
+    static bool isGamepadConnected(int j = 0);      // j = 手柄序号（0..kMaxGamepads-1）
+    static int connectedGamepadCount();
+    static const char* gamepadName(int j = 0);      // 未连接返回 nullptr；返回指针仅当帧有效
+    static bool isGamepadButtonDown(GamepadButton b, int j = 0);
+    static bool isGamepadButtonPressed(GamepadButton b, int j = 0);   // 本帧刚按下（边沿）
+    static bool isGamepadButtonReleased(GamepadButton b, int j = 0);  // 本帧刚松开（边沿）
+    static float gamepadAxis(GamepadAxis a, int j = 0);   // -1..1，死区已应用
+    static void setGamepadDeadzone(float d);              // 默认 0.15，钳制 [0,1)
 };
 
 }  // namespace NovaEngine

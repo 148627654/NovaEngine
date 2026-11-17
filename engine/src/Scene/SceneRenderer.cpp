@@ -2,7 +2,8 @@
 //
 // 编辑器 Play 路径与 NovaPlayer 共用的渲染序列，与 SceneViewPanel 的 Play 分支同构：
 //   取主相机（isMain → 第一个 → fallback）→ 第一个 DirectionalLight（无则默认光）
-//   → 天空 → 单次遍历收集（activeInHierarchy + MeshRenderer；opaque 进阴影，transparent 不进）
+//   → 天空 → 单次遍历收集（activeInHierarchy + MeshRenderer；V0.5-14 视锥剔除 + 实例化分组；
+//     opaque 进阴影，transparent 不进）
 //   → 阴影 pass（castShadows）→ 网格地面（showGrid，雾色取自 scene.fogColor）→ endFrame。
 // 调用方负责：绑定目标 FBO、设好视口、以及 Renderer/SkyboxRenderer 的 init 生命周期。
 
@@ -13,6 +14,7 @@
 #include <NovaEngine/Core/Logger.h>
 #include <NovaEngine/Render/Cubemap.h>
 #include <NovaEngine/Render/Framebuffer.h>
+#include <NovaEngine/Render/Frustum.h>
 #include <NovaEngine/Render/PostProcess.h>
 #include <NovaEngine/Render/ShadowMap.h>
 #include <NovaEngine/Render/SkyboxRenderer.h>
@@ -23,12 +25,35 @@
 #include <NovaEngine/Scene/Transform.h>
 #include <NovaEngine/UI/UIRenderer.h>
 
+#include <algorithm>
+#include <cstddef>
+
 #include <glm/geometric.hpp>              // dot（阴影盒中心投影）
 #include <glm/gtc/matrix_transform.hpp>   // lookAt / perspective / radians / inverse
 
 namespace NovaEngine {
 
 namespace {
+
+// 局部 AABB → 世界 AABB（V0.5-14 剔除用）：8 角点经世界矩阵变换后取包围盒。
+// 相比「中心 + 半径」方法，角点变换对旋转与非均匀缩放均给出保守精确的世界包围（无漏剔除）
+AABB transformAabb(const AABB& local, const glm::mat4& world) {
+    AABB out;
+    for (int i = 0; i < 8; ++i) {
+        const glm::vec3 corner(
+            (i & 1) ? local.max.x : local.min.x,
+            (i & 2) ? local.max.y : local.min.y,
+            (i & 4) ? local.max.z : local.min.z);
+        const glm::vec3 p = glm::vec3(world * glm::vec4(corner, 1.0f));
+        out.min.x = std::min(out.min.x, p.x);
+        out.min.y = std::min(out.min.y, p.y);
+        out.min.z = std::min(out.min.z, p.z);
+        out.max.x = std::max(out.max.x, p.x);
+        out.max.y = std::max(out.max.y, p.y);
+        out.max.z = std::max(out.max.z, p.z);
+    }
+    return out;
+}
 
 // 从 fallback 的投影矩阵反推宽高比（调用方 FBO 按目标分辨率设好；glm::perspective 下
 // proj[1][1]/proj[0][0] = aspect），供场景相机的 projection 保持同一视口比例
@@ -99,11 +124,23 @@ void renderSceneInternal(const Scene& scene, const RenderCamera& fallbackCamera,
     if (scene.skyMode == SkyMode::Cubemap && !scene.skyCubemapPath.empty())
         skyCube = AssetDatabase::instance().getCubemap(scene.skyCubemapPath);
 
-    // 5. 渲染序列：天空 → 单次遍历收集 → 阴影 → grid → endFrame
+    // 5. 渲染序列：天空 → 单次遍历收集（V0.5-14 视锥剔除 + 实例化分组）→ 阴影 → grid → endFrame
     Renderer::beginFrame(renderCam, light, glm::vec4(scene.skyColor, 1.0f));
     SkyboxRenderer::draw(glm::inverse(renderCam.projection * renderCam.view), renderCam.position,
                          scene.skyMode, scene.skyHorizonColor, scene.skyZenithColor,
                          skyCube, scene.skyRotation, scene.skyExposure);
+
+    // 视锥（V0.5-14）：由渲染相机 view × projection 构造；开关关闭时仍构造（成本可忽略），
+    // 仅跳过 intersects 测试——遍历行为与波 4 基线逐帧一致（回归 A/B）
+    const Frustum frustum = Frustum::fromViewProj(renderCam.projection * renderCam.view);
+
+    // 收集 (mesh, material, world) 三元组：剔除后的可见项（提交与阴影收集同源，保证一致）
+    struct SceneItem {
+        std::shared_ptr<Mesh> mesh;
+        Material material;
+        glm::mat4 world;
+    };
+    std::vector<SceneItem> items;
     scene.forEachObject([&](GameObject* go) {
         if (!go->activeInHierarchy()) return;
         const MeshRenderer* mr = go->getComponent<MeshRenderer>();
@@ -111,15 +148,57 @@ void renderSceneInternal(const Scene& scene, const RenderCamera& fallbackCamera,
         const Transform* t = go->transform();
         if (!t) return;
         const glm::mat4 world = t->worldMatrix();
+        // 世界 AABB：局部 AABB 8 角点经世界矩阵变换取包围盒（非均匀缩放/旋转精确）；
+        // 锥体外 → 跳过 submit 与阴影收集（被剔除物体不写阴影贴图，无幽灵阴影）
+        if (Renderer::frustumCullingEnabled() &&
+            !frustum.intersects(transformAabb(mr->mesh->aabb(), world))) {
+            Renderer::markCulled();
+            return;
+        }
         // 材质双轨（V0.3-6，§14.5）：引用材质资产时整块取值（submit 与阴影收集共用同一解析结果）；
         // MaterialAsset 由资产线实现，此处只消费冻结头 Material.h 的 materialAsset 字段
         const Material& mat = mr->material.materialAsset ? mr->material.materialAsset->material()
                                                          : mr->material;
-        Renderer::submit(mr->mesh, mat, world);
         // 透明物体不进阴影（裁定 2：队列归属只看 blendMode）
         if (shadowEnabled && mat.blendMode == BlendMode::Opaque)
             shadowItems.push_back(ShadowItem{mr->mesh, world});
+        items.push_back(SceneItem{mr->mesh, mat, world});
     });
+
+    // V0.5-14 实例化分组（冻结算法）：键 = (mesh 指针, material ==)；
+    // 组 ≥2 实例 → submitInstanced（批上限 512 个矩阵，超出拆批）；恰 1 → 普通 submit；
+    // AlphaBlend 一律普通 submit（透明段保持视距排序语义，禁实例化）。
+    // 分组保序：以组内首个实例的遍历顺序提交（opaque 普通项与实例化批在 endFrame 中分段绘制）
+    constexpr size_t kInstancedBatchLimit = 512;
+    std::vector<bool> grouped(items.size(), false);
+    for (size_t i = 0; i < items.size(); ++i) {
+        if (grouped[i]) continue;
+        grouped[i] = true;
+        const SceneItem& base = items[i];
+        if (base.material.blendMode != BlendMode::Opaque) {
+            Renderer::submit(base.mesh, base.material, base.world);
+            continue;
+        }
+        std::vector<glm::mat4> models{base.world};
+        for (size_t j = i + 1; j < items.size(); ++j) {
+            if (grouped[j] || items[j].material.blendMode != BlendMode::Opaque) continue;
+            if (items[j].mesh == base.mesh && items[j].material == base.material) {
+                grouped[j] = true;
+                models.push_back(items[j].world);
+            }
+        }
+        if (models.size() == 1) {
+            Renderer::submit(base.mesh, base.material, base.world);
+        } else {
+            for (size_t b = 0; b < models.size(); b += kInstancedBatchLimit) {
+                const size_t count = std::min(kInstancedBatchLimit, models.size() - b);
+                std::vector<glm::mat4> batch(models.begin() + static_cast<std::ptrdiff_t>(b),
+                                             models.begin() + static_cast<std::ptrdiff_t>(b + count));
+                Renderer::submitInstanced(base.mesh, base.material, batch);
+            }
+        }
+    }
+
     if (shadowEnabled) Renderer::drawShadowPass(shadowParams, shadowItems);
     if (scene.showGrid) Renderer::drawGrid(scene.fogColor);
     Renderer::endFrame();

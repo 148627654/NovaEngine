@@ -156,6 +156,9 @@ int main(int argc, char** argv) {
         Logger::error("[NovaPlayer] 场景加载失败: {}", args.scene.string());
         return 1;
     }
+    // 输入绑定（V0.5-11）：场景加载后经 AssetStream 读 pak 内 assets/input/default.novainput；
+    // 失败仅 warn（内置默认绑定兜底），不阻断启动
+    InputMap::load("assets/input/default.novainput");
     scene.start();
     // 注册为运行期场景并设为活动场景（§14.9；LoadScene 延迟切换经 flushPendingLoad 作用于本 scene）
     SceneManager::registerScene(scene.name(), args.scene);
@@ -178,6 +181,7 @@ int main(int argc, char** argv) {
         window->pollEvents();
         Time::beginFrame();
         Input::beginFrame();
+        InputMap::beginFrame();   // 每帧一次，紧跟 Input::beginFrame 之后（契约 §24.5）
 
         if (Input::isKeyPressed(Key::Escape)) break;
 

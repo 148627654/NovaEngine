@@ -42,6 +42,10 @@ void StatsPanel::onGui(EditorContext&, EditorCamera&) {
     ImGui::Text("Submitted: %u", Renderer::lastSubmittedCount());
     ImGui::Text("Triangles: %u", Renderer::lastTriangleCount());
     ImGui::Text("Shadow items: %u", Renderer::lastShadowItemCount());
+    // 剔除/实例化统计（V0.5-14：上一帧结算值；剔除关闭时 Culled 恒 0）
+    ImGui::Text("Culled: %u", Renderer::lastCulledCount());
+    ImGui::Text("Instanced draws: %u", Renderer::lastInstancedDrawCalls());
+    ImGui::Text("Instances: %u", Renderer::lastInstancedInstanceCount());
     ImGui::Separator();
 
     // 120 帧历史直方图：historyCount 截断；纵轴 max(peak, 1.0) 防除零；高 80px

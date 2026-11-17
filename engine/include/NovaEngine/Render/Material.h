@@ -30,6 +30,9 @@ struct Material {
     // ===== V0.3-6 材质库双轨 =====
     std::shared_ptr<MaterialAsset> materialAsset = nullptr;   // 非空 = 引用资产（整块引用，无 per-instance override）
     std::string materialAssetPath;                            // 序列化用（相对项目根）
+
+    // ===== V0.5-14 实例化分组键：逐字段比较（含贴图指针/资产指针/blendMode）=====
+    bool operator==(const Material&) const = default;
 };
 
 }  // namespace NovaEngine

@@ -1,8 +1,11 @@
 #include <NovaEngine/Core/Input.h>
+#include <NovaEngine/Core/Logger.h>
 
 #include <GLFW/glfw3.h>
 
+#include <cmath>
 #include <cstring>
+#include <string>
 
 namespace NovaEngine {
 
@@ -80,6 +83,31 @@ static_assert(static_cast<int>(MouseButton::Left) == GLFW_MOUSE_BUTTON_LEFT);
 static_assert(static_cast<int>(MouseButton::Right) == GLFW_MOUSE_BUTTON_RIGHT);
 static_assert(static_cast<int>(MouseButton::Middle) == GLFW_MOUSE_BUTTON_MIDDLE);
 
+// ===== 编译期校验：GamepadButton/GamepadAxis 枚举值域与 GLFW_GAMEPAD_* 一致（改枚举即编译失败）=====
+static_assert(static_cast<int>(GamepadButton::A) == GLFW_GAMEPAD_BUTTON_A);
+static_assert(static_cast<int>(GamepadButton::B) == GLFW_GAMEPAD_BUTTON_B);
+static_assert(static_cast<int>(GamepadButton::X) == GLFW_GAMEPAD_BUTTON_X);
+static_assert(static_cast<int>(GamepadButton::Y) == GLFW_GAMEPAD_BUTTON_Y);
+static_assert(static_cast<int>(GamepadButton::LeftBumper) == GLFW_GAMEPAD_BUTTON_LEFT_BUMPER);
+static_assert(static_cast<int>(GamepadButton::RightBumper) == GLFW_GAMEPAD_BUTTON_RIGHT_BUMPER);
+static_assert(static_cast<int>(GamepadButton::Back) == GLFW_GAMEPAD_BUTTON_BACK);
+static_assert(static_cast<int>(GamepadButton::Start) == GLFW_GAMEPAD_BUTTON_START);
+static_assert(static_cast<int>(GamepadButton::Guide) == GLFW_GAMEPAD_BUTTON_GUIDE);
+static_assert(static_cast<int>(GamepadButton::LeftThumb) == GLFW_GAMEPAD_BUTTON_LEFT_THUMB);
+static_assert(static_cast<int>(GamepadButton::RightThumb) == GLFW_GAMEPAD_BUTTON_RIGHT_THUMB);
+static_assert(static_cast<int>(GamepadButton::DPadUp) == GLFW_GAMEPAD_BUTTON_DPAD_UP);
+static_assert(static_cast<int>(GamepadButton::DPadRight) == GLFW_GAMEPAD_BUTTON_DPAD_RIGHT);
+static_assert(static_cast<int>(GamepadButton::DPadDown) == GLFW_GAMEPAD_BUTTON_DPAD_DOWN);
+static_assert(static_cast<int>(GamepadButton::DPadLeft) == GLFW_GAMEPAD_BUTTON_DPAD_LEFT);
+static_assert(static_cast<int>(GamepadButton::Count) == GLFW_GAMEPAD_BUTTON_LAST + 1);
+static_assert(static_cast<int>(GamepadAxis::LeftX) == GLFW_GAMEPAD_AXIS_LEFT_X);
+static_assert(static_cast<int>(GamepadAxis::LeftY) == GLFW_GAMEPAD_AXIS_LEFT_Y);
+static_assert(static_cast<int>(GamepadAxis::RightX) == GLFW_GAMEPAD_AXIS_RIGHT_X);
+static_assert(static_cast<int>(GamepadAxis::RightY) == GLFW_GAMEPAD_AXIS_RIGHT_Y);
+static_assert(static_cast<int>(GamepadAxis::LeftTrigger) == GLFW_GAMEPAD_AXIS_LEFT_TRIGGER);
+static_assert(static_cast<int>(GamepadAxis::RightTrigger) == GLFW_GAMEPAD_AXIS_RIGHT_TRIGGER);
+static_assert(static_cast<int>(GamepadAxis::Count) == GLFW_GAMEPAD_AXIS_LAST + 1);
+
 namespace {
 
 constexpr int kMaxKeyCode = 512;   // GLFW 键码实际范围 0..347，数组留余量
@@ -135,6 +163,92 @@ int toIndex(MouseButton button) {
     return (code >= 0 && code < 3) ? code : -1;
 }
 
+// ===== 手柄状态（每帧轮询快照，与键鼠同一「当前/上一帧」边沿纪律）=====
+constexpr int kGamepadButtonCount = static_cast<int>(GamepadButton::Count);   // 15（含 DPad 方向）
+constexpr int kGamepadAxisCount = static_cast<int>(GamepadAxis::Count);       // 6
+
+bool g_gpConnected[Input::kMaxGamepads] = {};
+bool g_gpMapped[Input::kMaxGamepads] = {};          // glfwJoystickIsGamepad 结果
+bool g_gpUnmappedWarned[Input::kMaxGamepads] = {};  // 第三方无映射设备 warn 一次（每次连接重置）
+std::string g_gpNames[Input::kMaxGamepads];
+bool g_gpButtonDown[Input::kMaxGamepads][kGamepadButtonCount] = {};
+bool g_gpButtonPrevDown[Input::kMaxGamepads][kGamepadButtonCount] = {};
+float g_gpAxes[Input::kMaxGamepads][kGamepadAxisCount] = {};
+float g_gpDeadzone = 0.15f;   // 默认死区 0.15，gamepadAxis 读取时应用
+
+int toIndex(GamepadButton b) {
+    const int code = static_cast<int>(b);
+    return (code >= 0 && code < kGamepadButtonCount) ? code : -1;
+}
+
+int toIndex(GamepadAxis a) {
+    const int code = static_cast<int>(a);
+    return (code >= 0 && code < kGamepadAxisCount) ? code : -1;
+}
+
+void clearGamepadState(int j) {
+    std::memset(g_gpButtonDown[j], 0, sizeof(g_gpButtonDown[j]));
+    std::memset(g_gpButtonPrevDown[j], 0, sizeof(g_gpButtonPrevDown[j]));
+    std::memset(g_gpAxes[j], 0, sizeof(g_gpAxes[j]));
+}
+
+// 每帧轮询 GLFW_JOYSTICK_1..4（手柄查询不依赖窗口上下文，故在 beginFrame 的 win 判定之外调用）：
+//   映射设备（glfwJoystickIsGamepad 为真）→ glfwGetGamepadState 映射为边沿快照；
+//   连接/断开状态变化各打一次日志（含设备名）；断开清零全部状态防按键粘连；
+//   非映射第三方设备（glfwJoystickPresent 但非 gamepad）→ 连接可见（name 有效）、输入恒 0、warn 一次。
+void pollGamepads() {
+    for (int j = 0; j < Input::kMaxGamepads; ++j) {
+        const int jid = GLFW_JOYSTICK_1 + j;
+        if (glfwJoystickPresent(jid) == 0) {
+            if (g_gpConnected[j]) {
+                Logger::warn("[Input] 手柄 {} 已断开: {}", j + 1, g_gpNames[j]);
+                g_gpConnected[j] = false;
+                g_gpMapped[j] = false;
+                g_gpUnmappedWarned[j] = false;
+                clearGamepadState(j);
+            }
+            continue;
+        }
+
+        const char* rawName = glfwGetJoystickName(jid);
+        const std::string name = rawName ? rawName : "";
+        if (!g_gpConnected[j]) {
+            Logger::info("[Input] 手柄 {} 已连接: {}", j + 1, name);
+            g_gpConnected[j] = true;
+            g_gpMapped[j] = false;
+            g_gpUnmappedWarned[j] = false;
+            clearGamepadState(j);
+        }
+        g_gpNames[j] = name;
+
+        const bool mapped = glfwJoystickIsGamepad(jid) != 0;
+        if (mapped && !g_gpMapped[j]) g_gpUnmappedWarned[j] = false;   // 重新获得映射后再次丢失可重新告警
+        g_gpMapped[j] = mapped;
+        if (!mapped) {
+            if (!g_gpUnmappedWarned[j]) {
+                Logger::warn("[Input] 手柄 {} 无 GLFW 映射（第三方设备），输入恒为 0: {}", j + 1, name);
+                g_gpUnmappedWarned[j] = true;
+            }
+            clearGamepadState(j);   // 非映射：连接可见、输入全 0
+            continue;
+        }
+
+        // 映射设备：先快照上一帧按钮状态，再读当前状态（边沿 = 两帧对比）
+        std::memcpy(g_gpButtonPrevDown[j], g_gpButtonDown[j], sizeof(g_gpButtonDown[j]));
+        GLFWgamepadstate st;
+        if (glfwGetGamepadState(jid, &st) == GLFW_TRUE) {
+            for (int b = 0; b < kGamepadButtonCount; ++b)
+                g_gpButtonDown[j][b] = st.buttons[b] == GLFW_PRESS;
+            for (int a = 0; a < kGamepadAxisCount; ++a)
+                g_gpAxes[j][a] = st.axes[a];
+        } else {
+            // 极端情况（轮询失败）：按全 0 处理，不粘连旧状态
+            std::memset(g_gpButtonDown[j], 0, sizeof(g_gpButtonDown[j]));
+            std::memset(g_gpAxes[j], 0, sizeof(g_gpAxes[j]));
+        }
+    }
+}
+
 }  // namespace
 
 void Input::beginFrame() {
@@ -169,6 +283,9 @@ void Input::beginFrame() {
         g_mousePos = glm::vec2(static_cast<float>(mx), static_cast<float>(my));
         g_mouseDelta = g_mousePos - g_prevMousePos;   // 首帧为 0
     }
+
+    // 手柄轮询放在 win 判定之外：GLFW 手柄查询不依赖窗口上下文
+    pollGamepads();
 }
 
 bool Input::isKeyDown(Key key) {
@@ -204,5 +321,59 @@ bool Input::isMouseReleased(MouseButton button) {
 glm::vec2 Input::mousePosition() { return g_mousePos; }
 glm::vec2 Input::mouseDelta() { return g_mouseDelta; }
 glm::vec2 Input::scrollDelta() { return g_scrollDelta; }
+
+// ===== 手柄查询 =====
+
+bool Input::isGamepadConnected(int j) {
+    return j >= 0 && j < kMaxGamepads && g_gpConnected[j];
+}
+
+int Input::connectedGamepadCount() {
+    int n = 0;
+    for (int j = 0; j < kMaxGamepads; ++j)
+        if (g_gpConnected[j]) ++n;
+    return n;
+}
+
+const char* Input::gamepadName(int j) {
+    if (j < 0 || j >= kMaxGamepads || !g_gpConnected[j]) return nullptr;
+    return g_gpNames[j].c_str();   // 指针仅当帧有效（下一帧 beginFrame 可能改写）
+}
+
+bool Input::isGamepadButtonDown(GamepadButton b, int j) {
+    if (j < 0 || j >= kMaxGamepads) return false;
+    const int i = toIndex(b);
+    return i >= 0 && g_gpButtonDown[j][i];
+}
+
+bool Input::isGamepadButtonPressed(GamepadButton b, int j) {
+    if (j < 0 || j >= kMaxGamepads) return false;
+    const int i = toIndex(b);
+    return i >= 0 && g_gpButtonDown[j][i] && !g_gpButtonPrevDown[j][i];
+}
+
+bool Input::isGamepadButtonReleased(GamepadButton b, int j) {
+    if (j < 0 || j >= kMaxGamepads) return false;
+    const int i = toIndex(b);
+    return i >= 0 && !g_gpButtonDown[j][i] && g_gpButtonPrevDown[j][i];
+}
+
+float Input::gamepadAxis(GamepadAxis a, int j) {
+    if (j < 0 || j >= kMaxGamepads) return 0.0f;
+    const int i = toIndex(a);
+    if (i < 0) return 0.0f;
+    float v = g_gpAxes[j][i];
+    if (std::abs(v) < g_gpDeadzone) v = 0.0f;   // 死区在读取时应用（|v| < deadzone → 0）
+    return v;
+}
+
+void Input::setGamepadDeadzone(float d) {
+    // NaN/Inf：钳制比较恒 false 会原样写入并污染全部轴读取，直接拒绝
+    if (!std::isfinite(d)) return;
+    // 钳制 [0,1)：死区 ≥1 时所有轴恒为 0，无意义
+    if (d < 0.0f) d = 0.0f;
+    if (d >= 1.0f) d = 0.99f;
+    g_gpDeadzone = d;
+}
 
 }  // namespace NovaEngine

@@ -21,6 +21,7 @@ add_executable(NovaEditor
     src/panels/AssetBrowserPanel.cpp
     src/panels/StatsPanel.cpp
     src/panels/BuildSettingsPanel.cpp
+    src/panels/InputBindingsPanel.cpp   # V0.5-11：输入绑定面板（整合者补入显式源清单）
     # Dear ImGui（docking）核心源码
     ${imgui_SOURCE_DIR}/imgui.cpp
     ${imgui_SOURCE_DIR}/imgui_draw.cpp
