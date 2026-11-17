@@ -1,0 +1,284 @@
+{
+ "editorCamera": {
+  "distance": 8.0,
+  "pitch": -0.35,
+  "target": [
+   0.0,
+   1.0,
+   0.0
+  ],
+  "yaw": 0.6
+ },
+ "environment": {
+  "ambientColor": [
+   0.15,
+   0.15,
+   0.18
+  ],
+  "fogColor": [
+   0.18,
+   0.22,
+   0.35
+  ],
+  "postProcess": {
+   "bloomIntensity": 0.5,
+   "bloomLevels": 3,
+   "bloomThreshold": 1.0,
+   "enabled": false,
+   "exposure": 1.0
+  },
+  "showGrid": true,
+  "skyColor": [
+   0.18,
+   0.22,
+   0.35
+  ],
+  "skyCubemapPath": "",
+  "skyExposure": 1.0,
+  "skyHorizonColor": [
+   0.55,
+   0.62,
+   0.72
+  ],
+  "skyMode": "Gradient",
+  "skyRotation": 0.0,
+  "skyZenithColor": [
+   0.22,
+   0.3,
+   0.48
+  ]
+ },
+ "name": "V05InputTest",
+ "objects": [
+  {
+   "active": true,
+   "components": [
+    {
+     "position": [
+      0.0,
+      3.0,
+      8.0
+     ],
+     "rotation": [
+      0.0,
+      1.0,
+      0.0,
+      6.123234262925839e-17
+     ],
+     "scale": [
+      1.0,
+      1.0,
+      1.0
+     ],
+     "type": "Transform"
+    },
+    {
+     "clearColor": [
+      0.18,
+      0.22,
+      0.35,
+      1.0
+     ],
+     "farPlane": 1000.0,
+     "fov": 60.0,
+     "isMain": true,
+     "nearPlane": 0.1,
+     "type": "Camera"
+    }
+   ],
+   "id": 6100000000000000002,
+   "name": "Main Camera",
+   "parent": 0
+  },
+  {
+   "active": true,
+   "components": [
+    {
+     "position": [
+      0.0,
+      -0.5,
+      0.0
+     ],
+     "rotation": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+     ],
+     "scale": [
+      20.0,
+      1.0,
+      20.0
+     ],
+     "type": "Transform"
+    },
+    {
+     "material": {
+      "albedo": [
+       0.45,
+       0.45,
+       0.5
+      ],
+      "albedoMap": "",
+      "alpha": 1.0,
+      "blendMode": "Opaque",
+      "emissionColor": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "emissionIntensity": 1.0,
+      "emissionMap": "",
+      "metallic": 0.0,
+      "metallicMap": "",
+      "normalMap": "",
+      "roughness": 0.5,
+      "roughnessMap": ""
+     },
+     "mesh": "assets/models/cube.obj",
+     "type": "MeshRenderer"
+    }
+   ],
+   "id": 6100000000000000003,
+   "name": "Ground",
+   "parent": 0
+  },
+  {
+   "active": true,
+   "components": [
+    {
+     "position": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "rotation": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+     ],
+     "scale": [
+      1.0,
+      1.0,
+      1.0
+     ],
+     "type": "Transform"
+    },
+    {
+     "material": {
+      "albedo": [
+       0.9,
+       0.35,
+       0.2
+      ],
+      "albedoMap": "",
+      "alpha": 1.0,
+      "blendMode": "Opaque",
+      "emissionColor": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "emissionIntensity": 1.0,
+      "emissionMap": "",
+      "metallic": 0.0,
+      "metallicMap": "",
+      "normalMap": "",
+      "roughness": 0.5,
+      "roughnessMap": ""
+     },
+     "mesh": "assets/models/cube.obj",
+     "type": "MeshRenderer"
+    },
+    {
+     "enabled": true,
+     "speed": 5.0,
+     "type": "MoveWithInput"
+    }
+   ],
+   "id": 6100000000000000004,
+   "name": "PlayerCube",
+   "parent": 0
+  },
+  {
+   "active": true,
+   "components": [
+    {
+     "position": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "rotation": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+     ],
+     "scale": [
+      1.0,
+      1.0,
+      1.0
+     ],
+     "type": "Transform"
+    },
+    {
+     "uiScale": 1.0,
+     "type": "Canvas"
+    }
+   ],
+   "id": 6100000000000000005,
+   "name": "Canvas",
+   "parent": 0
+  },
+  {
+   "active": true,
+   "components": [
+    {
+     "position": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "rotation": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+     ],
+     "scale": [
+      1.0,
+      1.0,
+      1.0
+     ],
+     "type": "Transform"
+    },
+    {
+     "text": "手柄验收:左摇杆 或 A/D + W/S 移动方块",
+     "fontSize": 28.0,
+     "color": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "fontPath": "",
+     "anchor": [
+      0.5,
+      0.5
+     ],
+     "offset": [
+      0.0,
+      -280.0
+     ],
+     "type": "Text"
+    }
+   ],
+   "id": 6100000000000000006,
+   "name": "Tip",
+   "parent": 6100000000000000005
+  }
+ ],
+ "version": 4
+}

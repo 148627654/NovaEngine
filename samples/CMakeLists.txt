@@ -6,6 +6,7 @@ add_library(NovaScripts OBJECT
     SpinningCube.cpp
     OrbitCamera.cpp
     SceneSwitcher.cpp
+    MoveWithInput.cpp
 )
 
 target_include_directories(NovaScripts PUBLIC ${CMAKE_SOURCE_DIR}/engine/include)
