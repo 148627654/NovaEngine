@@ -2009,7 +2009,7 @@ public:
 }
 ```
 
-行为：UIRenderer 渲染该 Canvas 时，先绘制可视区外框（bgColor 背景填充 + borderColor 四边描边，发射序先于子树 = 内容绘制其上；enter 回调发射、节点 ctx 裁剪），ScrollView 子树的 quad 在 scissor（可视区矩形，嵌套 ScrollView 取交集）内裁剪绘制；滚动指示条（右侧/底部细条，显示内容比例与位置，纯视觉 v1 不可拖）。processInput：滚轮（Input::scrollDelta × scrollSensitivity）滚动指针下冒泡链最近的 ScrollView；scrollOffset 钳制 [0, max(0, contentSize - viewSize)]（按轴）。子物体仍按普通 UI 布局（v1 不做内容自动重排——内容布局由创作者摆放，滚动仅平移视口）。
+行为：UIRenderer 渲染该 Canvas 时，先绘制可视区外框（bgColor 背景填充 + borderColor 四边描边，发射序先于子树 = 内容绘制其上；enter 回调发射、节点 ctx 裁剪），ScrollView 子树的 quad 在 scissor（可视区矩形，嵌套 ScrollView 取交集）内裁剪绘制；滚动指示条（右侧/底部细条，显示内容比例与位置，**可拖动**——按下条带拖拽改 scrollOffset，渲染/命中共用 scrollBarRect 同一公式）。processInput：滚轮（Input::scrollDelta × scrollSensitivity）滚动指针下冒泡链最近的 ScrollView。**滚动方向（2026-11-17 修正）**：滚轮向下（delta<0）→ scrollOffset 增加 → 内容上移（看更下面）；钳制按内容原位边界 vs 可视区：上界 = 内容底对齐视口底，下界 = 内容顶对齐视口顶（≤0，内容未贴顶时允许回拉）。指针在 ScrollView 上时滚轮一律消费（含已到边界）——编辑器据此抑制相机缩放。子物体仍按普通 UI 布局（v1 不做内容自动重排——内容布局由创作者摆放，滚动仅平移视口）。
 
 ### 24.3.5 命中、冒泡与「Play 中 UI 优先于场景拾取」（UI/UIRenderer.h 追加）
 

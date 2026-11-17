@@ -557,9 +557,38 @@ void emitSlider(EmitCtx& ctx, const Slider& s, float us, const Glyph* white, uin
                      yc + hh2, white, atlasTex);
 }
 
-// 滚动指示条（右侧/底部细条：显示内容比例与位置；纯视觉 v1 不可拖）
+// 滚动指示条（右侧/底部细条：显示内容比例与位置；可拖动——V0.5 验收补强）
 constexpr float kScrollBarThickness = 4.0f;   // 逻辑像素
 const glm::vec4 kScrollBarColor{0.75f, 0.75f, 0.75f, 0.5f};
+
+// 滚动条矩形（逻辑像素；渲染 emitScrollBars 与输入拖拽共用同一公式——保证点得到=看得见）。
+// vertical=true 右侧竖条 / false 底部横条；无可滚动范围时返回空矩形。
+// 位置比例 f = (offset - min)/(max - min)（钳制范围可与 0 不对齐，见 clampScrollOffset）。
+glm::vec4 scrollBarRect(const ScrollView& sv, float us, const glm::vec4& view, bool vertical) {
+    const float vw = view.z - view.x, vh = view.w - view.y;
+    if (vw <= 0.0f || vh <= 0.0f) return glm::vec4(0.0f);
+    const float barW = kScrollBarThickness * us;
+    const auto f01 = [](float off, float mn, float mx) -> float {
+        if (mx <= mn) return 0.0f;
+        return std::clamp((off - mn) / (mx - mn), 0.0f, 1.0f);
+    };
+    if (vertical) {
+        const float mn = std::min(0.0f, (sv.m_contentBoxMin.y - view.y) / us);
+        const float mx = std::max(0.0f, (sv.m_contentBoxMax.y - view.w) / us);
+        if (mx <= mn || !sv.scrollVertical) return glm::vec4(0.0f);
+        const float contentH = std::max(sv.m_contentSize.y * us, 1e-3f);
+        const float barH = std::max(vh * vh / contentH, 8.0f * us);
+        const float barY = view.y + (vh - barH) * f01(sv.scrollOffset.y, mn, mx);
+        return glm::vec4(view.z - barW, barY, view.z, barY + barH);
+    }
+    const float mn = std::min(0.0f, (sv.m_contentBoxMin.x - view.x) / us);
+    const float mx = std::max(0.0f, (sv.m_contentBoxMax.x - view.z) / us);
+    if (mx <= mn || !sv.scrollHorizontal) return glm::vec4(0.0f);
+    const float contentW = std::max(sv.m_contentSize.x * us, 1e-3f);
+    const float barL = std::max(vw * vw / contentW, 8.0f * us);
+    const float barX = view.x + (vw - barL) * f01(sv.scrollOffset.x, mn, mx);
+    return glm::vec4(barX, view.w - barW, barX + barL, view.w);
+}
 
 // 可视区外框（V0.5 验收补强）：背景填充 + 四边描边。
 // 在 enter 回调发射（先于子树）→ 批内发射序靠前，内容绘制在其上。
@@ -578,28 +607,13 @@ void emitScrollViewFrame(EmitCtx& ctx, const ScrollView& sv, float us, const glm
 
 void emitScrollBars(EmitCtx& ctx, const ScrollView& sv, float us, const glm::vec4& view,
                     const Glyph* white, uint32_t atlasTex) {
-    const float vw = view.z - view.x, vh = view.w - view.y;
-    if (vw <= 0.0f || vh <= 0.0f) return;
-    if (sv.scrollVertical && sv.m_contentSize.y > sv.size.y) {
-        const float contentH = std::max(sv.m_contentSize.y * us, 1e-3f);
-        const float barH = std::max(vh * vh / contentH, 8.0f * us);
-        const float maxOff = sv.m_contentSize.y - sv.size.y;
-        const float f = maxOff > 0.0f ? std::clamp(sv.scrollOffset.y / maxOff, 0.0f, 1.0f) : 0.0f;
-        const float barY = view.y + (vh - barH) * f;
-        const float bw = kScrollBarThickness * us;
-        emitRectQuad(ctx, "", kScrollBarColor, view.z - bw, barY, view.z, barY + barH, white,
-                     atlasTex);
-    }
-    if (sv.scrollHorizontal && sv.m_contentSize.x > sv.size.x) {
-        const float contentW = std::max(sv.m_contentSize.x * us, 1e-3f);
-        const float barW = std::max(vw * vw / contentW, 8.0f * us);
-        const float maxOff = sv.m_contentSize.x - sv.size.x;
-        const float f = maxOff > 0.0f ? std::clamp(sv.scrollOffset.x / maxOff, 0.0f, 1.0f) : 0.0f;
-        const float barX = view.x + (vw - barW) * f;
-        const float bh = kScrollBarThickness * us;
-        emitRectQuad(ctx, "", kScrollBarColor, barX, view.w - bh, barX + barW, view.w, white,
-                     atlasTex);
-    }
+    // 与 scrollBarRect 共用同一公式（输入拖拽点得到 = 渲染看得见）
+    const glm::vec4 vr = scrollBarRect(sv, us, view, /*vertical=*/true);
+    if (rectValid(vr))
+        emitRectQuad(ctx, "", kScrollBarColor, vr.x, vr.y, vr.z, vr.w, white, atlasTex);
+    const glm::vec4 hr = scrollBarRect(sv, us, view, /*vertical=*/false);
+    if (rectValid(hr))
+        emitRectQuad(ctx, "", kScrollBarColor, hr.x, hr.y, hr.z, hr.w, white, atlasTex);
 }
 
 // ============================================================
@@ -640,7 +654,10 @@ struct UIWalkState {
     bool hasClip = false;
     glm::vec4 clip{0.0f};             // 裁剪交集
     bool clipEmpty = false;           // 交集为空 → 子树不可见/不可命中
-    std::vector<std::pair<const ScrollView*, ContentBox>> collectors;   // contentSize 收集栈
+    // contentSize 收集栈。ContentBox 用 shared_ptr 共享：walkUIChildren 按值复制
+    // UIWalkState（含 collectors），子节点 enter 累加必须写回父级的盒子——
+    // 值类型 ContentBox 只改到副本上，父级读到恒空盒（contentSize 恒 0 → 不可滚动）。
+    std::vector<std::pair<const ScrollView*, std::shared_ptr<ContentBox>>> collectors;
     std::vector<UIChainEntry> chain;  // 命中测试用：根 → 当前节点的交互链
 };
 
@@ -695,7 +712,8 @@ NodeUIElements collectNodeElements(const GameObject* node, const glm::vec2& tran
     return e;
 }
 
-// 子树上下文：本节点是 ScrollView → 平移 + scrollOffset、裁剪 ∩ 可视区（空交集保持为空）
+// 子树上下文：本节点是 ScrollView → 平移 − scrollOffset（正偏移 = 内容上移 = 看更下面）、
+// 裁剪 ∩ 可视区（空交集保持为空）
 void applyScrollViewCtx(UIWalkState& st, const ScrollView& sv, const GameObject* node) {
     const float us = uiScaleOf(node);
     const glm::vec4 view =
@@ -703,7 +721,7 @@ void applyScrollViewCtx(UIWalkState& st, const ScrollView& sv, const GameObject*
     glm::vec2 off{0.0f};
     if (sv.scrollHorizontal) off.x = sv.scrollOffset.x * us;
     if (sv.scrollVertical) off.y = sv.scrollOffset.y * us;
-    st.translate += off;
+    st.translate -= off;
     if (st.clipEmpty) {
         /* 祖先交集已空 → 保持空 */
     } else if (st.hasClip) {
@@ -728,11 +746,11 @@ void walkUIChildren(const GameObject* parent, const UIWalkState& in, const UIWal
         const ScrollView* sv = node->getComponent<ScrollView>();
         if (sv) {
             applyScrollViewCtx(childSt, *sv, node);
-            childSt.collectors.push_back({sv, ContentBox{}});
+            childSt.collectors.push_back({sv, std::make_shared<ContentBox>()});
         }
         walkUIChildren(node, childSt, enter, leave);
         if (sv) {
-            const ContentBox box = childSt.collectors.back().second;
+            const ContentBox box = *childSt.collectors.back().second;
             childSt.collectors.pop_back();
             leave(node, nodeSt, childSt, box);
         }
@@ -746,7 +764,7 @@ void walkCanvas(const GameObject* root, UIWalkState& st, const UIWalkEnterFn& en
     const ScrollView* rootSv = root->getComponent<ScrollView>();
     if (rootSv) {
         applyScrollViewCtx(st, *rootSv, root);
-        st.collectors.push_back({rootSv, ContentBox{}});
+        st.collectors.push_back({rootSv, std::make_shared<ContentBox>()});
         // 根级 ScrollView 也进冒泡链（评审 P2 修复：此前 root 不进 enter → 链中缺失，
         // 指针命中其内容时滚轮无处交付）。rect = 可视区（无祖先平移，不含自身滚动量）
         UIChainEntry rootEntry;
@@ -759,7 +777,7 @@ void walkCanvas(const GameObject* root, UIWalkState& st, const UIWalkEnterFn& en
     }
     walkUIChildren(root, st, enter, leave);
     if (rootSv) {
-        const ContentBox box = st.collectors.back().second;
+        const ContentBox box = *st.collectors.back().second;
         st.collectors.pop_back();
         leave(root, UIWalkState{}, st, box);
     }
@@ -767,24 +785,42 @@ void walkCanvas(const GameObject* root, UIWalkState& st, const UIWalkEnterFn& en
 
 // ---- contentSize 落地与 scrollOffset 钳制 ----
 
-// 并集盒 → 逻辑像素写入 m_contentSize（UIRenderer 渲染/命中遍历期重算；脚本查询缓存）
+// 并集盒 → 逻辑像素写入 m_contentSize + 原位边界（UIRenderer 渲染/命中遍历期重算；
+// 脚本查询缓存）。box 在 walker 空间（含当前 scrollOffset 平移）——减去平移得原位边界，
+// 钳制依据与当前偏移无关。
 void finalizeContentSize(const ScrollView& sv, const ContentBox& box) {
     const GameObject* go = sv.gameObject();
     if (!go) return;
     const float us = uiScaleOf(go);
-    const glm::vec2 s = box.size();
-    const_cast<ScrollView&>(sv).m_contentSize = glm::vec2(s.x / us, s.y / us);
+    auto& s = const_cast<ScrollView&>(sv);
+    const glm::vec2 s0 = box.size();
+    s.m_contentSize = glm::vec2(s0.x / us, s0.y / us);
+    if (box.valid) {
+        // walker 平移 = −scrollOffset×us（内容上移）；box 已含该平移 → 原位 = box + off
+        const glm::vec2 off = sv.scrollOffset * us;
+        s.m_contentBoxMin = box.mn + off;
+        s.m_contentBoxMax = box.mx + off;
+    } else {
+        s.m_contentBoxMin = s.m_contentBoxMax = glm::vec2(0.0f);
+    }
 }
 
-// scrollOffset 钳制 [0, max(0, content-view)]（按启用轴；禁用轴保持存值——渲染不应用）
-void clampScrollOffset(const ScrollView& sv) {
+// scrollOffset 钳制（V0.5 验收修正）：按内容原位边界与可视区边界求可达范围——
+//   上界 = 内容底对齐视口底（看最下面）；下界 = 内容顶对齐视口顶（≤0，内容未贴顶时允许回拉）。
+// 禁用轴保持存值（渲染不应用）。view = 可视区矩形（walker 空间，与 box 同单位）。
+void clampScrollOffset(const ScrollView& sv, const glm::vec4& view) {
     auto& s = const_cast<ScrollView&>(sv);
-    if (s.scrollHorizontal)
-        s.scrollOffset.x =
-            std::clamp(s.scrollOffset.x, 0.0f, std::max(0.0f, s.m_contentSize.x - s.size.x));
-    if (s.scrollVertical)
-        s.scrollOffset.y =
-            std::clamp(s.scrollOffset.y, 0.0f, std::max(0.0f, s.m_contentSize.y - s.size.y));
+    const float us = (s.gameObject() != nullptr) ? uiScaleOf(s.gameObject()) : 1.0f;
+    if (s.scrollHorizontal) {
+        const float maxOff = std::max(0.0f, (s.m_contentBoxMax.x - view.z) / us);
+        const float minOff = std::min(0.0f, (s.m_contentBoxMin.x - view.x) / us);
+        s.scrollOffset.x = std::clamp(s.scrollOffset.x, minOff, maxOff);
+    }
+    if (s.scrollVertical) {
+        const float maxOff = std::max(0.0f, (s.m_contentBoxMax.y - view.w) / us);
+        const float minOff = std::min(0.0f, (s.m_contentBoxMin.y - view.y) / us);
+        s.scrollOffset.y = std::clamp(s.scrollOffset.y, minOff, maxOff);
+    }
 }
 
 // ============================================================
@@ -804,7 +840,7 @@ bool hitTestWithChain(const Scene& scene, const glm::vec2& mouse, UIHitResult& o
             // contentSize 收集（与可见性无关——被裁剪的内容仍占滚动范围）
             for (auto& entry : ws.collectors) {
                 for (const glm::vec4* r : {&e.image, &e.text, &e.button, &e.slider, &e.scrollView})
-                    if (rectValid(*r)) entry.second.add(*r);
+                    if (rectValid(*r)) entry.second->add(*r);
             }
             if (ws.clipEmpty) return;   // 裁剪交集为空 → 子树不可见也不可命中
             // 冒泡链记录（路径上每个含交互组件的节点；矩形已含平移）
@@ -841,11 +877,15 @@ bool hitTestWithChain(const Scene& scene, const glm::vec2& mouse, UIHitResult& o
             tryHit(e.slider, e.sliderComp);
             tryHit(e.scrollView, e.scrollViewComp);
         };
-        const UIWalkLeaveFn leave = [&](const GameObject* node, const UIWalkState&,
+        const UIWalkLeaveFn leave = [&](const GameObject* node, const UIWalkState& nodeCtx,
                                         const UIWalkState&, const ContentBox& box) {
             if (const ScrollView* sv = node->getComponent<ScrollView>()) {
+                const float us = uiScaleOf(node);
+                const glm::vec4 view =
+                    translateRect(centerRect(sv->anchor, sv->offset, sv->size, us),
+                                  nodeCtx.translate);
                 finalizeContentSize(*sv, box);
-                clampScrollOffset(*sv);
+                clampScrollOffset(*sv, view);
             }
         };
         walkCanvas(root, st, enter, leave);
@@ -867,6 +907,45 @@ struct ActiveDrag {
     Slider* slider = nullptr;
     glm::vec4 rect{0.0f};
 } s_activeDrag;
+
+// 滚动条拖拽捕获（V0.5 验收补强）：按下滚动条 → 拖动改 scrollOffset → 松开结束。
+// 跨帧捕获语义与 Slider 拖拽一致（指针移出控件不改变投递目标）。
+struct ActiveScrollDrag {
+    const Scene* scene = nullptr;
+    uint64_t goId = 0;
+    ScrollView* sv = nullptr;
+    glm::vec4 view{0.0f};   // 可视区（逻辑）
+    bool vertical = true;
+} s_activeScrollDrag;
+
+// 滚动条命中区（比 4px 细条加宽：视口边缘 12px 条带，易点中；拖动精度仍按条心公式）
+glm::vec4 scrollBarHitRect(const glm::vec4& view, bool vertical) {
+    const float hit = 12.0f;
+    if (vertical) return glm::vec4(view.z - hit, view.y, view.z, view.w);
+    return glm::vec4(view.x, view.w - hit, view.z, view.w);
+}
+
+// 拖拽更新：指针位置 → scrollOffset（与 scrollBarRect 反解一致；clamp 用内容原位边界）
+void updateScrollFromDrag(ActiveScrollDrag& d, const glm::vec2& m) {
+    const float us = d.sv->gameObject() ? uiScaleOf(d.sv->gameObject()) : 1.0f;
+    const glm::vec4 bar = scrollBarRect(*d.sv, us, d.view, d.vertical);
+    if (!rectValid(bar)) return;
+    const float vh = d.view.w - d.view.y, vw = d.view.z - d.view.x;
+    const float barH = bar.w - bar.y, barL = bar.z - bar.x;
+    if (d.vertical) {
+        const float f = std::clamp((m.y - d.view.y - barH * 0.5f) / std::max(vh - barH, 1e-3f),
+                                   0.0f, 1.0f);
+        const float mn = std::min(0.0f, (d.sv->m_contentBoxMin.y - d.view.y) / us);
+        const float mx = std::max(0.0f, (d.sv->m_contentBoxMax.y - d.view.w) / us);
+        d.sv->scrollOffset.y = mn + f * (mx - mn);
+    } else {
+        const float f = std::clamp((m.x - d.view.x - barL * 0.5f) / std::max(vw - barL, 1e-3f),
+                                   0.0f, 1.0f);
+        const float mn = std::min(0.0f, (d.sv->m_contentBoxMin.x - d.view.x) / us);
+        const float mx = std::max(0.0f, (d.sv->m_contentBoxMax.x - d.view.z) / us);
+        d.sv->scrollOffset.x = mn + f * (mx - mn);
+    }
+}
 
 bool deliverButton(Button& b, const glm::vec4& rect, const glm::vec2& mouse, bool leftDown,
                    bool leftPressed) {
@@ -905,22 +984,29 @@ bool deliverScrollView(ScrollView& sv, const glm::vec4& rect, const glm::vec2& m
     if (!pointInRect(mouse, rect)) return false;
     const glm::vec2 d = Input::scrollDelta();
     if (d.x == 0.0f && d.y == 0.0f) return false;
+    // 滚轮向下（d.y<0）→ scrollOffset 增加 → 内容上移（看更下面）；钳制依据 =
+    // 内容原位边界 vs 可视区（rect）：上界 = 内容底对齐视口底，下界 = 内容顶对齐视口顶
+    const float us = sv.gameObject() ? uiScaleOf(sv.gameObject()) : 1.0f;
+    const glm::vec2 maxOff{std::max(0.0f, (sv.m_contentBoxMax.x - rect.z) / us),
+                           std::max(0.0f, (sv.m_contentBoxMax.y - rect.w) / us)};
+    const glm::vec2 minOff{std::min(0.0f, (sv.m_contentBoxMin.x - rect.x) / us),
+                           std::min(0.0f, (sv.m_contentBoxMin.y - rect.y) / us)};
     glm::vec2 next = sv.scrollOffset;
-    const glm::vec2 maxOff{std::max(0.0f, sv.m_contentSize.x - sv.size.x),
-                           std::max(0.0f, sv.m_contentSize.y - sv.size.y)};
     bool changed = false;
     if (sv.scrollHorizontal && d.x != 0.0f) {
-        const float nx = std::clamp(next.x + d.x * sv.scrollSensitivity, 0.0f, maxOff.x);
+        const float nx = std::clamp(next.x - d.x * sv.scrollSensitivity, minOff.x, maxOff.x);
         changed = changed || nx != next.x;
         next.x = nx;
     }
     if (sv.scrollVertical && d.y != 0.0f) {
-        const float ny = std::clamp(next.y + d.y * sv.scrollSensitivity, 0.0f, maxOff.y);
+        const float ny = std::clamp(next.y - d.y * sv.scrollSensitivity, minOff.y, maxOff.y);
         changed = changed || ny != next.y;
         next.y = ny;
     }
     sv.scrollOffset = next;
-    return changed;
+    // 已到边界（changed=false）也返回 true：指针在 ScrollView 上即消费滚轮——调用方
+    //（编辑器）据此抑制相机缩放，否则滚到底时相机会突然接管滚轮（用户报障「视角偏远」）
+    return true;
 }
 
 // 静态库链接防护（V0.5-13）：UIRenderer 对 Slider/ScrollView 仅按指针访问公共字段，
@@ -1082,7 +1168,7 @@ void UIRenderer::render(const Scene& scene, int screenW, int screenH) {
             // contentSize 收集（与可见性无关；Edit 预览无 processInput 也保持新鲜值）
             for (auto& entry : ws.collectors) {
                 for (const glm::vec4* r : {&e.image, &e.text, &e.button, &e.slider, &e.scrollView})
-                    if (rectValid(*r)) entry.second.add(*r);
+                    if (rectValid(*r)) entry.second->add(*r);
             }
             if (ws.clipEmpty) return;   // ScrollView 交集为空 → 子树整体不可见
             EmitCtx ctx{sink, ws.hasClip ? clipIndexOf(clipRects, ws.clip) : -1};
@@ -1104,12 +1190,12 @@ void UIRenderer::render(const Scene& scene, int screenW, int screenH) {
                                         const UIWalkState& childCtx, const ContentBox& box) {
             const ScrollView* sv = node->getComponent<ScrollView>();
             if (!sv) return;
-            finalizeContentSize(*sv, box);
-            clampScrollOffset(*sv);
-            if (childCtx.clipEmpty) return;
             const float us = uiScaleOf(node);
             const glm::vec4 view =
                 translateRect(centerRect(sv->anchor, sv->offset, sv->size, us), nodeCtx.translate);
+            finalizeContentSize(*sv, box);
+            clampScrollOffset(*sv, view);
+            if (childCtx.clipEmpty) return;
             EmitCtx ctx{sink, childCtx.hasClip ? clipIndexOf(clipRects, childCtx.clip) : -1};
             emitScrollBars(ctx, *sv, us, view, white, atlasTex);
         };
@@ -1190,6 +1276,23 @@ void UIRenderer::processInput(const Scene& scene, const glm::vec2& mouse, bool l
     }
     for (Slider* s : scene.findComponents<Slider>()) s->m_dragging = false;
 
+    // 2a. 滚动条拖拽捕获（V0.5 验收补强；跨帧语义与 Slider 拖拽一致）
+    if (s_activeScrollDrag.sv) {
+        GameObject* dragGo = (s_activeScrollDrag.scene == &scene)
+            ? scene.findGameObject(s_activeScrollDrag.goId) : nullptr;
+        const bool valid = dragGo &&
+                           dragGo->getComponent<ScrollView>() == s_activeScrollDrag.sv;
+        if (!valid) {
+            s_activeScrollDrag = {};   // 场景已切换/GO 已销毁重建：丢弃捕获
+        } else if (leftDown) {
+            updateScrollFromDrag(s_activeScrollDrag, m);
+            s_lastPointerConsumed = true;
+            return;
+        } else {
+            s_activeScrollDrag = {};   // 松开帧：捕获结束，本帧其余交互照常处理
+        }
+    }
+
     // 2. Slider 拖拽捕获（跨帧）：拖拽中指针移动/离开控件不改变投递目标（连续回调）
     if (s_activeDrag.slider) {
         // 校验经 GO id 重查：场景重建后原始 Slider* 悬垂，先 findGameObject 再取组件，
@@ -1239,6 +1342,24 @@ void UIRenderer::processInput(const Scene& scene, const glm::vec2& mouse, bool l
             deliverScrollView(*static_cast<ScrollView*>(e.scrollView), e.scrollViewRect, m)) {
             consumed = true;
             break;
+        }
+        // 滚动条拖拽起点（V0.5 验收补强）：按下落在视口边缘 12px 条带（条心公式同渲染）
+        if (e.scrollView && leftPressed) {
+            ScrollView* sv = static_cast<ScrollView*>(e.scrollView);
+            const float us = e.go ? uiScaleOf(e.go) : 1.0f;
+            const glm::vec4 vh = scrollBarHitRect(e.scrollViewRect, /*vertical=*/true);
+            const glm::vec4 hh = scrollBarHitRect(e.scrollViewRect, /*vertical=*/false);
+            if (pointInRect(m, vh) && rectValid(scrollBarRect(*sv, us, e.scrollViewRect, true))) {
+                s_activeScrollDrag = {&scene, e.go->id(), sv, e.scrollViewRect, true};
+                consumed = true;
+                break;
+            }
+            if (pointInRect(m, hh) &&
+                rectValid(scrollBarRect(*sv, us, e.scrollViewRect, false))) {
+                s_activeScrollDrag = {&scene, e.go->id(), sv, e.scrollViewRect, false};
+                consumed = true;
+                break;
+            }
         }
     }
     s_lastPointerConsumed = consumed;
