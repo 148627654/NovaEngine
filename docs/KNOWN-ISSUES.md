@@ -282,3 +282,11 @@ Wave 2 审查无 P0；两条 P1 已修复（见下段「已修复项」）。以
 - **根因**：场景批量销毁（~Scene / deserialize 原地重建）时，组件析构的 unregister 路径仍执行「重建/重挂」——正在析构的 Collider 被重新注册进 hostByCollider/staticBodyByGo，随后对已释放的 GameObject 再次 rebuildStaticBody → 对悬挂 GO 的 UAF（编辑器 abort / Player 关闭挂死两种表象）。diag 文件日志实证：同一 Ground 指针被重建 3 次、第 3 次挂在 getComponents。
 - **修复**：PhysicsWorld::beginTeardown() 批量销毁旗标——~Scene 与 SceneSerializer::deserialize 清空前置位，register/unregister 四入口在旗标期直返（不再重建/重挂）；残留 body 由 ~Impl 的 teardownAll 统一销毁；syncFromTransforms 复位并全量重建（Edit 态本不步进物理，无功能损失；LoadScene 路径的 start() 亦触发复位）。
 - **验证**：Player 带物理场景优雅关闭——进程干净退出（0 残留、0 断言），teardownAll→监听清理→Jolt 成员析构→UnregisterTypes 全链路走完；退出 Play 编辑器路径待用户复验。
+
+## 2026-11-18 波 2 记录
+
+- **波 2 契约冻结（1cf889f）**：ARCHITECTURE §25 落盘——2a/2b 两轮拆分、骨架日纪律、9 项功能接口签名；#15 保留 spike 独立分支（spike/network-v1，独立 worktree，代码不进 main）、热重载 mtime 自动检测默认开（用户裁定）。
+- **骨架日交付（890f475，c0）**：一次性布完 2a+2b 全部冻结头与钩子——16 新头 + 13 桩 cpp + SceneRenderer 遍历扩展点（LOD 替换/地形粒子钩子/IBL 天空接线/SSAO 管线/正交投影/Sprite 收集）+ GBuffer MRT + AO 合成 + IBL 采样段。Debug 全量零错误零警告、编辑器 headless 退出码 0、Player 冒烟正常。4 处落地裁定已回写 ARCHITECTURE §25.0。
+- **网络 spike 交付（b2d93f9，c9，spike/network-v1 分支，不进 main）**：锁步帧同步原型（WinSock2 非阻塞、60Hz 固定 tick、3 帧输入缓冲、NetCube 确定性积分）——单机双进程实测 60 秒 3482 帧双方日志逐字节一致；80ms 延迟注入与断开均不崩溃。结论已写入 ARCHITECTURE §25.9 落地结论：可行性成立；跨机 Jolt 物理锁步 V1.0 不纳入（确定性未验证）；局域网双人锁步（无物理同步）可选纳入（2-3 周）。分支保留不合并。
+- **既有问题（非波 2 回归）**：PlayCycleTest 在「V05UITest 往返」段崩于 Mesh::create（测试进程无 GL 上下文、glad 指针为空）——c0 已 git stash A/B 验证 HEAD 基线同点同 exit 139 崩溃，系 b0b1454 重建场景加入 MeshRenderer 后遗留。修复选项（测试侧跳过 GPU 上传 / 引擎 Mesh::create GL 守卫 / 场景去 MeshRenderer）留 2a 合波前定，不阻塞 Coder 开工。
+- **合波日待办（c0 骨架日报告 + c9 报告移交）**：Physics2D::step 在 Scene::update 固定点接线；ParticleRenderer 统计上报通道（Renderer 补 setter）；SceneViewPanel/Player 的 hdrFbo.create 传 normalDepth=true（SSAO 附件接通）；Camera 投影字段序列化键；NovaEngine.h 伞头 include；editor 面板接线（EnvironmentPanel SSAO/IBL 区、InspectorPanel 新组件、EditorApplication Auto Reload 菜单）。

@@ -2284,6 +2284,12 @@ NovaEditor.exe --headless [--import] [--build --scene <path> --out <dir>] [--qui
 12. GLSL 新增：ibl_irradiance_conv.frag、ibl_prefilter.frag、ibl_brdf_lut.frag、（可选 ibl_irradiance.comp/ibl_prefilter.comp）、ssao.frag、particle.vert/.frag、terrain.vert/.frag、blinn_phong_skinned.vert、sprite.vert；修改：blinn_phong.frag（IBL 间接光 + GBuffer 法线/线性深度输出）、post_combine.frag（AO 合成）——两处修改均由 c0 骨架日完成
 13. CMake：samples/CMakeLists.txt 重写（OBJECT→SHARED NovaGame.dll）；editor/CMakeLists.txt +WINDOWS_EXPORT_ALL_SYMBOLS +/WHOLEARCHIVE +NOVA_GAME_DLL_PATH/NOVA_BUILD_CONFIG 编译定义 + 面板源清单（c0/c5）；player/CMakeLists.txt +WINDOWS_EXPORT_ALL_SYMBOLS（c5）
 
+**骨架日落地裁定（2026-11-18，c0，提交 890f475）**——对 §25 冻结签名的 4 处补充（不改任何已冻结签名，全部追加式；各 Coder 以本块 + §25 原文为准）：
+1. Renderer.h 追加 `static void setGbufferPassEnabled(bool)`：§25.3 的 uGbufferPass 开关需要携带通道（§25.0 冻结清单未列）。SceneRenderer 每帧按 (hdr && ssaoEnabled) 设置；renderScene 旧路径恒 false。
+2. AnimatorParameter/AnimatorTransition/AnimatorState 三结构体落点 = `Animation/AnimatorController.h`（§25.7 代码块列于 Animator.h 内，与 §25.0 文件清单要求的 AnimatorController.h 合并裁定）；Animator.h include AnimatorController.h——名字/签名逐字不变，c7 include 任一均可取到。
+3. blinn_phong.frag 追加 `uniform mat4 uView`（契约未列）：GBuffer 段换算视图空间法线/线性深度所需（CameraBlock 仅 uViewProj）；由 Renderer.cpp 的 setBlinnPhongUniforms 每项设置；blinn_phong.vert 未动。
+4. SSAO 触发条件 = 契约「ssaoEnabled && hdr」追加附件存在性检查（normalTextureId()/depthLinearTextureId() != 0，即 §25.3「附件创建失败 → AO 跳过」降级路径）。注意：编辑器 SceneViewPanel（c6 文件）与 Player main（c5 文件）的 hdrFbo.create 尚未传 normalDepth=true，接通前 SSAO 实际走降级分支（接通归合波日）。
+
 ---
 
 ## 25.1 LOD 系统（c1，V0.5-3）
@@ -2727,6 +2733,8 @@ static bool extractSkeleton(const aiScene* src, const aiMesh* skinMesh, Skeleton
 static bool extractAnimations(const aiScene* src, std::vector<AnimationClip>& out);   // aiNodeAnim/aiMeshAnim
 ```
 
+> 落地裁定（890f475）：AnimatorParameter/AnimatorTransition/AnimatorState 三结构体实际落点 `Animation/AnimatorController.h`（Animator.h include 之，签名不变）——见 §25.0 骨架日落地裁定 2。
+
 **行为（9.1）**：动画采样（最近关键帧插值 TRS）→ 局部矩阵 → 全局矩阵 × inverseBind → 骨骼矩阵数组 → Mesh::setBoneMatrices → blinn_phong_skinned.vert 蒙皮变换，**复用 blinn_phong.frag（2a 后含 IBL——蒙皮角色自动获得 IBL 间接光）**；单动画播放 = Animator 未配置状态机时的退化形态（1 状态）。**行为（9.2）**：每帧检查当前状态出边过渡条件 → 触发后按 duration 线性混合两状态骨骼矩阵（权重渐变）→ 过渡完切换；Trigger 当帧消费；无 SMR → Animator no-op warn 一次。面板：AnimatorPanel 列表式（状态列表/参数列表/过渡列表，无节点图——ROADMAP 裁定）。
 
 **序列化键名**：
@@ -2841,7 +2849,12 @@ public:
 
 **风险：中**（Jolt 跨机浮点确定性未验证——spike 用「确定性积分移动方块」绕开物理同步，结论中记录 Jolt 确定性评估；WinSock2 代码全部隔离在 Network 目录）。**回滚**：分支不合并即 main 零影响；结论文档仅一段文字，可随时删。
 
-**落地结论（占位，spike 完成后由主会话填入）**：可行性 / 成本拆解 / V1.0+ 建议。
+**落地结论（spike 完成，c9 分支 b2d93f9，2026-11-18）**：
+- **可行性：成立。** 锁步与引擎天然契合（物理固定 60Hz 步进 + 单线程主循环）；非阻塞 WinSock2 网络层 ~1100 行即可用；单机双进程实测 60 秒 3482 帧**双方日志逐字节一致零偏离**；80ms 延迟注入（超 3 帧缓冲）仍逐帧精确同步（以慢机为准停等，设计行为）；断开/强杀不崩溃。
+- **Jolt 确定性评估**：固定步进是必要非充分条件——Jolt 用 8 线程 JobSystemThreadPool 多线程求解器，官方仅承诺「同二进制+同平台」确定性，本引擎**未实测验证**；引擎侧另有帧率依赖逻辑/容器遍历顺序/脚本非确定性等不确定源。跨机物理锁步需双机万帧比对实测 + 必要时改单线程求解器（性能代价）——最大不确定项 2-6 周。
+- **成本拆解**：联网层产品化（重连/超时/多玩家/NAT）1-2 周；协议完善（显式小端序列化/版本协商）1-2 周；真机联调与缓冲调参 1 周；编辑器支持（网络面板/Play 联机入口）2-3 周；物理确定性验证改造 2-6 周——合计约 8-14 周（1.5-2 人月）。
+- **V1.0+ 建议**：① V1.0 **不纳入**跨机 Jolt 物理锁步（确定性未验证，风险高）；② V1.0 **可选纳入**「局域网双人锁步（确定性积分移动、无物理同步）」——约 2-3 周，可直接收编 spike 代码；③ 全物理联机留 V1.1+，先在「锁步+确定性验证」与「服务器权威状态同步」之间二选一再决策。
+- **分支处置**：spike/network-v1 保留不合并（用户裁定）。真机双机验证步骤见 c9 报告（同一局域网两机：主机 `--net host`，从机 `--net join --net-ip <主机IP>`，HUD 双方位置一致；定量验收 `--net-automove --net-duration 60` 后比对双方 Logs/NetSync_*.log 逐字节一致）。
 
 ---
 
