@@ -197,6 +197,15 @@ void Framebuffer::resize(int width, int height) {
 
 void Framebuffer::bind() const {
     glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+    // draw buffer 状态随本 FBO 重建（V0.5-5 SSAO）：单输出 pass（天空/网格/描边/精灵/线框）
+    // 会临时切 A0 防广播污染；几何 pass（blinn_phong GBuffer）需要完整 3 附件——
+    // 每次 bind 恢复本 FBO 的完整附件集合，各 pass 的临时切换不跨帧残留
+    if (m_normalDepth) {
+        const GLenum drawBuffers[3] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2};
+        glDrawBuffers(3, drawBuffers);
+    } else {
+        glDrawBuffer(GL_COLOR_ATTACHMENT0);
+    }
     glViewport(0, 0, m_width, m_height);
 }
 

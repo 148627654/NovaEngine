@@ -175,6 +175,10 @@ void drawSprites(const Scene& scene, const RenderCamera& renderCam) {
     ensureSpriteResources();
     if (!s_spriteShader) return;   // shader 失败：静默不绘制（不崩溃）
 
+    // 单输出 pass（ui.frag 仅 fragColor）：切 A0，防 MRT FBO 下唯一输出广播污染
+    // 法线/线性深度附件（V0.5-5 SSAO，c3 探针复现）
+    glDrawBuffer(GL_COLOR_ATTACHMENT0);
+
     // 透明段：AlphaBlend + 不写深度（深度仍测试——被 3D 几何正确遮挡；排序序 = 层序）
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -270,6 +274,9 @@ void renderSceneInternal(const Scene& scene, const RenderCamera& fallbackCamera,
 
     // 5. 渲染序列：天空 → 单次遍历收集（V0.5-14 视锥剔除 + 实例化分组）→ 阴影 → grid → endFrame
     Renderer::beginFrame(renderCam, light, glm::vec4(scene.skyColor, 1.0f));
+    // 天空 = 单输出 pass（只写 location 0）：MRT FBO 下切 A0，防唯一输出广播写入法线/
+    // 线性深度附件（V0.5-5 SSAO，c3 探针复现；SkyboxRenderer 自身不改 draw buffer 状态）
+    glDrawBuffer(GL_COLOR_ATTACHMENT0);
     SkyboxRenderer::draw(glm::inverse(renderCam.projection * renderCam.view), renderCam.position,
                          scene.skyMode, scene.skyHorizonColor, scene.skyZenithColor,
                          skyCube, scene.skyRotation, scene.skyExposure);
@@ -386,10 +393,13 @@ uint32_t SceneRenderer::renderSceneToOutput(const Scene& scene, const RenderCame
     // HDR → 场景线性输出（uGamma=0 直通，combine 内 ACES+gamma）；否则 1/2.2（直通路径）
     const bool hdr = pp.enabled && PostProcess::hdrSupported();
     Renderer::setGammaMode(hdr);
-    // GBuffer pass 开关（V0.5-5 SSAO，§25.3 数据流）：hdr 且 ssaoEnabled → blinn_phong 写
-    // 法线/线性深度附件；其余（含非 hdr 直通）恒关 = 逐像素与 2a 前一致。
-    // （附件实际缺失时输出被 GL 丢弃，无副作用——FBO normalDepth 是否生效由调用方创建时决定）
-    Renderer::setGbufferPassEnabled(hdr && pp.ssaoEnabled);
+    // GBuffer pass 开关（V0.5-5 SSAO，§25.3 数据流）：hdr 且 ssaoEnabled 且 MRT 附件真实
+    // 存在 → blinn_phong 写法线/线性深度附件（endFrame 据此把 draw buffer 切到 3 附件——
+    // 必须与附件真实存在严格一致，否则 glDrawBuffers(3) 令单附件 FBO 不完整而黑屏）；
+    // 其余（含非 hdr 直通）恒关 = 逐像素与 2a 前一致
+    const bool gbufferPass = hdr && pp.ssaoEnabled &&
+                             hdrFbo.normalTextureId() != 0 && hdrFbo.depthLinearTextureId() != 0;
+    Renderer::setGbufferPassEnabled(gbufferPass);
 
     // 3D pass（含天空/阴影/网格）→ 描边（若有）→ afterSceneDraw 注入点（Show Colliders 线框等）→ resolve
     hdrFbo.bind();

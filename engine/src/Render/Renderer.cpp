@@ -455,6 +455,16 @@ void Renderer::endFrame() {
     uint32_t instancedDrawCalls = 0;      // 本帧实例化批数（V0.5-14，结算到 s_lastInstancedDrawCalls）
     uint32_t instancedInstances = 0;      // 本帧实例化累计实例数
     if (s_initialized) {
+        // 几何 pass 的 draw buffer 配置（V0.5-5 SSAO，c3 探针）：单输出 pass（天空/网格/
+        // 描边/精灵/线框）只写 location 0，NVIDIA 会把唯一输出广播写入全部启用的 draw buffer
+        // ——各单输出 pass 已自行切 A0；此处按 GBuffer 开关切回：开 = 3 附件（写 GBuffer），
+        // 关 = A0（s_gbufferPass 仅在 MRT 附件真实存在时由 SceneRenderer 置位，安全）
+        if (s_gbufferPass) {
+            const GLenum drawBuffers[3] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2};
+            glDrawBuffers(3, drawBuffers);
+        } else {
+            glDrawBuffer(GL_COLOR_ATTACHMENT0);
+        }
         // 裁定 2：stable_partition 按 blendMode 分两段——opaque 在前、transparent 在后
         const auto transparentBegin = std::stable_partition(
             s_queue.begin(), s_queue.end(),
@@ -543,6 +553,9 @@ void Renderer::endFrame() {
 
 void Renderer::drawGrid(const glm::vec3& fogColor) {
     if (!s_initialized || !s_gridShader || !s_gridVao) return;
+    // 单输出 pass（grid.frag 仅 fragColor）：切 A0，防 MRT FBO 下唯一输出广播污染
+    // 法线/线性深度附件（V0.5-5 SSAO，c3 探针复现）
+    glDrawBuffer(GL_COLOR_ATTACHMENT0);
     s_gridShader->bind();
     s_gridShader->setMat4("uViewProj", s_viewProj);
     s_gridShader->setVec3("uCamPos", s_camPos);
@@ -573,6 +586,9 @@ void Renderer::drawGrid(const glm::vec3& fogColor) {
 void Renderer::drawOutline(std::shared_ptr<Mesh> mesh, const glm::mat4& modelMatrix,
                            const glm::vec3& color) {
     if (!s_initialized || !mesh || !s_blinnPhong || !s_outlineShader) return;
+    // 单输出 pass（第一遍 blinn_phong uGbufferPass=0、第二遍 outline.frag）：切 A0，
+    // 防 MRT FBO 下唯一输出广播污染法线/线性深度附件（V0.5-5 SSAO，c3 探针复现）
+    glDrawBuffer(GL_COLOR_ATTACHMENT0);
 
     // 膨胀量 = 模型 AABB 最大边长的 4%（对象空间沿法线膨胀，随模型缩放）
     const AABB& box = mesh->aabb();
@@ -616,6 +632,8 @@ void Renderer::drawLines(const std::vector<glm::vec3>& positions, const glm::vec
     // 3D pass 之后调用；CameraBlock UBO（binding 0，beginFrame 已填充）复用为 uViewProj。
     if (!s_initialized || !s_debugLineShader || positions.size() < 2)
         return;
+    // 单输出 pass：切 A0，防 MRT FBO 下唯一输出广播污染法线/线性深度附件（V0.5-5 SSAO）
+    glDrawBuffer(GL_COLOR_ATTACHMENT0);
 
     // 懒创建线框 VAO/VBO（动态顶点流，每帧整体上传——碰撞体线框规模小）
     if (s_debugLineVao == 0) {
