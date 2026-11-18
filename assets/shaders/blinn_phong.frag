@@ -49,6 +49,18 @@ uniform int uShadowEnabled;     // 0 = 无阴影（无阴影帧由 C++ 关掉）
 uniform float uShadowBias;      // 深度偏置（[0,1] 深度空间；默认 0.0005 约合数厘米世界距离）
 uniform float uShadowMapSize;   // 深度贴图边长（texel 步长用）
 
+// ===== IBL 环境（V0.5-4，c0 骨架日布；贴图 unit 总表追加 6/7/8）=====
+uniform samplerCube uIrrMap;    // unit 6：irradiance 卷积（32²）
+uniform samplerCube uPrefMap;   // unit 7：prefiltered 镜面（128²，mip 链 5 级）
+uniform sampler2D uBrdfLut;     // unit 8：BRDF 积分 LUT（512²）
+uniform float uIblIntensity;    // 0 = 间接光 0（与 2a 前逐像素一致）
+
+// ===== GBuffer 输出（V0.5-5 SSAO，c0 骨架日布）=====
+layout(location = 1) out vec3 oNormal;       // 视图空间法线（RGBA16F 附件 1）
+layout(location = 2) out float oLinearDepth; // 线性深度（view-space -z，RGBA16F 附件 2）
+uniform int uGbufferPass;      // 0（默认）= 不写 GBuffer，off 时逐像素与原来一致
+uniform mat4 uView;            // 视图矩阵（视图空间法线/线性深度换算）
+
 // ===== 输出 gamma（V0.3-4）=====
 // 无后处理：1/2.2（V0.2 现行为）；HDR 模式：0（触发直通分支，非 pow 指数 0；波 3 后处理接管，届时 C++ 侧改设）
 uniform float uGamma;
@@ -138,14 +150,35 @@ void main() {
     // 阴影只作用于直射光（环境光不受影）
     float shadow = uShadowEnabled != 0 ? shadowFactor(vWorldPos, N, L) : 1.0;
 
-    // 环境光沿用 V0.2 语义（ambient * albedo；无 IBL，金属环境反射留待后处理扩展）
+    // 环境光沿用 V0.2 语义（ambient * albedo）
     vec3 ambient = uAmbient * albedo;
+
+    // ===== IBL 间接光（V0.5-4）：uIblIntensity=0 或未绑定 → 贡献 0，与 2a 前逐像素一致
+    //（程序化回退 = 既有 ambientColor，不黑屏）=====
+    vec3 indirect = vec3(0.0);
+    if (uIblIntensity > 0.0) {
+        vec3 R = reflect(-V, N);                       // 世界空间反射方向
+        vec3 irradiance = texture(uIrrMap, N).rgb;     // 漫反射：irradiance 卷积（unit 6）
+        // 镜面：prefiltered mip 链（unit 7，5 级）按粗糙度选 LOD（0..4）
+        vec3 prefiltered = textureLod(uPrefMap, R, roughness * 4.0).rgb;
+        // BRDF LUT（unit 8）：(NdotV, roughness) → (scale, bias) 补偿
+        vec2 brdf = texture(uBrdfLut, vec2(NdotV, roughness)).rg;
+        vec3 specularIbl = prefiltered * (F * brdf.x + brdf.y);
+        indirect = (kD * irradiance * albedo + specularIbl) * uIblIntensity;
+    }
 
     // 自发光（贴图 × 颜色 × 强度，线性空间相加）
     vec3 emission = (uUseEmissionMap != 0 ? texture(uEmissionMap, vUV).rgb : vec3(1.0))
                     * uEmissionColor * uEmissionIntensity;
 
-    vec3 color = ambient + direct * shadow + emission;
+    vec3 color = ambient + direct * shadow + indirect + emission;
+
+    // ===== GBuffer 输出（V0.5-5 SSAO）：uGbufferPass=1 时写附件 1/2（法线/线性深度）；
+    // 默认 0 = 该段不执行，逐像素与 2a 前一致 =====
+    if (uGbufferPass != 0) {
+        oNormal = mat3(uView) * N;                          // 世界法线 → 视图空间（RGBA16F 附件 1）
+        oLinearDepth = -(uView * vec4(vWorldPos, 1.0)).z;   // view-space -z 线性深度（附件 2）
+    }
 
     // 输出前 gamma 校正（引擎管线按线性计算，显示器按 sRGB 显示；uGamma=1/2.2 现行为）
     // uGamma<=0（HDR 模式，波 3 启用）走直通分支——pow(x,0)≡1 会全白，故必须显式分支

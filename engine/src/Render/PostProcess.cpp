@@ -53,6 +53,10 @@ int s_height = 0;
 
 uint32_t s_copyFbo = 0;   // 直通 blit 的 READ 挂载点（懒创建；不依赖 shader）
 
+// ===== V0.5-5 SSAO：combine 合成用 AO 纹理（0 = 无 AO → 绑 1×1 白，shader 侧乘 1）=====
+uint32_t s_aoTex = 0;
+uint32_t s_whiteTex = 0;   // 懒创建兜底白（AO=0 时乘 1，逐像素与 2a 前一致）
+
 // RGB16F 探测缓存（一次性）
 bool s_hdrProbed = false;
 bool s_hdr = false;
@@ -98,6 +102,20 @@ void runBlur(uint32_t srcTex, int srcW, int srcH, const BloomTex& dst,
     s_blurShader->setVec3("uTexelSize", glm::vec3(1.0f / static_cast<float>(srcW),
                                                   1.0f / static_cast<float>(srcH), 0.0f));
     drawFullscreenInto(dst);
+}
+
+// AO 兜底白纹理（V0.5-5）：懒创建 1×1 白——AO 纹理为 0 时 combine 采样恒 1（乘 1 不变）
+uint32_t aoWhiteTexture() {
+    if (s_whiteTex == 0) {
+        const uint8_t white[4] = {255, 255, 255, 255};
+        glGenTextures(1, &s_whiteTex);
+        glBindTexture(GL_TEXTURE_2D, s_whiteTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, white);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+    return s_whiteTex;
 }
 
 // 直通 blit：hdrTex → 当前绑定 FBO（GL_READ 临时挂载；不依赖 shader，降级可用）
@@ -153,6 +171,8 @@ void PostProcess::shutdown() {
     destroyBloomTex(s_blur1);
     destroyBloomTex(s_blur2);
     if (s_copyFbo) { glDeleteFramebuffers(1, &s_copyFbo); s_copyFbo = 0; }
+    if (s_whiteTex) { glDeleteTextures(1, &s_whiteTex); s_whiteTex = 0; }
+    s_aoTex = 0;
     if (s_fullscreenVao) { glDeleteVertexArrays(1, &s_fullscreenVao); s_fullscreenVao = 0; }
     s_brightShader.reset();
     s_blurShader.reset();
@@ -178,6 +198,10 @@ void PostProcess::resize(int w, int h) {
     createBloomTex(w / 2, h / 2, s_blur0);
     createBloomTex(w / 4, h / 4, s_blur1);
     createBloomTex(w / 8, h / 8, s_blur2);
+}
+
+void PostProcess::setAmbientOcclusionTexture(uint32_t tex) {
+    s_aoTex = tex;   // 0 = 无 AO（combine 乘 1）；由 SceneRenderer 每帧按 SSAO 结果设置（§25.3）
 }
 
 bool PostProcess::hdrSupported() {
@@ -270,8 +294,12 @@ void PostProcess::apply(uint32_t hdrColorTexture, const PostProcessSettings& s) 
     glBindTexture(GL_TEXTURE_2D, hdrColorTexture);
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, bloomTex);
+    // AO 合成（V0.5-5 SSAO，§25.3）：unit 2——0 = 绑兜底白（shader 侧乘 1，AO 无贡献）
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, s_aoTex != 0 ? s_aoTex : aoWhiteTexture());
     s_combineShader->setInt("uScene", 0);
     s_combineShader->setInt("uBloom", 1);
+    s_combineShader->setInt("uAmbientOcclusionTexture", 2);
     s_combineShader->setFloat("uBloomIntensity", std::max(s.bloomIntensity, 0.0f));
     s_combineShader->setFloat("uExposure", std::max(s.exposure, 0.001f));
     glDrawArrays(GL_TRIANGLES, 0, 3);
@@ -279,6 +307,8 @@ void PostProcess::apply(uint32_t hdrColorTexture, const PostProcessSettings& s) 
     // ===== 状态恢复 =====
     glBindVertexArray(static_cast<uint32_t>(prevVao));
     glUseProgram(static_cast<uint32_t>(prevProgram));
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, 0);
     glActiveTexture(static_cast<GLenum>(prevActiveTex));

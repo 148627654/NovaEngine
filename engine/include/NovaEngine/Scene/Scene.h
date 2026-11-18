@@ -58,6 +58,7 @@ public:
     std::string skyCubemapPath;                                   // 空=渐变回退；否则 6 面目录或 equirect 文件
     float skyRotation = 0.0f;                                     // cubemap 绕 +Y 旋转（度）
     float skyExposure = 1.0f;                                     // HDR 曝光
+    float iblIntensity = 1.0f;   // IBL 强度（V0.5-4；environment.ibl 段，0 = 关闭环境间接光）
 
     // 后处理（V0.3-14，波 3 冻结；SceneSerializer 读写 environment.postProcess 段）
     PostProcessSettings postProcess;

@@ -39,6 +39,12 @@ std::string SceneSerializer::serialize(const Scene& scene, int indent) {
         env["skyCubemapPath"] = scene.skyCubemapPath;
         env["skyRotation"] = scene.skyRotation;
         env["skyExposure"] = scene.skyExposure;
+        // IBL（V0.5-4）：environment.ibl 段（Scene::iblIntensity）
+        {
+            nlohmann::json ibl;
+            ibl["iblIntensity"] = scene.iblIntensity;
+            env["ibl"] = std::move(ibl);
+        }
         // 后处理（V0.3-14，波 3）：environment.postProcess 段，读时全默认值兜底
         {
             nlohmann::json pp;
@@ -47,6 +53,11 @@ std::string SceneSerializer::serialize(const Scene& scene, int indent) {
             pp["bloomIntensity"] = scene.postProcess.bloomIntensity;
             pp["bloomLevels"] = scene.postProcess.bloomLevels;
             pp["exposure"] = scene.postProcess.exposure;
+            // SSAO（V0.5-5）：四键追加（缺省关；旧文件读时兜底零警告）
+            pp["ssaoEnabled"] = scene.postProcess.ssaoEnabled;
+            pp["ssaoRadius"] = scene.postProcess.ssaoRadius;
+            pp["ssaoStrength"] = scene.postProcess.ssaoStrength;
+            pp["ssaoSampleCount"] = scene.postProcess.ssaoSampleCount;
             env["postProcess"] = std::move(pp);
         }
         root["environment"] = std::move(env);
@@ -203,6 +214,12 @@ void SceneSerializer::deserialize(Scene& target, const std::string& json) {
         target.skyCubemapPath = safeGet(env, "skyCubemapPath", std::string());
         target.skyRotation = safeGet(env, "skyRotation", 0.0f);
         target.skyExposure = safeGet(env, "skyExposure", 1.0f);
+        // IBL（V0.5-4）：旧文件无 ibl 段 → 默认 1.0（有 cubemap 天空的旧场景打开后自动获得
+        // IBL 增强，用户可调 0 关闭；无 HDRI 时本就无 IBL，缺省零影响）
+        const nlohmann::json& iblNode = (env.contains("ibl") && env["ibl"].is_object())
+                                            ? env["ibl"]
+                                            : kEmptyObject;
+        target.iblIntensity = safeGet(iblNode, "iblIntensity", 1.0f);
 
         // 后处理（V0.3-14，波 3）：旧文件无此段 → 全默认值兜底（与 PostProcessSettings 一致）
         const nlohmann::json& pp = (env.contains("postProcess") && env["postProcess"].is_object())
@@ -213,6 +230,11 @@ void SceneSerializer::deserialize(Scene& target, const std::string& json) {
         target.postProcess.bloomIntensity = safeGet(pp, "bloomIntensity", 0.5f);
         target.postProcess.bloomLevels = safeGet(pp, "bloomLevels", 3);
         target.postProcess.exposure = safeGet(pp, "exposure", 1.0f);
+        // SSAO（V0.5-5）：四键缺省兜底（旧文件零警告）
+        target.postProcess.ssaoEnabled = safeGet(pp, "ssaoEnabled", false);
+        target.postProcess.ssaoRadius = safeGet(pp, "ssaoRadius", 0.5f);
+        target.postProcess.ssaoStrength = safeGet(pp, "ssaoStrength", 1.0f);
+        target.postProcess.ssaoSampleCount = safeGet(pp, "ssaoSampleCount", 16);
 
         const nlohmann::json& cam =
             (root.contains("editorCamera") && root["editorCamera"].is_object()) ? root["editorCamera"] : kEmptyObject;

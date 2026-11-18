@@ -12,24 +12,34 @@
 #include <NovaEngine/Assets/AssetDatabase.h>
 #include <NovaEngine/Assets/MaterialAsset.h>
 #include <NovaEngine/Core/Logger.h>
+#include <NovaEngine/Particles/ParticleRenderer.h>
 #include <NovaEngine/Render/Cubemap.h>
 #include <NovaEngine/Render/Framebuffer.h>
 #include <NovaEngine/Render/Frustum.h>
+#include <NovaEngine/Render/IBL.h>
 #include <NovaEngine/Render/PostProcess.h>
+#include <NovaEngine/Render/SSAO.h>
+#include <NovaEngine/Render/Shader.h>
 #include <NovaEngine/Render/ShadowMap.h>
 #include <NovaEngine/Render/SkyboxRenderer.h>
+#include <NovaEngine/Render/Texture.h>
 #include <NovaEngine/Scene/Camera.h>
 #include <NovaEngine/Scene/DirectionalLight.h>
+#include <NovaEngine/Scene/LODGroup.h>
 #include <NovaEngine/Scene/MeshRenderer.h>
 #include <NovaEngine/Scene/Scene.h>
+#include <NovaEngine/Scene/SpriteRenderer.h>
 #include <NovaEngine/Scene/Transform.h>
+#include <NovaEngine/Terrain/TerrainRenderer.h>
 #include <NovaEngine/UI/UIRenderer.h>
+
+#include <glad/gl.h>
 
 #include <algorithm>
 #include <cstddef>
 
 #include <glm/geometric.hpp>              // dot（阴影盒中心投影）
-#include <glm/gtc/matrix_transform.hpp>   // lookAt / perspective / radians / inverse
+#include <glm/gtc/matrix_transform.hpp>   // lookAt / perspective / ortho / radians / inverse
 
 namespace NovaEngine {
 
@@ -69,10 +79,132 @@ bool assembleFromCamera(const Camera* cam, const RenderCamera& fallback, RenderC
     if (!t) return false;
     const glm::vec3 pos = t->worldPosition();
     out.view = glm::lookAt(pos, pos + t->forward(), glm::vec3(0.0f, 1.0f, 0.0f));
-    out.projection = glm::perspective(glm::radians(cam->fov), aspectOf(fallback),
-                                      cam->nearPlane, cam->farPlane);
+    // V0.5-10 2D（§25.8）：按投影模式分支——缺省 Perspective = 旧行为零变化；
+    // 正交半高 = orthoSize（Unity 语义），半宽按 fallback 宽高比保持视口比例
+    if (cam->projectionMode == ProjectionMode::Orthographic) {
+        const float aspect = aspectOf(fallback);
+        const float halfH = glm::max(cam->orthoSize, 0.001f);
+        const float halfW = halfH * aspect;
+        out.projection = glm::ortho(-halfW, halfW, -halfH, halfH, cam->nearPlane, cam->farPlane);
+    } else {
+        out.projection = glm::perspective(glm::radians(cam->fov), aspectOf(fallback),
+                                          cam->nearPlane, cam->farPlane);
+    }
     out.position = pos;
     return true;
+}
+
+// ===== 2D 精灵渲染（V0.5-10 骨架日最小版，c8 后续可改进 sprite.vert）=====
+// sprite.vert（世界变换 quad）+ ui.frag（vColor × 贴图 alpha）复用；
+// 收集 → (sortingLayer, orderInLayer, 视距) 排序 → 顺序提交（层越大越后绘，§25.8）。
+std::shared_ptr<Shader> s_spriteShader;
+uint32_t s_spriteVao = 0, s_spriteVbo = 0;
+std::shared_ptr<Texture> s_spriteWhiteTex;   // 空贴图 = 白块（1×1 世界单位，Unity 默认精灵语义）
+
+struct SpriteItem {
+    glm::mat4 world;
+    std::shared_ptr<Texture> texture;
+    glm::vec4 color;
+    int sortingLayer = 0, orderInLayer = 0;
+    float viewDepth = 0.0f;   // 视空间深度（远 → 大）
+    float sizeX = 1.0f, sizeY = 1.0f;
+    bool flipX = false, flipY = false;
+};
+
+void ensureSpriteResources() {
+    if (!s_spriteShader)
+        s_spriteShader = Shader::createFromFiles("assets/shaders/sprite.vert",
+                                                 "assets/shaders/ui.frag");
+    if (s_spriteVao == 0) {
+        // quad VAO + 动态 VBO（每精灵 6 顶点，交错 pos(3) + uv(2) + color(4)）
+        glGenVertexArrays(1, &s_spriteVao);
+        glBindVertexArray(s_spriteVao);
+        glGenBuffers(1, &s_spriteVbo);
+        glBindBuffer(GL_ARRAY_BUFFER, s_spriteVbo);
+        constexpr GLsizei kStride = 9 * static_cast<GLsizei>(sizeof(float));
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, kStride, nullptr);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, kStride,
+                              reinterpret_cast<const void*>(3 * sizeof(float)));
+        glEnableVertexAttribArray(2);
+        glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, kStride,
+                              reinterpret_cast<const void*>(5 * sizeof(float)));
+        glBindVertexArray(0);
+    }
+    if (!s_spriteWhiteTex)
+        s_spriteWhiteTex = Texture::createWhite();
+}
+
+void drawSprites(const Scene& scene, const RenderCamera& renderCam) {
+    std::vector<SpriteItem> sprites;
+    scene.forEachObject([&](GameObject* go) {
+        if (!go->activeInHierarchy()) return;
+        const SpriteRenderer* sr = go->getComponent<SpriteRenderer>();
+        if (!sr) return;
+        const Transform* t = go->transform();
+        if (!t) return;
+        SpriteItem item;
+        item.world = t->worldMatrix();
+        item.texture = sr->texture;
+        item.color = sr->color;
+        item.sortingLayer = sr->sortingLayer;
+        item.orderInLayer = sr->orderInLayer;
+        item.flipX = sr->flipX;
+        item.flipY = sr->flipY;
+        const float ppu = sr->pixelsPerUnit > 0.0f ? sr->pixelsPerUnit : 100.0f;
+        if (sr->texture) {
+            item.sizeX = static_cast<float>(sr->texture->width()) / ppu;
+            item.sizeY = static_cast<float>(sr->texture->height()) / ppu;
+        } else {
+            item.sizeX = 100.0f / ppu;   // 白块 = 100×100 px 贴图（Unity 默认精灵）
+            item.sizeY = item.sizeX;
+        }
+        item.viewDepth = -(renderCam.view * glm::vec4(t->worldPosition(), 1.0f)).z;
+        sprites.push_back(std::move(item));
+    });
+    if (sprites.empty()) return;
+
+    // 排序：层/序升序（大层后绘覆盖），同层按视距降序（远先画，画家算法）
+    std::sort(sprites.begin(), sprites.end(), [](const SpriteItem& a, const SpriteItem& b) {
+        if (a.sortingLayer != b.sortingLayer) return a.sortingLayer < b.sortingLayer;
+        if (a.orderInLayer != b.orderInLayer) return a.orderInLayer < b.orderInLayer;
+        return a.viewDepth > b.viewDepth;
+    });
+
+    ensureSpriteResources();
+    if (!s_spriteShader) return;   // shader 失败：静默不绘制（不崩溃）
+
+    // 透明段：AlphaBlend + 不写深度（深度仍测试——被 3D 几何正确遮挡；排序序 = 层序）
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE);
+
+    s_spriteShader->bind();
+    s_spriteShader->setInt("uTex", 0);
+    glBindVertexArray(s_spriteVao);
+    for (const SpriteItem& item : sprites) {
+        const float hx = item.sizeX * 0.5f, hy = item.sizeY * 0.5f;
+        const float u0 = item.flipX ? 1.0f : 0.0f, u1 = item.flipX ? 0.0f : 1.0f;
+        const float v0 = item.flipY ? 1.0f : 0.0f, v1 = item.flipY ? 0.0f : 1.0f;
+        // 两个三角形（对象空间，X 右 Y 上——2D 平面 = 世界 XY）
+        const float verts[6 * 9] = {
+            -hx, -hy, 0.0f, u0, v0, item.color.r, item.color.g, item.color.b, item.color.a,
+             hx, -hy, 0.0f, u1, v0, item.color.r, item.color.g, item.color.b, item.color.a,
+             hx,  hy, 0.0f, u1, v1, item.color.r, item.color.g, item.color.b, item.color.a,
+            -hx, -hy, 0.0f, u0, v0, item.color.r, item.color.g, item.color.b, item.color.a,
+             hx,  hy, 0.0f, u1, v1, item.color.r, item.color.g, item.color.b, item.color.a,
+            -hx,  hy, 0.0f, u0, v1, item.color.r, item.color.g, item.color.b, item.color.a,
+        };
+        s_spriteShader->setMat4("uModel", item.world);
+        glBindBuffer(GL_ARRAY_BUFFER, s_spriteVbo);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STREAM_DRAW);
+        (item.texture ? item.texture : s_spriteWhiteTex)->bind(0);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+    }
+    glBindVertexArray(0);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
 }
 
 }  // namespace
@@ -120,9 +252,21 @@ void renderSceneInternal(const Scene& scene, const RenderCamera& fallbackCamera,
     }
 
     // 4. 天空 cubemap（Cubemap 模式且路径非空时加载；失败/渐变走 nullptr（内部回退渐变））
+    //    + IBL 环境（V0.5-4，§25.2 渲染接线）：天空盒与 IBL 同源（v1 无独立 IBL 源路径）。
+    //    loadCached 失败（渐变天空/6 面目录源/烘焙失败）→ setEnvironment(0,0,0,0)
+    //    （blinn_phong.frag 间接光贡献 0，程序化回退 = 既有 ambientColor，不黑屏）。
     std::shared_ptr<Cubemap> skyCube;
-    if (scene.skyMode == SkyMode::Cubemap && !scene.skyCubemapPath.empty())
+    if (scene.skyMode == SkyMode::Cubemap && !scene.skyCubemapPath.empty()) {
         skyCube = AssetDatabase::instance().getCubemap(scene.skyCubemapPath);
+        const std::shared_ptr<IblEnvironment> env = IBL::loadCached(scene.skyCubemapPath);
+        if (env)
+            Renderer::setEnvironment(env->irradianceId(), env->prefilterId(), env->brdfLutId(),
+                                     scene.iblIntensity);
+        else
+            Renderer::setEnvironment(0, 0, 0, 0);
+    } else {
+        Renderer::setEnvironment(0, 0, 0, 0);
+    }
 
     // 5. 渲染序列：天空 → 单次遍历收集（V0.5-14 视锥剔除 + 实例化分组）→ 阴影 → grid → endFrame
     Renderer::beginFrame(renderCam, light, glm::vec4(scene.skyColor, 1.0f));
@@ -147,11 +291,16 @@ void renderSceneInternal(const Scene& scene, const RenderCamera& fallbackCamera,
         if (!mr || !mr->mesh) return;
         const Transform* t = go->transform();
         if (!t) return;
+        // V0.5-3 LOD（§25.0 遍历扩展点）：mesh 来源替换——resolveMeshFor 无 LODGroup/无可用档
+        // → nullptr 回退 mr->mesh（= 旧路径零变化）；剔除/材质双轨/实例化分组/阴影收集逻辑
+        // 不变，全部使用同一替代结果
+        std::shared_ptr<Mesh> mesh = LODGroup::resolveMeshFor(go, renderCam.position);
+        if (!mesh) mesh = mr->mesh;
         const glm::mat4 world = t->worldMatrix();
         // 世界 AABB：局部 AABB 8 角点经世界矩阵变换取包围盒（非均匀缩放/旋转精确）；
         // 锥体外 → 跳过 submit 与阴影收集（被剔除物体不写阴影贴图，无幽灵阴影）
         if (Renderer::frustumCullingEnabled() &&
-            !frustum.intersects(transformAabb(mr->mesh->aabb(), world))) {
+            !frustum.intersects(transformAabb(mesh->aabb(), world))) {
             Renderer::markCulled();
             return;
         }
@@ -161,8 +310,8 @@ void renderSceneInternal(const Scene& scene, const RenderCamera& fallbackCamera,
                                                          : mr->material;
         // 透明物体不进阴影（裁定 2：队列归属只看 blendMode）
         if (shadowEnabled && mat.blendMode == BlendMode::Opaque)
-            shadowItems.push_back(ShadowItem{mr->mesh, world});
-        items.push_back(SceneItem{mr->mesh, mat, world});
+            shadowItems.push_back(ShadowItem{mesh, world});
+        items.push_back(SceneItem{mesh, mat, world});
     });
 
     // V0.5-14 实例化分组（冻结算法）：键 = (mesh 指针, material ==)；
@@ -199,15 +348,26 @@ void renderSceneInternal(const Scene& scene, const RenderCamera& fallbackCamera,
         }
     }
 
+    // ===== 遍历扩展点（§25.0 冻结语义，骨架日布；空实现默认 = 零影响）=====
+    // 遍历结束后、阴影 pass 前：地形（castShadows 时把地形项追加进 shadowItems）
+    // 与粒子（合并实例数据提交；绘制顺序由 c4 在实现内保证「粒子最后」）
+    TerrainRenderer::collectAndSubmit(scene, renderCam, frustum, shadowItems);
+    ParticleRenderer::collectAndSubmit(scene, renderCam);
+
     if (shadowEnabled) Renderer::drawShadowPass(shadowParams, shadowItems);
     if (scene.showGrid) Renderer::drawGrid(scene.fogColor);
     Renderer::endFrame();
+
+    // V0.5-10 2D 精灵：透明段，全部 3D 之后绘制（(sortingLayer, orderInLayer, 视距) 排序后提交）
+    drawSprites(scene, renderCam);
 }
 
 void SceneRenderer::renderScene(const Scene& scene, const RenderCamera& fallbackCamera) {
     // 旧路径（编辑器 Edit / 兼容调用）：固定非 HDR——uGamma=1/2.2，行为与波 2 逐像素一致
-    // （本入口每帧重置 gamma 模式，防止与 renderSceneToOutput 的 HDR 帧交错时状态泄漏）
+    // （本入口每帧重置 gamma 模式与 GBuffer 开关，防止与 renderSceneToOutput 的 HDR 帧
+    // 交错时状态泄漏；GBuffer 恒关 = blinn_phong 不写 MRT 附件，逐像素与 2a 前一致）
     Renderer::setGammaMode(false);
+    Renderer::setGbufferPassEnabled(false);
     renderSceneInternal(scene, fallbackCamera, /*useSceneCamera=*/true);
 }
 
@@ -226,6 +386,10 @@ uint32_t SceneRenderer::renderSceneToOutput(const Scene& scene, const RenderCame
     // HDR → 场景线性输出（uGamma=0 直通，combine 内 ACES+gamma）；否则 1/2.2（直通路径）
     const bool hdr = pp.enabled && PostProcess::hdrSupported();
     Renderer::setGammaMode(hdr);
+    // GBuffer pass 开关（V0.5-5 SSAO，§25.3 数据流）：hdr 且 ssaoEnabled → blinn_phong 写
+    // 法线/线性深度附件；其余（含非 hdr 直通）恒关 = 逐像素与 2a 前一致。
+    // （附件实际缺失时输出被 GL 丢弃，无副作用——FBO normalDepth 是否生效由调用方创建时决定）
+    Renderer::setGbufferPassEnabled(hdr && pp.ssaoEnabled);
 
     // 3D pass（含天空/阴影/网格）→ 描边（若有）→ afterSceneDraw 注入点（Show Colliders 线框等）→ resolve
     hdrFbo.bind();
@@ -238,6 +402,18 @@ uint32_t SceneRenderer::renderSceneToOutput(const Scene& scene, const RenderCame
     if (afterSceneDraw)
         afterSceneDraw();
     hdrFbo.resolveMsaa();
+
+    // ===== SSAO（V0.5-5，§25.3 数据流）：resolveMsaa 后、PostProcess::apply 前 =====
+    // ssaoEnabled && hdr 且 MRT 附件可用 → SSAO::render（半分辨率 AO）供 combine 合成；
+    // 否则 setAmbientOcclusionTexture(0)（combine 乘 1，AO 无贡献——非 hdr/附件缺失 = 降级路径）
+    if (pp.ssaoEnabled && hdr && hdrFbo.normalTextureId() != 0 &&
+        hdrFbo.depthLinearTextureId() != 0) {
+        const uint32_t aoTex =
+            SSAO::render(hdrFbo.normalTextureId(), hdrFbo.depthLinearTextureId(), pp);
+        PostProcess::setAmbientOcclusionTexture(aoTex);
+    } else {
+        PostProcess::setAmbientOcclusionTexture(0);
+    }
 
     // 后处理（或 RGBA8 直通 blit）→ UI（outLdrFbo 内，§14.3 渲染顺序：HDR→post→UI→显示）
     PostProcess::resize(hdrFbo.width(), hdrFbo.height());

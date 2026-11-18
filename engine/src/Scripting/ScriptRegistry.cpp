@@ -34,6 +34,14 @@ bool ScriptRegistry::exists(const std::string& name) {
     return factories().contains(trimScriptName(name));
 }
 
+void ScriptRegistry::unregisterScript(const std::string& name) {
+    factories().erase(trimScriptName(name));   // 不存在时静默（erase 幂等，§25.5）
+}
+
+void ScriptRegistry::removeAllScripts() {
+    factories().clear();   // DLL 卸载前清空（防旧工厂悬垂，§25.5）
+}
+
 std::vector<std::string> ScriptRegistry::allNames() {
     // Inspector「Add Component」下拉列表用；排序保证顺序稳定
     std::vector<std::string> names;

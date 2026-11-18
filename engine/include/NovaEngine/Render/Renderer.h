@@ -69,6 +69,19 @@ public:
     static uint32_t lastCulledCount();                    // 上一帧剔除项数
     static uint32_t lastInstancedDrawCalls();             // 上一帧实例化 draw call 数（批数）
     static uint32_t lastInstancedInstanceCount();         // 上一帧实例化累计实例数
+
+    // ===== 波 2 渲染钩子（V0.5-4/5/6，骨架日 c0 布；追加式）=====
+    // IBL 环境绑定（§25.2）：irradiance cubemap（unit 6）/ prefiltered cubemap（unit 7）/
+    // BRDF LUT（unit 8）+ 强度；全 0 = 无环境（blinn_phong.frag 间接光贡献 0，逐像素与 2a 前一致）。
+    // 调用点 = SceneRenderer 天空段（每帧；同源 HDRI 或渐变天空均会调用）。
+    static void setEnvironment(uint32_t irradianceMapId, uint32_t prefilterMapId,
+                               uint32_t brdfLutId, float intensity);
+    // SSAO GBuffer pass 开关（§25.3）：true 时 blinn_phong.frag 写 MRT 附件 1（法线）/附件 2（线性深度）；
+    // 默认 false = 逐像素与 2a 前一致。由 SceneRenderer 每帧按 (hdr && ssaoEnabled) 设置。
+    static void setGbufferPassEnabled(bool enabled);
+    // 粒子统计（§25.4）：上一帧粒子数 / 粒子 draw call 数（空实现默认 0；ParticleRenderer 接入后填充）
+    static uint32_t lastParticleCount();
+    static uint32_t lastParticleDrawCalls();
 };
 
 }  // namespace NovaEngine

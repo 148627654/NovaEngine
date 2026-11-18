@@ -82,6 +82,20 @@ bool s_linearOutput = false;
 bool s_frustumCullingEnabled = true;
 uint32_t s_culled = 0;
 
+// ===== V0.5-4 IBL 环境（SceneRenderer 每帧经 setEnvironment 注入；全 0 = 无环境，间接光 0）=====
+uint32_t s_iblIrradiance = 0;
+uint32_t s_iblPrefilter = 0;
+uint32_t s_iblBrdfLut = 0;
+float s_iblIntensity = 0.0f;
+
+// ===== V0.5-5 SSAO GBuffer pass 开关（SceneRenderer 每帧经 setGbufferPassEnabled 设置；
+// 开 = blinn_phong.frag 写 MRT 附件 1（法线）/附件 2（线性深度）；关 = 逐像素与 2a 前一致）=====
+bool s_gbufferPass = false;
+
+// ===== V0.5-6 粒子统计（骨架日空实现默认 0；ParticleRenderer 接入后填充，§25.4）=====
+uint32_t s_lastParticleCount = 0;
+uint32_t s_lastParticleDrawCalls = 0;
+
 // 网格地面配色：雾色已参数化（drawGrid(fogColor) 由 Scene::fogColor 传入，V0.2-5）
 const glm::vec3 kGridLineColor(0.55f, 0.55f, 0.60f);
 
@@ -124,9 +138,11 @@ void buildGrid() {
     s_gridVertexCount = static_cast<uint32_t>(verts.size() / 4);
 }
 
-// 填充 blinn_phong 的材质/光照/模型 uniform（endFrame 逐项与 drawOutline 第一遍共用）
+// 填充 blinn_phong 的材质/光照/模型 uniform（endFrame 逐项与 drawOutline 第一遍共用）。
+// gbufferPass：V0.5-5 SSAO——主 pass 且 MRT 开启时写 GBuffer 附件 1/2；描边等旁路恒 false
 void setBlinnPhongUniforms(const std::shared_ptr<Shader>& shader,
-                           const Material& material, const glm::mat4& model) {
+                           const Material& material, const glm::mat4& model,
+                           bool gbufferPass) {
     shader->setVec3("uLightDir", s_light.direction);
     shader->setVec3("uLightColor", s_light.color * s_light.intensity);
     shader->setVec3("uAmbient", s_light.ambient);
@@ -196,6 +212,18 @@ void setBlinnPhongUniforms(const std::shared_ptr<Shader>& shader,
     } else {
         shader->setInt("uShadowEnabled", 0);
     }
+
+    // ===== IBL 环境（V0.5-4，§25.2）：unit 6/7/8 采样器与强度（0 = 间接光 0）。
+    // 纹理绑定由 setEnvironment 在帧内完成（endFrame 绘制期间 unit 6/7/8 不被其它绑定占用）=====
+    shader->setFloat("uIblIntensity", s_iblIntensity);
+    shader->setInt("uIrrMap", 6);
+    shader->setInt("uPrefMap", 7);
+    shader->setInt("uBrdfLut", 8);
+
+    // ===== GBuffer pass（V0.5-5 SSAO，§25.3）：主 pass 且 MRT 开启时写附件 1/2；
+    // 旁路（描边等）恒 false = 逐像素与 2a 前一致 =====
+    shader->setInt("uGbufferPass", gbufferPass ? 1 : 0);
+    shader->setMat4("uView", s_view);   // 视图矩阵（视图空间法线/线性深度换算）
 }
 
 }  // namespace
@@ -278,6 +306,37 @@ void Renderer::setGammaMode(bool linearOutput) {
 
 bool Renderer::linearOutput() {
     return s_linearOutput;
+}
+
+void Renderer::setEnvironment(uint32_t irradianceMapId, uint32_t prefilterMapId,
+                              uint32_t brdfLutId, float intensity) {
+    // V0.5-4 IBL（§25.2）：记录状态 + 立即绑定。调用点 = SceneRenderer 天空段
+    // （beginFrame 之后、endFrame 之前）；unit 6/7/8 在绘制路径中不被其它绑定占用。
+    // 全 0 = 无环境（blinn_phong.frag 经 uIblIntensity=0 跳过采样，间接光 0）。
+    s_iblIrradiance = irradianceMapId;
+    s_iblPrefilter = prefilterMapId;
+    s_iblBrdfLut = brdfLutId;
+    s_iblIntensity = intensity;
+    if (!s_initialized) return;   // 未初始化：仅记录状态（下一帧调用时绑定）
+    glActiveTexture(GL_TEXTURE6);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, irradianceMapId);
+    glActiveTexture(GL_TEXTURE7);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, prefilterMapId);
+    glActiveTexture(GL_TEXTURE8);
+    glBindTexture(GL_TEXTURE_2D, brdfLutId);
+    glActiveTexture(GL_TEXTURE0);   // 恢复常用激活单元
+}
+
+void Renderer::setGbufferPassEnabled(bool enabled) {
+    s_gbufferPass = enabled;   // 粘性：由 SceneRenderer 每帧设置（beginFrame 不重置）
+}
+
+uint32_t Renderer::lastParticleCount() {
+    return s_lastParticleCount;   // 骨架日空实现：恒 0（ParticleRenderer 接入后填充）
+}
+
+uint32_t Renderer::lastParticleDrawCalls() {
+    return s_lastParticleDrawCalls;
 }
 
 void Renderer::beginFrame(const RenderCamera& camera, const DirectionalLightData& light,
@@ -424,7 +483,7 @@ void Renderer::endFrame() {
 
             // opaque 普通项照旧绘制（深度照写）
             for (auto it = s_queue.begin(); it != transparentBegin; ++it) {
-                setBlinnPhongUniforms(s_blinnPhong, it->material, it->model);
+                setBlinnPhongUniforms(s_blinnPhong, it->material, it->model, s_gbufferPass);
                 it->mesh->draw();
                 s_tris += it->mesh->indexCount() / 3;
                 ++s_drawCalls;
@@ -439,7 +498,7 @@ void Renderer::endFrame() {
             glDepthFunc(GL_LEQUAL);
             for (const InstancedBatch& batch : s_instancedQueue) {
                 if (!batch.mesh || batch.models.empty()) continue;
-                setBlinnPhongUniforms(s_blinnPhongInstanced, batch.material, glm::mat4(1.0f));
+                setBlinnPhongUniforms(s_blinnPhongInstanced, batch.material, glm::mat4(1.0f), s_gbufferPass);
                 batch.mesh->drawInstanced(batch.models);
                 s_tris += (batch.mesh->indexCount() / 3) *
                           static_cast<uint32_t>(batch.models.size());
@@ -456,7 +515,7 @@ void Renderer::endFrame() {
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             glDepthMask(GL_FALSE);
             for (auto it = transparentBegin; it != s_queue.end(); ++it) {
-                setBlinnPhongUniforms(s_blinnPhong, it->material, it->model);
+                setBlinnPhongUniforms(s_blinnPhong, it->material, it->model, s_gbufferPass);
                 it->mesh->draw();
                 s_tris += it->mesh->indexCount() / 3;
                 ++s_drawCalls;
@@ -528,7 +587,7 @@ void Renderer::drawOutline(std::shared_ptr<Mesh> mesh, const glm::mat4& modelMat
     glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
     glStencilMask(0xFF);
     s_blinnPhong->bind();
-    setBlinnPhongUniforms(s_blinnPhong, Material{}, modelMatrix);
+    setBlinnPhongUniforms(s_blinnPhong, Material{}, modelMatrix, /*gbufferPass=*/false);
     mesh->draw();
 
     // 第二遍：沿法线膨胀的描边壳，模板 != 1 处绘制（被遮挡部分也可见，Unity 风格）

@@ -16,6 +16,8 @@ public:
     static std::unique_ptr<Behaviour> create(const std::string& name, GameObject* owner);  // 未知返回 nullptr
     static bool exists(const std::string& name);
     static std::vector<std::string> allNames();     // Inspector「Add Component」下拉列表用
+    static void unregisterScript(const std::string& name);   // 追加（V0.5-7）：单个移除（不存在静默）
+    static void removeAllScripts();                          // 追加（V0.5-7）：DLL 卸载前清空（防旧工厂悬垂）
 
 private:
     static std::unordered_map<std::string, ScriptFactory>& factories();  // 函数内静态，避免初始化顺序问题

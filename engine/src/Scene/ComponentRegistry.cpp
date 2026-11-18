@@ -1,17 +1,24 @@
 #include <NovaEngine/Scene/ComponentRegistry.h>
+#include <NovaEngine/Animation/Animator.h>
+#include <NovaEngine/Animation/SkeletalMeshRenderer.h>
+#include <NovaEngine/Particles/ParticleSystem.h>
 #include <NovaEngine/Scene/AudioListener.h>
 #include <NovaEngine/Scene/AudioSource.h>
+#include <NovaEngine/Scene/BoxCollider2D.h>
 #include <NovaEngine/Scene/Button.h>
 #include <NovaEngine/Scene/Camera.h>
 #include <NovaEngine/Scene/Canvas.h>
 #include <NovaEngine/Scene/Collider.h>
 #include <NovaEngine/Scene/DirectionalLight.h>
 #include <NovaEngine/Scene/Image.h>
+#include <NovaEngine/Scene/LODGroup.h>
 #include <NovaEngine/Scene/MeshRenderer.h>
 #include <NovaEngine/Scene/PrefabInstance.h>
 #include <NovaEngine/Scene/Rigidbody.h>
+#include <NovaEngine/Scene/SpriteRenderer.h>
 #include <NovaEngine/Scene/Text.h>
 #include <NovaEngine/Scene/Transform.h>
+#include <NovaEngine/Terrain/Terrain.h>
 #include <NovaEngine/UI/Slider.h>
 #include <NovaEngine/UI/ScrollView.h>
 #include <NovaEngine/Core/Logger.h>
@@ -78,6 +85,14 @@ std::unique_ptr<Component> ComponentRegistry::create(const std::string& typeName
         (void)std::make_unique<PrefabInstance>(owner); // V0.3-9（Coder B 波 4 Prefab）
         (void)std::make_unique<Slider>(owner);         // V0.5-13（c3 UI 控件）
         (void)std::make_unique<ScrollView>(owner);     // V0.5-13（c3 UI 控件）
+        // ===== 波 2 新增 7 组件（V0.5-3/6/8/9/10，骨架日 c0 布；§25.0 纪律 4）=====
+        (void)std::make_unique<LODGroup>(owner);             // V0.5-3（c1 LOD）
+        (void)std::make_unique<ParticleSystem>(owner);       // V0.5-6（c4 粒子）
+        (void)std::make_unique<Terrain>(owner);              // V0.5-8（c6 地形）
+        (void)std::make_unique<SpriteRenderer>(owner);       // V0.5-10（c8 2D）
+        (void)std::make_unique<BoxCollider2D>(owner);        // V0.5-10（c8 2D）
+        (void)std::make_unique<SkeletalMeshRenderer>(owner); // V0.5-9（c7 动画）
+        (void)std::make_unique<Animator>(owner);             // V0.5-9（c7 动画）
     }
 
     auto& map = entries();
