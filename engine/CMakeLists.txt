@@ -19,6 +19,7 @@ target_link_libraries(NovaEngine PUBLIC
     nlohmann_json::nlohmann_json
     stb
     Jolt
-    miniaudio)
+    miniaudio
+    ws2_32)   # WinSock2（网络帧同步 spike V0.5-15，分支 spike/network-v1；Windows 自带）
 
 nova_configure_target(NovaEngine)

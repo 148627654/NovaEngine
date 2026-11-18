@@ -29,3 +29,6 @@ atlas.raw
 
 # 游戏存档（运行时产物）
 saves/
+
+# 网络 spike worktree 独立构建目录（spike/network-v1 专用，不进 main）
+build-spike/

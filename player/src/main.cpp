@@ -10,10 +10,18 @@
 //
 // 参数：--scene（默认 assets/scenes/demo.nova.json，项目内相对路径）
 //       --pak（默认自动扫描 exe 同目录 *.novapak）--width/--height（默认 1280x720）
+//
+// 网络帧同步 spike（V0.5-15，分支 spike/network-v1，不进 main）：
+//   --net host|join 进入锁步模式（跳过场景文件加载，程序化构建 NetSpike 样例场景）；
+//   --net-ip <ip>（join 用，默认 127.0.0.1）--net-port（默认 27777）
+//   --net-delay <帧>（输入延迟缓冲，默认 3）--net-lag <ms>（延迟注入，验收用，默认 0）
+//   --net-automove（自动输入脚本，单机双进程验证免按键）--net-duration <秒>（到时自动退出）
 
 #include <windows.h>   // SetConsoleOutputCP + GetModuleFileNameW（须在 glad 之前）
 
 #include <NovaEngine/NovaEngine.h>
+#include <NovaEngine/Network/NetSpikeSample.h>
+#include <NovaEngine/Network/NetworkManager.h>
 
 #include <glad/gl.h>                    // glViewport
 #include <GLFW/glfw3.h>                  // glfwGetWindowSize（窗口逻辑尺寸；GLFW_INCLUDE_NONE 已定义）
@@ -30,6 +38,14 @@ struct PlayerArgs {
     std::filesystem::path pak;   // 空 = 自动扫描 exe 目录
     int width = 1280;
     int height = 720;
+    // ===== 网络帧同步 spike（V0.5-15，分支 spike/network-v1）=====
+    std::string netMode;                  // "" | "host" | "join"
+    std::string netIp = "127.0.0.1";      // join 目标（默认本机回环，单机双进程验证）
+    int netPort = 27777;
+    int netDelay = 3;                     // 输入延迟缓冲帧数
+    int netLag = 0;                       // 延迟注入 ms（验收用）
+    bool netAutoMove = false;             // 自动输入脚本（单机双进程验证）
+    int netDuration = 0;                  // 秒数，>0 时到时自动退出（验证用）
 };
 
 bool parseInt(const char* s, int& out) {
@@ -37,6 +53,19 @@ bool parseInt(const char* s, int& out) {
         size_t consumed = 0;
         const long v = std::stol(s, &consumed);
         if (consumed != std::strlen(s) || v <= 0 || v > 16384) return false;
+        out = static_cast<int>(v);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+// 非负整数（--net-delay/--net-lag 允许 0）
+bool parseIntNonNeg(const char* s, int& out) {
+    try {
+        size_t consumed = 0;
+        const long v = std::stol(s, &consumed);
+        if (consumed != std::strlen(s) || v < 0 || v > 16384) return false;
         out = static_cast<int>(v);
         return true;
     } catch (...) {
@@ -57,6 +86,25 @@ PlayerArgs parseArgs(int argc, char** argv) {
             parseInt(argv[++i], args.width);
         } else if (arg == "--height" && hasValue) {
             parseInt(argv[++i], args.height);
+        } else if (arg == "--net" && hasValue) {
+            args.netMode = argv[++i];
+            if (args.netMode != "host" && args.netMode != "join") {
+                NovaEngine::Logger::warn("[NovaPlayer] --net 仅支持 host|join，收到: {}",
+                                         args.netMode);
+                args.netMode.clear();
+            }
+        } else if (arg == "--net-ip" && hasValue) {
+            args.netIp = argv[++i];
+        } else if (arg == "--net-port" && hasValue) {
+            parseInt(argv[++i], args.netPort);
+        } else if (arg == "--net-delay" && hasValue) {
+            parseIntNonNeg(argv[++i], args.netDelay);
+        } else if (arg == "--net-lag" && hasValue) {
+            parseIntNonNeg(argv[++i], args.netLag);
+        } else if (arg == "--net-automove") {
+            args.netAutoMove = true;
+        } else if (arg == "--net-duration" && hasValue) {
+            parseIntNonNeg(argv[++i], args.netDuration);
         } else {
             NovaEngine::Logger::warn("[NovaPlayer] 未知参数: {}", arg);
         }
@@ -108,8 +156,15 @@ int main(int argc, char** argv) {
     const std::filesystem::path exeDir = executableDir();
     Logger::info("[NovaPlayer] 启动（exe 目录: {}）", exeDir.string());
 
+    // 网络帧同步 spike（V0.5-15）：--net host|join 进入锁步模式
+    const bool netEnabled = !args.netMode.empty();
+    const bool netIsHost = netEnabled && args.netMode == "host";
+
     // 1. 窗口（先于 Renderer::init：GL 上下文）
-    auto window = Window::create("NovaPlayer", args.width, args.height);
+    std::string windowTitle = "NovaPlayer";
+    if (netEnabled)
+        windowTitle += netIsHost ? " - NetSpike Host" : " - NetSpike Join";
+    auto window = Window::create(windowTitle, args.width, args.height);
     if (!window) {
         Logger::error("[NovaPlayer] 窗口创建失败（GLFW 初始化错误）");
         return 1;
@@ -151,18 +206,37 @@ int main(int argc, char** argv) {
     SceneManager::init();
 
     // 7. 场景加载（AssetStream：先查 pak 再查磁盘）+ Play 启动
-    Scene scene("Player");
-    if (!SceneSerializer::loadFromFile(scene, args.scene)) {
+    //    网络模式：跳过文件加载，程序化构建锁步样例场景（主机/从机同一份，见 NetSpikeSample）
+    Scene scene(netEnabled ? "NetSpike" : "Player");
+    if (netEnabled) {
+        buildNetSpikeScene(scene);
+    } else if (!SceneSerializer::loadFromFile(scene, args.scene)) {
         Logger::error("[NovaPlayer] 场景加载失败: {}", args.scene.string());
         return 1;
     }
     // 输入绑定（V0.5-11）：场景加载后经 AssetStream 读 pak 内 assets/input/default.novainput；
     // 失败仅 warn（内置默认绑定兜底），不阻断启动
     InputMap::load("assets/input/default.novainput");
+
+    // 7.5 网络启动（spike）：先于 scene.start()（NetCube::onStart 注册进锁步模拟）；
+    //     日志目录 = exe/Logs（同步校验日志 NetSync_<角色>_<pid>.log）
+    NetworkManager& net = NetworkManager::instance();
+    net.setLogDir(exeDir / "Logs");
+    if (netEnabled) {
+        const bool started = netIsHost
+                                 ? net.startHost(static_cast<uint16_t>(args.netPort), args.netDelay)
+                                 : net.startJoin(args.netIp, static_cast<uint16_t>(args.netPort), args.netDelay);
+        if (!started) return 1;   // 错误已在 startHost/startJoin 内日志
+        if (args.netLag > 0) net.setSimulatedLagMs(args.netLag);
+        if (args.netAutoMove) net.setAutoMove(true);
+    }
+
     scene.start();
-    // 注册为运行期场景并设为活动场景（§14.9；LoadScene 延迟切换经 flushPendingLoad 作用于本 scene）
-    SceneManager::registerScene(scene.name(), args.scene);
-    SceneManager::setActiveScene(&scene);
+    if (!netEnabled) {
+        // 注册为运行期场景并设为活动场景（§14.9；LoadScene 延迟切换经 flushPendingLoad 作用于本 scene）
+        SceneManager::registerScene(scene.name(), args.scene);
+        SceneManager::setActiveScene(&scene);
+    }
 
     // 7. 主循环（无相机时 fallback 相机兜底；场景相机经 collectCamera 优先）
     RenderCamera fallback;
@@ -184,6 +258,15 @@ int main(int argc, char** argv) {
         InputMap::beginFrame();   // 每帧一次，紧跟 Input::beginFrame 之后（契约 §24.5）
 
         if (Input::isKeyPressed(Key::Escape)) break;
+
+        // 网络帧同步入口（spike）：泵网络 + 固定步进推进（内部 60Hz 累加器，锁步）
+        // 放在 Input::beginFrame 之后（读到本帧输入）、scene.update 之前（先推进模拟再广播脚本）
+        if (netEnabled) net.update(Time::deltaTime());
+
+        // 验证模式：--net-duration 到时自动退出（同步日志逐行已落盘）
+        if (netEnabled && args.netDuration > 0 &&
+            Time::totalTime() >= static_cast<float>(args.netDuration))
+            break;
 
         // 视口跟随帧缓冲（分辨率自适应）；fallback 投影供场景相机 aspect 推导
         int fbW = args.width, fbH = args.height;
@@ -255,7 +338,8 @@ int main(int argc, char** argv) {
         window->swapBuffers();
     }
 
-    // 8. 清理（后处理 FBO → UI/音频 → 天空/渲染器 GL 资源先释放；窗口最后析构 → glfwTerminate）
+    // 8. 清理（网络 → 后处理 FBO → UI/音频 → 天空/渲染器 GL 资源先释放；窗口最后析构 → glfwTerminate）
+    if (netEnabled) net.shutdown();   // 关 socket + 收同步日志（在 scene 析构前：NetCube 注销安全）
     hdrFbo.destroy();
     outLdrFbo.destroy();
     SceneManager::shutdown();
