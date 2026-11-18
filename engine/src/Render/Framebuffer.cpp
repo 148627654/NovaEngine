@@ -208,20 +208,33 @@ void Framebuffer::resolveMsaa() const {
     if (m_samples <= 0 || m_resolveFbo == 0 || m_fbo == 0) return;   // 无 MSAA 无需 resolve
     glBindFramebuffer(GL_READ_FRAMEBUFFER, m_fbo);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_resolveFbo);
-    glBlitFramebuffer(0, 0, m_width, m_height,
-                      0, 0, m_width, m_height,
-                      GL_COLOR_BUFFER_BIT, GL_NEAREST);
-    // MRT 多附件 resolve（V0.5-5 SSAO）：逐附件读缓冲 + 同尺寸 blit（GL_NEAREST 与颜色一致）
     if (m_normalDepth) {
+        // MRT 多附件 resolve（V0.5-5 SSAO）：blit 会把源写入 DRAW 侧全部启用的 draw buffer
+        // （resolve FBO 创建时设了 glDrawBuffers(3)）——必须逐附件把 DRAW 侧切到单目标，
+        // 否则三次 blit 相互覆盖、三张 resolve 纹理最终全是最后一个（深度）附件的内容
+        // （c3 以 GL 行为探针 + 纹理回读复现确认，2026-11-18）。
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+        glDrawBuffer(GL_COLOR_ATTACHMENT0);
+        glBlitFramebuffer(0, 0, m_width, m_height,
+                          0, 0, m_width, m_height,
+                          GL_COLOR_BUFFER_BIT, GL_NEAREST);
         glReadBuffer(GL_COLOR_ATTACHMENT1);
+        glDrawBuffer(GL_COLOR_ATTACHMENT1);
         glBlitFramebuffer(0, 0, m_width, m_height,
                           0, 0, m_width, m_height,
                           GL_COLOR_BUFFER_BIT, GL_NEAREST);
         glReadBuffer(GL_COLOR_ATTACHMENT2);
+        glDrawBuffer(GL_COLOR_ATTACHMENT2);
         glBlitFramebuffer(0, 0, m_width, m_height,
                           0, 0, m_width, m_height,
                           GL_COLOR_BUFFER_BIT, GL_NEAREST);
-        glReadBuffer(GL_COLOR_ATTACHMENT0);   // 恢复默认读缓冲（全局 GL 状态）
+        glReadBuffer(GL_COLOR_ATTACHMENT0);   // 恢复默认读/写缓冲（全局 GL 状态）
+        glDrawBuffer(GL_COLOR_ATTACHMENT0);
+    } else {
+        // 单附件旧路径不变（draw buffer 恒 ATTACHMENT0，blit 即颜色）
+        glBlitFramebuffer(0, 0, m_width, m_height,
+                          0, 0, m_width, m_height,
+                          GL_COLOR_BUFFER_BIT, GL_NEAREST);
     }
     // 恢复调用方状态（文档约定 resolveMsaa 在 bind 状态下调用）
     glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
