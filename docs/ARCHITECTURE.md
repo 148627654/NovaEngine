@@ -2213,3 +2213,645 @@ NovaEditor.exe --headless [--import] [--build --scene <path> --out <dir>] [--qui
 7. samples/ 本波不动：V0.2-9 的「示例脚本迁移到 InputMap」验收项顺延；波 1 验收以引擎 API + 绑定面板为准。
 8. schema version 保持 4 的取舍：新组件/新字段对旧读取器 = warn 跳过/缺省兜底；若波内出现破坏性变更必须即时回报 Architect 重议 version。
 9. UIRenderer 命中公式必须与 render 共用同一布局 helper（hitTest 与绘制 rect 不一致 = 点击漂移）——评审重点。
+
+---
+
+# V0.5 波 2 契约（2026-11-18 冻结）
+
+> 范围：V0.5-3（LOD）/ #4（IBL）/ #5（SSAO）/ #6（粒子）/ #7（脚本 DLL 热重载）/ #8（地形）/ #9（动画控制器）/ #10（2D 模式）/ #15（网络预研 spike，独立分支，代码不进 main）。
+> **范围修正（架构师裁定，2026-11-18）**：①ROADMAP §6 标注 #9「已有：V0.3-13 骨骼动画模块」与代码实况不符——勘察确认引擎内无任何骨骼动画代码（V0.3-13 于 V0.3 波次整体顺延，§22 可证）。本节 #9 契约 = V0.3-13 全量范围（蒙皮+单动画播放）+ 状态机，#9 是「新模块」而非「升级」。②#15 保留「1 周可运行 spike 原型」（用户裁定 2026-11-18）：与 2a/2b 解耦，独立分支 spike/network-v1，代码不进 main，交付与理由见 §25.9。
+> 分工：2a 轮（渲染四件套）c1 LOD / c2 IBL / c3 SSAO / c4 粒子 + c0 渲染整合者；2b 轮 c5 热重载 / c6 地形 / c7 动画 / c8 2D；两轮编辑器侧收尾归 c0；并行轨 c9 网络 spike（独立分支，与 2a/2b 解耦）。
+> 本节号承接 §24，新增 §25 一章；每节含：文件落点、公共签名（头文件级）、序列化键名、shader、验收要点、风险与回滚。
+
+## 25.0 总则：两轮交付、骨架日纪律与冻结头总清单
+
+**交付顺序（2a/2b 拆分裁定）**：波 2 拆两轮——
+- **2a（约 1 周）**：#3/#4/#5/#6 渲染四件套。四项全部动渲染管线共享文件（SceneRenderer/Renderer/PostProcess/Framebuffer/blinn_phong.frag），冲突最集中，骨架日一次性化解。
+- **2b（约 1.5 周）**：#7/#8/#9/#10。
+- **并行轨（约 1 周，与 2a 同时起）**：#15 网络 spike（c9），独立分支 spike/network-v1，与 2a/2b 零文件冲突，不占两轮人力。
+- 拆轮收益：2a 合波先回归一次（剔除/实例化/后处理双路径全量回归），2b 合波风险减半；2a 交付的 blinn_phong.frag（IBL 版）是 2b 蒙皮 shader 复用的前置。
+
+**文件所有权严格分区（并行安全前提）——「骨架日」模式**：
+
+| 轮 | Coder | 独占文件 | 共享文件接触 |
+|---|---|---|---|
+| 2a | c0 渲染整合者 | 无（唯一合法触碰共享文件者） | SceneRenderer.h/.cpp、Renderer.h/.cpp、PostProcess.h/.cpp、Framebuffer.h/.cpp、Scene.h、SceneSerializer.cpp（仅环境段）、ComponentRegistry.cpp、NovaEngine.h、blinn_phong.frag、post_combine.frag、EnvironmentPanel.cpp、InspectorPanel.cpp、EditorApplication.cpp、editor/CMakeLists.txt |
+| 2a | c1 LOD | engine/include\|src/Scene/LODGroup.h/.cpp（新增） | 无 |
+| 2a | c2 IBL | engine/include\|src/Render/IBL.h/.cpp（新增）、assets/shaders/ibl_irradiance_conv.frag、ibl_prefilter.frag、ibl_brdf_lut.frag（可选 ibl_irradiance.comp/ibl_prefilter.comp） | 无 |
+| 2a | c3 SSAO | engine/include\|src/Render/SSAO.h/.cpp（新增）、assets/shaders/ssao.frag | 无 |
+| 2a | c4 粒子 | engine/include\|src/Particles/ParticleSystem.h/.cpp、ParticleRenderer.h/.cpp（新目录）、assets/shaders/particle.vert/.frag、editor/src/panels/ParticleWidgets.h | 无 |
+| 2b | c5 热重载 | engine/include\|src/Scripting/ScriptRuntime.h/.cpp（新增）、ScriptRegistry.h/.cpp、samples/CMakeLists.txt、samples/*.h/.cpp、player/src/main.cpp、player/CMakeLists.txt、editor/src/Packager.cpp | 无 |
+| 2b | c6 地形 | engine/include\|src/Terrain/Terrain.h/.cpp、TerrainRenderer.h/.cpp（新目录）、assets/shaders/terrain.vert/.frag、engine/include\|src/Physics/PhysicsWorld.h/.cpp、editor/src/panels/SceneViewPanel.cpp、editor/src/panels/TerrainPanel.h/.cpp（新增） | 无 |
+| 2b | c7 动画 | engine/include\|src/Animation/（新目录全部）、engine/src/Assets/ModelLoader.cpp、engine/include\|src/Render/Mesh.cpp、assets/shaders/blinn_phong_skinned.vert、editor/src/panels/AnimatorPanel.h/.cpp（新增） | MeshData.h 蒙皮段与 ModelLoader.h 声明由 c0 骨架日布（接口本节冻结） |
+| 2b | c8 2D | engine/include\|src/Scene/SpriteRenderer.h/.cpp、BoxCollider2D.h/.cpp、engine/include\|src/Physics/Physics2D.h/.cpp（新模块）、engine/src/Scene/Camera.cpp、assets/shaders/sprite.vert | Camera.h 投影段由 c0 骨架日布（接口本节冻结） |
+| 并行轨 | c9 网络 spike | spike/network-v1 分支上：engine/include\|src/Network/（新目录，自由） | 无（main 零接触；仅结论文档由主会话写回 §25.9） |
+
+**共享文件窗口纪律（唯一合法修改窗口 = 骨架日 + 合波日）**：
+1. **骨架日（2a 第 0 天，c0 执行）**：c0 一次性完成 2a+2b 全部共享文件修改——创建全部冻结头声明（接口本节已冻结，仅声明）、SceneRenderer 遍历扩展点（见下）、Renderer 粒子/环境钩子、Framebuffer MRT、PostProcess AO 钩子、Scene.h 环境字段、SceneSerializer 环境段、ComponentRegistry.cpp link-guard 追加 7 行、blinn_phong.frag 的 IBL 采样与 GBuffer 输出段、post_combine.frag 的 AO 合成段、MeshData.h 蒙皮段、Camera.h 投影段、ModelLoader.h 声明。骨架日结束后**共享文件冻结**，任何 Coder 不得再触碰（越界改动 = 合波回退，§24.0 同纪律）。
+2. 各 Coder 只写自己独占文件（上表）；实现经骨架日钩子接入，不再改遍历代码。
+3. **合波日（c0）**：2a 与 2b 各一次收尾——NovaEngine.h 伞头 include、editor/CMakeLists.txt 显式清单（TerrainPanel/AnimatorPanel .cpp）、InspectorPanel/EnvironmentPanel/EditorApplication 接线、守卫与序列化回归清单更新、双 exe 冒烟、SceneViewPanel 的 SpriteRenderer 拾取分支。
+4. 新组件接入序列化零改动 SceneSerializer（ComponentRegistry 按名分发 + NE_REGISTER_COMPONENT 自注册；组件 .cpp 末尾放宏）。
+5. 场景 JSON schema version 保持 4（纯增量，读 1/2/3/4）：新组件缺失 = 无该组件、新字段缺省兜底、未知组件 warn 跳过；旧文件往返无损。
+6. **内置组件数 18 → 25**（+LODGroup/ParticleSystem/Terrain/SpriteRenderer/BoxCollider2D/SkeletalMeshRenderer/Animator）；编辑器守卫与序列化回归清单同步更新为 25 条（c0 合波）。
+7. 无新第三方库、Dependencies.cmake 零改动；engine/CMakeLists.txt 为 GLOB_RECURSE 自动收录新 .cpp；samples/CMakeLists.txt 归 c5 独占重写（OBJECT→SHARED）。stb 仓库内含 stb_image_write.h（地形 16bit PNG 写回用，不引入新库）。
+8. 新资产类型一个：assets/terrains/*.png（16bit 灰度高度图，见 §25.6）；IBL 卷积缓存走既有 assets/.novacache（BinaryCache，非新资产类型）。
+
+**SceneRenderer 遍历扩展点（骨架日布，冻结语义）**——渲染遍历是 7 项功能的交汇点，按「钩子函数 + 空实现默认」冻结，各 Coder 实现钩子本体：
+
+```
+收集阶段（renderSceneInternal 内，实例化分组前）：
+  对每个带 MeshRenderer 的 GO：
+    mesh = LODGroup::resolveMeshFor(go, renderCam.position)   // 无 LODGroup/disabled/空档 → 返回 mr->mesh
+    （剔除/材质双轨/实例化分组/阴影收集逻辑不变，仅 mesh 来源替换）
+  遍历结束后、阴影 pass 前：
+    TerrainRenderer::collectAndSubmit(scene, renderCam, frustum, shadowItems)  // 空实现默认
+    ParticleRenderer::collectAndSubmit(scene, renderCam)                       // 空实现默认
+  蒙皮网格走既有 submit（Mesh 含蒙皮顶点布局；骨骼矩阵 UBO 由 Mesh 持有，Animation 模块每帧更新）
+```
+
+**冻结头变更总清单（总表；签名见各子节）**：
+1. Render/MeshData.h：+SkinnedVertex/SkeletonBone/Skeleton/AnimKey/AnimChannel/AnimationClip 结构、MeshData +skinnedVertices/skeleton/clips（非蒙皮路径零变化，ROADMAP §10-C2 兼容裁定）
+2. Render/Mesh.h：+setBoneMatrices/isSkinned（蒙皮 UBO 懒建，binding 1，上限 64）
+3. Render/Renderer.h：+setEnvironment（IBL 纹理绑定）/+lastParticleCount/lastParticleDrawCalls（追加式）
+4. Render/Framebuffer.h：create +normalDepth 参数；+normalTextureId()/depthLinearTextureId()
+5. Render/PostProcess.h：PostProcessSettings +ssaoEnabled/ssaoRadius/ssaoStrength/ssaoSampleCount（追加式，缺省=关）；PostProcess +setAmbientOcclusionTexture（追加式）
+6. Scene/Scene.h：+iblIntensity（环境段 environment.ibl）
+7. Scene/Camera.h：+ProjectionMode 枚举/+orthoSize（追加式，缺省 Perspective 旧行为零变化）
+8. Assets/ModelLoader.h：+extractSkeleton/extractAnimations 声明（骨架日布，c7 实现）
+9. Scripting/ScriptRegistry.h：+unregisterScript/removeAllScripts（追加式）
+10. Scripting/ScriptRuntime.h：新增
+11. 新增头：Scene/LODGroup.h、Render/IBL.h、Render/SSAO.h、Particles/ParticleSystem.h、Particles/ParticleRenderer.h、Terrain/Terrain.h、Terrain/TerrainRenderer.h、Animation/{Skeleton,AnimationClip,SkeletalMeshRenderer,AnimatorController,Animator}.h、Scene/SpriteRenderer.h、Scene/BoxCollider2D.h、Physics/Physics2D.h；NovaEngine.h 伞头同步（c0 合波）
+12. GLSL 新增：ibl_irradiance_conv.frag、ibl_prefilter.frag、ibl_brdf_lut.frag、（可选 ibl_irradiance.comp/ibl_prefilter.comp）、ssao.frag、particle.vert/.frag、terrain.vert/.frag、blinn_phong_skinned.vert、sprite.vert；修改：blinn_phong.frag（IBL 间接光 + GBuffer 法线/线性深度输出）、post_combine.frag（AO 合成）——两处修改均由 c0 骨架日完成
+13. CMake：samples/CMakeLists.txt 重写（OBJECT→SHARED NovaGame.dll）；editor/CMakeLists.txt +WINDOWS_EXPORT_ALL_SYMBOLS +/WHOLEARCHIVE +NOVA_GAME_DLL_PATH/NOVA_BUILD_CONFIG 编译定义 + 面板源清单（c0/c5）；player/CMakeLists.txt +WINDOWS_EXPORT_ALL_SYMBOLS（c5）
+
+---
+
+## 25.1 LOD 系统（c1，V0.5-3）
+
+**文件落点**：`engine/include/NovaEngine/Scene/LODGroup.h` + `engine/src/Scene/LODGroup.cpp`（新增，独占）。接入点 = SceneRenderer 收集阶段的 resolveMeshFor 调用（c0 骨架日布）。
+
+```cpp
+// engine/include/NovaEngine/Scene/LODGroup.h
+namespace NovaEngine {
+// LOD 档位描述（V0.5-3）
+struct LODLevel {
+    std::string meshPath;               // 资产相对路径；反序列化经 AssetDatabase 解析
+    float distance = 0.0f;              // 相机距离 >= distance 时该档可用（升序；LOD0 = 0）
+    std::shared_ptr<Mesh> mesh = nullptr;   // 运行时（不序列化）
+};
+
+// LOD 组件：挂在带 MeshRenderer 的 GO 上，渲染遍历按相机距离选 mesh。
+// 与 MeshRenderer 的关系：enabled 且 lods 非空时，遍历收集用 resolveMeshFor 结果
+// 替代 mr->mesh（阴影/剔除/实例化分组全部使用同一替代结果）；
+// 无 LODGroup / disabled / lods 空 → 原 MeshRenderer.mesh 路径零变化。
+class LODGroup : public Component {
+public:
+    explicit LODGroup(GameObject* owner);
+    bool enabled = true;
+    std::vector<LODLevel> lods;         // v1 上限 3 档（0/1/2；距离升序）
+    bool crossFade = false;             // v1 预留（dither 过渡本波不实现；序列化保留字段）
+
+    // 冻结入口（渲染遍历扩展点调用；SceneRenderer 不再有 LOD 分支逻辑）：
+    // 按相机世界位置与 GO 世界位置距离选档；无可用档返回 nullptr（调用方回退 mr->mesh）
+    static std::shared_ptr<Mesh> resolveMeshFor(GameObject* go, const glm::vec3& cameraPos);
+
+    void onSerialize(nlohmann::json& out) const override;
+    void onDeserialize(const nlohmann::json& in) override;
+};
+}
+```
+
+**行为**：距离判定每帧每 GO 一次 O(lods)；Edit/Play 一致生效；Inspector 编辑 lods 列表（mesh 路径 + distance，接线 c0 合波）；mesh 路径加载失败 warn + 该档跳过。
+
+**序列化键名（场景 JSON，version 4 不变）**：`{"type":"LODGroup","enabled":true,"crossFade":false,"lods":[{"mesh":"assets/models/rock_lod0.obj","distance":0.0},{"mesh":"assets/models/rock_lod1.obj","distance":15.0},{"mesh":"assets/models/rock_lod2.obj","distance":30.0}]}`（lods 非数组/空 → resolveMeshFor 返回 nullptr 等效无 LOD；未知键忽略）。
+
+**验收要点（c1）**：
+1. 2000 物体场景（统计层）：相机拉远 lastTriangleCount 显著下降、拉近回升；三档切换目测正确。
+2. 切换无闪烁帧（无 cross-fade v1：整档边界切换；目测无 z-fighting/闪面）。
+3. LODGroup 随场景序列化往返无损（路径/距离/顺序）；旧文件（无 LODGroup）打开零警告。
+4. 每对象组切换开销 < 0.1ms（1000 组场景统计层帧时间回归）。
+5. LOD 替代 mesh 参与阴影/剔除/实例化（无幽灵阴影、剔除无漏绘）。
+
+**风险：低。回滚**：骨架日钩子返回 nullptr = 旧路径；删除 LODGroup.h/.cpp + 钩子一行即全回滚。**shader：无**（切 mesh 而已）。
+
+---
+
+## 25.2 IBL 环境光照（c2，V0.5-4）
+
+**文件落点**：`engine/include/NovaEngine/Render/IBL.h` + `engine/src/Render/IBL.cpp`（新增，独占）+ 3 个卷积 shader + 可选 2 个 compute。blinn_phong.frag 的 IBL 采样段与 SceneRenderer 天空段绑定由 c0 骨架日布（接口本节冻结）。
+
+```cpp
+// engine/include/NovaEngine/Render/IBL.h
+namespace NovaEngine {
+// IBL 环境（卷积产物）：irradiance 32² + prefiltered 128² mip 链（5 级）+ BRDF LUT 512²
+class IblEnvironment {
+public:
+    void bind(uint32_t irradianceUnit, uint32_t prefilterUnit, uint32_t brdfLutUnit) const;
+    uint32_t irradianceId() const; uint32_t prefilterId() const; uint32_t brdfLutId() const;
+};
+
+class IBL {
+public:
+    static void init(); static void shutdown();   // 惰性初始化（幂等）；shader 失败 → 全部入口安全 no-op
+    static bool available();
+    // 烘焙：等距柱状 HDRI 绝对路径 → 环境。fragment 卷积默认；compute（4.5 core 直接可用，
+    // glad gl:core=4.5 提供 glDispatchCompute，无扩展名；IBL 模块内自行编译 compute program，
+    // 不改 Shader 类）编译/执行失败自动回退 fragment；fragment 也失败 → 无 IBL（不黑屏）。
+    static std::shared_ptr<IblEnvironment> bake(const std::filesystem::path& equirectPath);
+    // 磁盘缓存：key = 源文件 hash + 参数 hash；assets/.novacache/ibl/（复用 BinaryCache 读写器）
+    static std::shared_ptr<IblEnvironment> loadCached(const std::filesystem::path& equirectPath);
+    static void saveCache(const std::filesystem::path& equirectPath, const IblEnvironment& env);
+    static bool cacheExists(const std::filesystem::path& equirectPath);
+    static uint32_t brdfLutTextureId();   // 全局一张（与具体 HDRI 无关；首用生成/缓存）
+};
+}
+```
+
+**渲染接线（骨架日，c0）**：SceneRenderer 天空段——skyMode==Cubemap 且 skyCubemapPath 非空时：skyCube 加载后 `IBL::loadCached(同源文件)` → `Renderer::setEnvironment(irrId, prefId, lutId, scene.iblIntensity)`；否则 setEnvironment(0,0,0,0)。**天空盒与 IBL 同源（v1 无独立 IBL 源路径）**；无 HDRI（渐变天空/加载失败）→ 无环境绑定，blinn_phong.frag 的 IBL 段贡献 0（程序化回退 = 既有 ambientColor，不黑屏）。
+
+**shader**：
+- ibl_brdf_lut.frag：GGX BRDF 积分 LUT（512² 一次性，与场景无关）。
+- ibl_irradiance_conv.frag / ibl_prefilter.frag：渲染到 cubemap 6 面（equirect_to_cube 同模式；fragment 路径）；可选 compute 变体 ibl_irradiance.comp/ibl_prefilter.comp（imageStore 直写面）。
+- blinn_phong.frag（c0 改，追加式）：`samplerCube uIrrMap(unit 6)/uPrefMap(unit 7)/sampler2D uBrdfLut(unit 8)/float uIblIntensity`；间接光 = irradiance 漫反射 + prefiltered 镜面（LOD = roughness × mip 数）+ BRDF LUT 补偿；uIblIntensity=0 或未绑定（1×1 黑 cubemap 兜底）→ 间接光 0，与 2a 前逐像素一致（回滚路径）。
+
+**序列化键名**：environment 段追加 `"ibl":{"iblIntensity":1.0}`（Scene.h 字段；旧文件缺省 1.0——无 HDRI 时本就无 IBL，有 cubemap 天空的旧场景打开后 IBL 自动生效为增强，用户可调 0 关闭）。
+
+**验收要点（c2）**：
+1. 导入 .hdr 设为天空盒（现有路径）：金属球（roughness 0）出现环境反射图像，随 skyRotation 旋转正确。
+2. 粗糙度 0→1：间接高光由锐利变柔和（mip 链正确，目测）。
+3. 无 HDRI（渐变天空）：场景亮度与 2a 基线一致（IBL 段为 0，回归 A/B）。
+4. 卷积缓存：首次烘焙后二次启动 < 1s（日志打烘焙耗时）；删除 assets/.novacache/ibl 后重建正确。
+5. 统计层开销 < 1ms（绑定+采样；烘焙不计入帧）。
+6. iblIntensity 序列化往返；EnvironmentPanel 加 IBL 强度滑条（c0 合波）。
+
+**风险：中**（compute 驱动差异；一次性烘焙耗时）。**回滚**：uIblIntensity=0 逐像素回退；conv shader 失败 → 无 IBL 环境；烘焙为启动成本可缓存。
+
+---
+
+## 25.3 SSAO（c3，V0.5-5）
+
+**文件落点**：`engine/include/NovaEngine/Render/SSAO.h` + `engine/src/Render/SSAO.cpp`（新增，独占）+ assets/shaders/ssao.frag。PostProcess.cpp 的 AO 合成段、Framebuffer MRT、blinn_phong.frag 的 GBuffer 输出段由 c0 骨架日布（接口本节冻结）。
+
+```cpp
+// engine/include/NovaEngine/Render/SSAO.h
+namespace NovaEngine {
+// 屏幕空间 AO（V0.5-5）：输入 = 场景法线纹理（RGBA16F）+ 线性深度（RGBA16F，view-space -z）；
+// 半球采样 → 半分辨率 AO → 复用 post.vert+post_blur.frag 高斯模糊（H/V 各一次）
+// → 供 PostProcess combine 合成。参数取自 PostProcessSettings（环境段，见下）。
+class SSAO {
+public:
+    static void init(); static void shutdown();
+    static void resize(int w, int h);    // 半分辨率 AO 纹理重建
+    static uint32_t render(uint32_t normalTex, uint32_t linearDepthTex, const PostProcessSettings& s);
+};
+}
+```
+
+**PostProcess.h 追加（c0，追加式）**：
+```cpp
+struct PostProcessSettings {
+    // ...既有字段不变...
+    bool ssaoEnabled = false;      // 追加：环境段缺省 false（旧文件零变化）
+    float ssaoRadius = 0.5f;       // 采样半径（米，view-space）
+    float ssaoStrength = 1.0f;     // 遮蔽强度
+    int ssaoSampleCount = 16;      // 半球采样数（8/16/32）
+};
+// PostProcess 追加：
+static void setAmbientOcclusionTexture(uint32_t tex);   // 0 = 无 AO（combine 跳过合成）
+```
+
+**数据流（骨架日管线，c0）**：Framebuffer::create 加 `bool normalDepth=false` 参数——hdr 模式且 ssaoEnabled 时 MRT：附件 0 颜色（RGBA16F）+ 附件 1 法线（RGBA16F）+ 附件 2 线性深度（RGBA16F），resolve 各附件（+normalTextureId()/depthLinearTextureId()）；blinn_phong.frag 加 `layout(location=1) out vec3 oNormal; layout(location=2) out float oLinearDepth;`（uniform uGbufferPass 开关，off 时零变化）；renderSceneToOutput 内 resolveMsaa 后、PostProcess::apply 前：`if (pp.ssaoEnabled && hdr) SSAO::render(...) → PostProcess::setAmbientOcclusionTexture(aoTex); else setAmbientOcclusionTexture(0)`；post_combine.frag 乘 AO（0 = 乘 1）。**降级**：ssaoEnabled 但非 hdr 路径（RGBA8 直通）或附件创建失败 → AO 跳过 + warn 一次（「永不黑屏」同纪律）。
+
+**序列化键名**：environment.postProcess 段追加 `"ssaoEnabled":false,"ssaoRadius":0.5,"ssaoStrength":1.0,"ssaoSampleCount":16`（缺省兜底，旧文件零警告）。
+
+**验收要点（c3）**：
+1. 墙角/物体接触处出现柔和暗部；开关 A/B 目测明显（EnvironmentPanel 加 SSAO 折叠区，c0 合波）。
+2. 1080p 开销 < 2ms（统计层：ssaoEnabled on/off 帧时间差）。
+3. 模糊后无闪烁/噪点跳动（静止画面连续 120 帧目测）。
+4. radius/strength 参数调节即时生效；随场景序列化往返。
+5. 降级路径：RGBA8 直通（pp.enabled=false）时 SSAO 自动跳过不崩溃、不黑屏。
+
+**风险：中**（MSAA 多附件 resolve 驱动差异、老集显）。**回滚**：ssaoEnabled=false = 逐像素旧路径；附件创建失败自动关闭。
+
+---
+
+## 25.4 粒子系统 v1（c4，V0.5-6）
+
+**文件落点**：`engine/include/NovaEngine/Particles/ParticleSystem.h`、`ParticleRenderer.h` + `engine/src/Particles/*.cpp`（新目录，独占）+ assets/shaders/particle.vert/.frag + editor/src/panels/ParticleWidgets.h。SceneRenderer 粒子钩子（c0 骨架日布）、InspectorPanel 接线（c0 合波）。
+
+```cpp
+// engine/include/NovaEngine/Particles/ParticleSystem.h
+namespace NovaEngine {
+// 粒子系统组件（V0.5-6 v1）：CPU 模拟粒子池 + GPU 实例化 billboard quad 单 draw call。
+// Edit 态渲染「稳态快照」（按 emissionRate×lifetime 预填、时间冻结——参数变更当帧生效，
+// 满足「参数编辑即时预览」）；Play 态 onUpdate 全速推进；退出 Play 快照恢复自动清零。
+class ParticleSystem : public Component {
+public:
+    explicit ParticleSystem(GameObject* owner);
+
+    float emissionRate = 30.0f;      // 个/秒
+    float lifetime = 1.0f;           // 秒（±20% 随机）
+    float initialSpeed = 2.0f;       // m/s
+    float gravity = 0.0f;            // 世界 -Y 加速度（m/s²）
+    glm::vec4 startColor{1.0f};
+    glm::vec4 endColor{1.0f, 1.0f, 1.0f, 0.0f};   // 寿命内线性插值
+    float startSize = 0.2f;
+    float endSize = 0.05f;
+    std::string texturePath;         // 纹理条（flipbook）贴图；空 = 白块
+    int tileX = 1, tileY = 1;        // 纹理条网格（寿命内按序播放）
+    int maxParticles = 1000;
+    bool loop = true;                // false = 播完停止发射
+    bool playOnAwake = true;
+    bool billboard = true;           // v1 固定 true（相机面向 quad）
+    bool blendAdditive = false;      // true = 加性混合（火花/火焰）
+
+    void play(); void stop(); void clear();          // 运行期控制（Play 中脚本可用）
+    bool isPlaying() const;
+    uint32_t aliveCount() const;
+
+    void onUpdate(float dt) override;                // Play 推进（发射/积分/死亡回收）
+    void onSerialize(nlohmann::json& out) const override;
+    void onDeserialize(const nlohmann::json& in) override;
+};
+}
+
+// engine/include/NovaEngine/Particles/ParticleRenderer.h
+namespace NovaEngine {
+// 粒子渲染（V0.5-6）：遍历收集全部启用的 ParticleSystem → 合并实例数据一次 VBO 上传
+// → 一次 glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, count)。
+// 透明段绘制、不写深度；绘制顺序 = 全部透明几何之后（粒子最后，保证可见）。
+// 骨架日钩子：SceneRenderer 在 opaque 收集后调用（初始空实现由 c4 填充）。
+class ParticleRenderer {
+public:
+    static void init(); static void shutdown();
+    static void collectAndSubmit(const Scene& scene, const RenderCamera& camera);
+};
+}
+```
+
+**shader**：particle.vert（实例属性：位置/颜色/大小/纹理条索引；相机右/上向量展开 billboard quad）+ particle.frag（贴图采样 × 颜色；blendAdditive 加性）。
+
+**序列化键名**：`{"type":"ParticleSystem","emissionRate":30.0,"lifetime":1.0,"initialSpeed":2.0,"gravity":0.0,"startColor":[1,1,1,1],"endColor":[1,1,1,0],"startSize":0.2,"endSize":0.05,"texturePath":"","tileX":1,"tileY":1,"maxParticles":1000,"loop":true,"playOnAwake":true,"billboard":true,"blendAdditive":false}`（缺省兜底；未知键忽略）。
+
+**验收要点（c4）**：
+1. 火焰粒子（纹理条 4×4）：Play 中发射→消亡循环正确、UV 动画正确、加性混合火光感正确。
+2. 1000 粒子：单 draw call（统计层 lastDrawCalls 增量 = 1、lastParticleCount 一致）、< 2ms（Release 统计层）。
+3. 参数编辑即时预览（Edit 态稳态：改 emissionRate/颜色 → SceneView 当帧变化）。
+4. 序列化往返无损；退出 Play 粒子清零（快照恢复，重进 Play 重新发射）。
+5. loop=false：发射停止后粒子自然消亡；play/stop/clear 脚本接口生效。
+
+**风险：低-中。回滚**：新模块新 shader 独立；钩子空实现 = 零影响；删除 Particles 目录 + 钩子一行即全回滚。
+
+---
+
+## 25.5 脚本 DLL 热重载（c5，V0.5-7）
+
+**文件落点**：`engine/include/NovaEngine/Scripting/ScriptRuntime.h` + `engine/src/Scripting/ScriptRuntime.cpp`（新增）、ScriptRegistry.h/.cpp（追加）、samples/CMakeLists.txt（重写）、samples/*（验证性零改动）、player/src/main.cpp、player/CMakeLists.txt、editor/src/Packager.cpp（独占）。编辑器触发接线归 c0 合波。
+
+```cpp
+// engine/include/NovaEngine/Scripting/ScriptRegistry.h（追加）
+class ScriptRegistry {
+    // ...既有签名不变...
+    static void unregisterScript(const std::string& name);   // 追加：单个移除（不存在静默）
+    static void removeAllScripts();                          // 追加：DLL 卸载前清空（防旧工厂悬垂）
+};
+
+// engine/include/NovaEngine/Scripting/ScriptRuntime.h（新增）
+namespace NovaEngine {
+// 脚本 DLL 运行时（V0.5-7）：NovaScripts OBJECT 库 → NovaGame.dll（SHARED）。
+class ScriptRuntime {
+public:
+    static void setDllPath(const std::filesystem::path& path);   // 启动时注入（编译期路径）
+    static bool load();                                          // LoadLibrary；失败 false + Logger::error
+    static void unload();                                        // FreeLibrary（正常路径走 reload）
+    static bool isLoaded();
+    static const std::string& lastError();
+
+    // 重载核心：快照脚本字段（复用 onSerialize）→ 逐脚本组件替换实例（旧 vtable 实例
+    // 不可在 FreeLibrary 后存活）→ 卸载旧 DLL → 加载新 DLL（静态注册器自动重新填充
+    // ScriptRegistry）→ 按「对象 ID + 组件下标」原位恢复字段（onDeserialize）。
+    // 任一步失败（加载失败/工厂缺失）→ 保留旧 DLL 继续运行，返回 false + error 日志。
+    static bool reload(Scene& scene);
+
+    // 字段快照（内存 JSON，不落盘）：每脚本组件 {type, enabled, fields（onSerialize 产物）}
+    static std::string snapshotScriptFields(const Scene& scene);
+};
+}
+```
+
+**CMake 与符号裁定（本功能核心技术风险，冻结）**：
+- samples/CMakeLists.txt 重写：`add_library(NovaGame SHARED SpinningCube.cpp OrbitCamera.cpp SceneSwitcher.cpp MoveWithInput.cpp)` + target_link_libraries PRIVATE NovaEngine；输出 samples/<Config>/NovaGame.dll。
+- **NE_REGISTER_SCRIPT 宏不动**：DLL 加载时静态初始化器自动执行注册，与静态链接行为一致（脚本代码零改动）。
+- **符号方向**：引擎代码静态链入 exe；DLL 内脚本类引用引擎符号（vtable/RTTI）——exe 必须导出全部符号：editor/CMakeLists.txt 与 player/CMakeLists.txt 各加 `set_target_properties(<t> PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)`，editor 追加 `target_link_options(NovaEditor PRIVATE "/WHOLEARCHIVE:$<TARGET_FILE:NovaEngine>")`（player 已有 /WHOLEARCHIVE）。
+- **对象指针跨 DLL**：脚本持有的 GameObject*/Transform* 均为 exe 内存，引擎内存不卸载 → 指针稳定（复杂度评估已确认）；脚本静态变量重置 = 文档化取舍。
+- **卸载时序铁律**：先替换全部脚本组件实例，再 FreeLibrary；反序列化在新 DLL 加载后进行（新工厂创建）。
+- 编辑器编译期注入：`NOVA_GAME_DLL_PATH="${CMAKE_BINARY_DIR}/samples/$<CONFIG>/NovaGame.dll"`、`NOVA_BUILD_CONFIG="$<CONFIG>"`。
+
+**编辑器触发流程（契约）**：
+1. 菜单「Scripts → Reload Scripts」+ Ctrl+Shift+R（Edit 态可用；Play 态灰显——Play 快照含旧类型）。
+2. 编辑器 spawn `cmake --build <NOVA_PROJECT_ROOT>/build --config <NOVA_BUILD_CONFIG> --target NovaGame` 并等待退出；失败 → 编译输出进 Console，**旧 DLL 保持运行**（不调用 reload）。
+3. 成功 → `ScriptRuntime::reload(*m_scene)` → Console 打结果日志（重载脚本数/字段恢复数）。
+4. mtime 自动检测（用户裁定 2026-11-18：**默认开**）：每 1s 轮询 NovaGame.dll mtime；Edit 态下变化即触发与手动相同的流程（编译失败 → Console 报错、旧 DLL 保留运行）；Play 态跳过检测（退出 Play 后若 DLL 已变化则触发一次）；菜单「Scripts → Auto Reload」勾选可关（EditorApplication 接线归 c0 合波）。
+
+**Player**：启动时 `ScriptRuntime::setDllPath(exe 目录/NovaGame.dll)` + load()；失败 → 脚本组件反序列化 warn 跳过、场景其余正常；Packager 拷贝 NovaGame.dll 进发布目录（c5 改 Packager.cpp）。
+
+**验收要点（c5）**：
+1. 改 SpinningCube.cpp 重编译 → 编辑器自动检测（mtime，默认开）或 Ctrl+Shift+R 手动触发，热重载成功；场景对象脚本字段（speed=30 手改值）保留、无需重启；新代码行为当帧生效；Auto Reload 菜单关闭时仅手动可用。
+2. 故意写错编译失败 → 构建输出进 Console、旧 DLL 保留运行、场景不崩。
+3. 连续 10 次热重载：无内存增长/崩溃/泄漏痕迹（日志）。
+4. 热重载后 Ctrl+P Play 正常（新工厂创建 + 快照恢复）；退出 Play 正常。
+5. 热重载后 Ctrl+S 保存/重开场景脚本字段往返无损（反序列化走新注册表）。
+6. Player：发布目录含 NovaGame.dll，双击运行脚本行为与编辑器一致。
+7. 无 DLL（未编译）启动：编辑器 warn 一次、场景加载正常、Add Component 脚本列表为空（不崩）。
+8. 回归：samples 四脚本 DLL 形态行为与静态链接一致（SpinningCube/OrbitCamera/SceneSwitcher/MoveWithInput）。
+
+**风险：高（全波最高；DLL 边界 + 链接器 + RTTI）**。**回滚**：CMake 变量 NOVA_SCRIPTS_DLL 双形态开关（samples/CMakeLists.txt 保留 OBJECT 分支）——回滚 = 关开关恢复 $<TARGET_OBJECTS:NovaScripts>；ScriptRuntime 未加载时全部入口 no-op。**开工前先做半天 PoC**：最小 DLL（单脚本）加载/重载/字段恢复验证链接器方案，通过后再全量改造。
+
+---
+
+## 25.6 地形 v1（c6，V0.5-8）
+
+**文件落点**：`engine/include/NovaEngine/Terrain/Terrain.h`、`TerrainRenderer.h` + `engine/src/Terrain/*.cpp`（新目录，独占）+ assets/shaders/terrain.vert/.frag + PhysicsWorld.h/.cpp（追加）+ editor/src/panels/TerrainPanel.h/.cpp + SceneViewPanel.cpp（笔刷，独占）。SceneRenderer 地形钩子（c0 骨架日布）。
+
+```cpp
+// engine/include/NovaEngine/Terrain/Terrain.h
+namespace NovaEngine {
+// 地形组件（V0.5-8 v1）：512² 高度图 + 4 层材质 splat 混合 + Jolt heightfield 碰撞。
+// 高度图资产 = 16bit 灰度 PNG（assets/terrains/*.png；stb 读 ushort 通道）；
+// 笔刷改内存高度 → 保存写回 PNG（16bit，stb_image_write——stb 仓库内含，不引入新库）。
+class Terrain : public Component {
+public:
+    explicit Terrain(GameObject* owner);
+
+    std::string heightmapPath;             // 16bit 灰度 PNG；空 = 平面 0 高度
+    std::string splatmapPath;              // RGBA 权重图（4 层）；可空
+    glm::vec2 worldSize{100.0f, 100.0f};   // 世界尺寸（米；XZ 平面）
+    float heightScale = 10.0f;             // 0..1 高度值 → 米
+    struct TerrainLayer {                  // 固定 4 层（v1）；splat R/G/B/A 对应 0..3
+        std::string albedoPath;            // 空 = 白
+        std::string normalPath;            // 空 = 无
+        float tileSize = 10.0f;            // 贴图平铺（米/次）
+    };
+    std::array<TerrainLayer, 4> layers;
+    bool collisionEnabled = true;          // Jolt HeightFieldShape 静态体
+
+    // 笔刷 API（编辑器 Edit 态；TerrainPanel/SceneViewPanel 用）：
+    bool raycast(const glm::vec3& origin, const glm::vec3& dir, glm::vec3& outHit) const;
+    enum class BrushMode { Raise, Lower, Flatten, Smooth };
+    void applyBrush(const glm::vec3& worldCenter, float radius, float strength, BrushMode mode);
+    void rebuildDirtyRegion();             // 帧末调用：顶点/法线区域重算 + GPU 上传 + 碰撞重建（每帧最多一次）
+    float heightAt(float x, float z) const;
+    bool saveHeightmap() const;            // 写回 PNG（失败 Logger::error）
+    uint32_t resolution() const;           // 512（自高度图）
+
+    void onSerialize(nlohmann::json& out) const override;
+    void onDeserialize(const nlohmann::json& in) override;
+};
+}
+
+// engine/include/NovaEngine/Terrain/TerrainRenderer.h
+namespace NovaEngine {
+class TerrainRenderer {
+public:
+    static void init(); static void shutdown();
+    // 骨架日钩子（空实现默认）：懒建 GPU 网格（高度图→顶点/法线/索引 512²）→ 专用
+    // terrain shader submit；castShadows 时地形进 shadowItems
+    static void collectAndSubmit(const Scene& scene, const RenderCamera& camera,
+                                 const Frustum& frustum, std::vector<ShadowItem>& shadowItems);
+};
+}
+
+// engine/include/NovaEngine/Physics/PhysicsWorld.h（追加）
+void registerTerrainHeightfield(class Terrain* terrain);      // 创建/重建 Jolt HeightFieldShape（静态 body）
+void unregisterTerrainHeightfield(class Terrain* terrain);
+```
+
+**shader**：terrain.vert（高度图 R16 位移 + 4 层 splat 权重传递）+ terrain.frag（4 层 albedo/normal 按权重混合 + 自含 GGX 光照（与 blinn_phong.frag 同公式，注释互指）+ 阴影采样同 unit 约定）。
+
+**序列化键名**：`{"type":"Terrain","heightmapPath":"assets/terrains/h1.png","splatmapPath":"","worldSize":[100.0,100.0],"heightScale":10.0,"collisionEnabled":true,"layers":[{"albedo":"assets/textures/grass.png","normal":"","tileSize":10.0},{"albedo":"","normal":"","tileSize":10.0},{"albedo":"","normal":"","tileSize":10.0},{"albedo":"","normal":"","tileSize":10.0}]}`（缺省兜底）。
+
+**笔刷接线（SceneViewPanel，c6）**：工具栏「Terrain Brush」按钮（Edit 态，场景含 Terrain 时可用）；左键拖拽在 Terrain 上刷（raycast 命中）；TerrainPanel（dock 底部）：笔刷模式下拉（抬升/压低/平整/平滑）、半径/强度滑条、层材质编辑、Save Heightmap 按钮。
+
+**验收要点（c6）**：
+1. 512×512 高度图地形渲染正确（起伏目测 + 4 层 splat 混合过渡自然）；中等画质 Release 60 FPS（统计层）。
+2. 笔刷四模式即时生效；Save 后重开场景高度一致（16bit PNG 往返）。
+3. 刚体球在起伏地形上滚落（碰撞正确、无穿透）；Show Colliders 显示 heightfield 轮廓。
+4. 序列化往返无损；无 heightmap 文件 → 平面地形不崩溃（warn）。
+5. 非地形场景零回退（钩子空实现路径，统计层回归）。
+
+**风险：中**（16bit PNG 精度 ±1/65535 可接受；重建耗时——节流每帧一次，笔刷期间 < 30ms/次）。**回滚**：删除 Terrain 目录 + 钩子一行 + PhysicsWorld 追加段。
+
+---
+
+## 25.7 动画控制器（c7，V0.5-9 = V0.3-13 全量 + 状态机）
+
+**范围修正（冻结）**：V0.3-13 未落地（勘察确认无任何动画代码）。本项分两阶段一次交付：**9.1 蒙皮基础**（V0.3-13 范围：蒙皮顶点/骨架/动画通道提取 + 蒙皮着色路径 + 单动画播放）**9.2 状态机**（V0.5-9 范围：状态/参数/过渡/混合 + 列表式面板）。
+
+**文件落点**：`engine/include/NovaEngine/Animation/`（新目录：Skeleton.h/AnimationClip.h/SkeletalMeshRenderer.h/AnimatorController.h/Animator.h 等）+ `engine/src/Animation/*.cpp` + assets/shaders/blinn_phong_skinned.vert + ModelLoader.cpp（骨骼提取实现）+ Mesh.cpp（蒙皮布局）。MeshData.h 蒙皮段与 ModelLoader.h 声明由 c0 骨架日布（接口本节冻结）。
+
+```cpp
+// engine/include/NovaEngine/Render/MeshData.h（追加，冻结接口变更——骨架日 c0 布）
+namespace NovaEngine {
+// 蒙皮顶点（V0.5-9）：独立布局，不并入 Vertex（非蒙皮路径零变化，ROADMAP §10-C2 兼容裁定）
+struct SkinnedVertex {
+    glm::vec3 position; glm::vec3 normal; glm::vec2 uv; glm::vec3 tangent;
+    glm::ivec4 boneIds{0}; glm::vec4 boneWeights{0.0f};   // 权重和归一化由导入器保证
+};
+struct SkeletonBone { std::string name; int parent = -1; glm::mat4 inverseBind{1.0f}; };
+struct Skeleton { std::vector<SkeletonBone> bones; };
+struct AnimKey { float time = 0.0f; glm::vec3 position{0.0f}; glm::quat rotation{1,0,0,0}; glm::vec3 scale{1.0f}; };
+struct AnimChannel { std::string boneName; std::vector<AnimKey> keys; };
+struct AnimationClip { std::string name; float duration = 0.0f; float ticksPerSecond = 1.0f; std::vector<AnimChannel> channels; };
+// MeshData 追加（非蒙皮网格留空，旧代码路径逐字节不变）：
+std::vector<SkinnedVertex> skinnedVertices;
+Skeleton skeleton;
+std::vector<AnimationClip> clips;
+}
+
+// engine/include/NovaEngine/Animation/SkeletalMeshRenderer.h
+namespace NovaEngine {
+class SkeletalMeshRenderer : public Component {
+public:
+    explicit SkeletalMeshRenderer(GameObject* owner);
+    std::shared_ptr<Mesh> mesh = nullptr;      // 蒙皮布局 GPU 网格
+    std::string meshPath;                      // 资产相对路径
+    Material material;
+    Skeleton skeleton;                         // 反序列化自 mesh 缓存
+    void onSerialize(nlohmann::json& out) const override;
+    void onDeserialize(const nlohmann::json& in) override;
+};
+}
+
+// engine/include/NovaEngine/Animation/Animator.h
+namespace NovaEngine {
+// 动画状态机组件（V0.5-9）：参数驱动状态过渡 + 过渡混合；v1 列表式配置（内联 JSON，无独立资产）。
+struct AnimatorParameter {
+    enum class Type { Float, Bool, Trigger } type = Type::Float;
+    std::string name; float value = 0.0f;   // Trigger：运行期置位标记（当帧消费，不序列化）
+};
+struct AnimatorTransition {
+    int from = 0, to = 0;
+    float duration = 0.25f;                  // 过渡混合时长（秒）
+    struct Condition { std::string parameter; enum class Op { Greater, Less, Equals, BoolTrue } op = Op::Greater; float value = 0.0f; };
+    std::vector<Condition> conditions;       // 全部满足才触发（v1 无 Exit Time）
+};
+struct AnimatorState { std::string name; std::string clip; float speed = 1.0f; bool loop = true; };
+
+class Animator : public Component {
+public:
+    explicit Animator(GameObject* owner);
+    std::vector<AnimatorState> states;
+    int defaultState = 0;
+    std::vector<AnimatorTransition> transitions;
+    std::vector<AnimatorParameter> parameters;
+
+    void setFloat(const std::string& name, float v);    // 脚本 API（Play 中；对齐 Unity 心智）
+    void setBool(const std::string& name, bool v);
+    void setTrigger(const std::string& name);
+    float getFloat(const std::string& name) const;
+    const std::string& currentStateName() const;
+    void play(const std::string& stateName);   // 直接跳转（无混合）
+
+    void onUpdate(float dt) override;          // 过渡判定/参数消费/混合推进/骨骼矩阵上传
+    void onSerialize(nlohmann::json& out) const override;
+    void onDeserialize(const nlohmann::json& in) override;
+};
+}
+
+// engine/include/NovaEngine/Render/Mesh.h（追加）
+void setBoneMatrices(const std::vector<glm::mat4>& mats);   // 懒建 UBO（binding 1，上限 64）；空 = 不绑定
+bool isSkinned() const;
+
+// engine/include/NovaEngine/Assets/ModelLoader.h（追加声明，骨架日 c0 布）
+static bool extractSkeleton(const aiScene* src, const aiMesh* skinMesh, Skeleton& out);
+static bool extractAnimations(const aiScene* src, std::vector<AnimationClip>& out);   // aiNodeAnim/aiMeshAnim
+```
+
+**行为（9.1）**：动画采样（最近关键帧插值 TRS）→ 局部矩阵 → 全局矩阵 × inverseBind → 骨骼矩阵数组 → Mesh::setBoneMatrices → blinn_phong_skinned.vert 蒙皮变换，**复用 blinn_phong.frag（2a 后含 IBL——蒙皮角色自动获得 IBL 间接光）**；单动画播放 = Animator 未配置状态机时的退化形态（1 状态）。**行为（9.2）**：每帧检查当前状态出边过渡条件 → 触发后按 duration 线性混合两状态骨骼矩阵（权重渐变）→ 过渡完切换；Trigger 当帧消费；无 SMR → Animator no-op warn 一次。面板：AnimatorPanel 列表式（状态列表/参数列表/过渡列表，无节点图——ROADMAP 裁定）。
+
+**序列化键名**：
+- SkeletalMeshRenderer：`{"type":"SkeletalMeshRenderer","mesh":"assets/models/char.glb","material":{...同 MeshRenderer material 段...}}`
+- Animator：`{"type":"Animator","defaultState":0,"states":[{"name":"Idle","clip":"idle","speed":1.0,"loop":true},{"name":"Walk","clip":"walk","speed":1.0,"loop":true}],"transitions":[{"from":0,"to":1,"duration":0.25,"conditions":[{"parameter":"Speed","op":"Greater","value":0.5}]}],"parameters":[{"name":"Speed","type":"Float","value":0.0},{"name":"Running","type":"Bool","value":false}]}`
+- 畸形兜底：states 空 → no-op；clip 名找不到 → warn 保持 T-pose；参数未知 → warn 忽略。
+
+**验收要点（c7）**：
+1. 导入 Mixamo 角色 FBX/glTF：蒙皮显示正确、无顶点脱离；walk 循环播放流畅。
+2. walk→run→idle 按 Speed 参数自动过渡且混合平滑（过渡期两动画权重渐变，目测无跳变/滑步）；过渡时长 0.25s 生效。
+3. 状态机配置随场景序列化往返无损；示例角色走跑跳组合正确（整合者搭示例场景）。
+4. 骨骼 UBO 更新开销 < 0.2ms/角色（统计层）。
+5. 非骨骼模型路径不受影响（回归：普通模型/材质/阴影/后处理零变化）；蒙皮角色参与阴影与实例化分组（单实例走普通 submit）。
+
+**风险：高**（冻结接口变更 MeshData + ModelLoader + 蒙皮 shader；Assimp 各格式骨骼数据差异）。**回滚**：skinnedVertices 为空时全部新路径不触发（MeshData 追加字段对旧代码零影响）；blinn_phong_skinned.vert 独立新文件；提取失败 → 无蒙皮数据 → SkeletalMeshRenderer 显示静态 T-pose 不崩溃。
+
+---
+
+## 25.8 2D 模式（c8，V0.5-10）
+
+**文件落点**：`engine/include/NovaEngine/Scene/SpriteRenderer.h`、`BoxCollider2D.h` + 对应 .cpp、`engine/include/NovaEngine/Physics/Physics2D.h` + `engine/src/Physics/Physics2D.cpp`（新模块）、Camera.cpp（投影实现）、assets/shaders/sprite.vert（新，复用 ui.frag）。Camera.h 投影段、SceneRenderer 的正交投影与 Sprite 收集分支由 c0 骨架日布；SceneViewPanel 的 sprite 拾取分支由 c0 合波补。
+
+```cpp
+// engine/include/NovaEngine/Scene/Camera.h（追加，骨架日 c0 布）
+enum class ProjectionMode { Perspective, Orthographic };
+// Camera 类追加：
+ProjectionMode projectionMode = ProjectionMode::Perspective;   // 缺省 = 旧行为零变化
+float orthoSize = 5.0f;                                        // 正交半高（米；Unity 语义）
+
+// engine/include/NovaEngine/Scene/SpriteRenderer.h
+namespace NovaEngine {
+// 2D 精灵渲染（V0.5-10）：世界空间 quad（尺寸 = 贴图像素 / pixelsPerUnit；2D 平面 = 世界 XY）。
+// 渲染：透明段（AlphaBlend 固定），按 (sortingLayer, orderInLayer, 视距) 排序——层越大越后绘。
+class SpriteRenderer : public Component {
+public:
+    explicit SpriteRenderer(GameObject* owner);
+    std::string texturePath;               // 空 = 白块
+    std::shared_ptr<Texture> texture = nullptr;
+    glm::vec4 color{1.0f};
+    bool flipX = false, flipY = false;
+    int sortingLayer = 0;                  // v1 无命名层表
+    int orderInLayer = 0;
+    float pixelsPerUnit = 100.0f;
+    void onSerialize(nlohmann::json& out) const override;
+    void onDeserialize(const nlohmann::json& in) override;
+};
+}
+
+// engine/include/NovaEngine/Scene/BoxCollider2D.h
+namespace NovaEngine {
+// 2D AABB 碰撞（V0.5-10 v1）：重叠查询 + 事件回调；v1 无刚体动力学（移动由脚本/Transform 驱动）。
+// 独立于 Jolt（不注册进 PhysicsWorld；2D 与 3D 物理共存不互扰）。
+class BoxCollider2D : public Component {
+public:
+    explicit BoxCollider2D(GameObject* owner);
+    glm::vec2 center{0.0f}; glm::vec2 size{1.0f};   // 局部（2D 平面 = 世界 XY）
+    bool isTrigger = false;
+    void onSerialize(nlohmann::json& out) const override;
+    void onDeserialize(const nlohmann::json& in) override;
+};
+}
+
+// engine/include/NovaEngine/Physics/Physics2D.h（新模块）
+namespace NovaEngine {
+// 2D 碰撞求解（V0.5-10 v1）：每帧（Play）对全部 BoxCollider2D 做 AABB 重叠对检测
+//（O(n²) 上限 500 组件——mini 引擎规模可接受，验收 < 0.5ms）→ 事件回调：
+// OnCollision2DEnter/Stay/Exit、OnTrigger2DEnter/Stay/Exit（复用 Events 类型化事件；
+// Enter/Exit 边沿由内部状态表维护）。
+struct Collision2DEvent { GameObject* other = nullptr; glm::vec2 overlap{0.0f}; };
+class Physics2D {
+public:
+    static void step(Scene& scene);   // Scene::update 内、onUpdate 广播后调用（固定点，契约）
+};
+}
+```
+
+**行为**：正交相机投影：SceneRenderer::assembleFromCamera 按 projectionMode 分支（骨架日）；2D 与 3D 共存：同场景可同时有透视/正交相机，isMain 决定 Play 渲染相机；SpriteRenderer 进 SceneRenderer 收集（sprite.vert 世界变换 quad + 复用 ui.frag）。**2D 模板**：新建场景菜单加「2D Scene」模板（整合者）：正交相机（isMain）+ 2-3 个 sprite + BoxCollider2D 示例，assets/scenes/2DTemplate.nova.json。
+
+**序列化键名**：
+- SpriteRenderer：`{"type":"SpriteRenderer","texturePath":"assets/textures/hero.png","color":[1,1,1,1],"flipX":false,"flipY":false,"sortingLayer":0,"orderInLayer":0,"pixelsPerUnit":100.0}`
+- BoxCollider2D：`{"type":"BoxCollider2D","center":[0.0,0.0],"size":[1.0,1.0],"isTrigger":false}`
+- Camera 追加键：`"projectionMode":"Perspective"|"Orthographic","orthoSize":5.0`（缺省兜底，旧文件零变化）
+
+**验收要点（c8）**：
+1. 正交场景中 sprite 正确渲染（尺寸/PPU 正确、flip 生效）；排序层生效（大 layer 后绘覆盖，目测）。
+2. 2D AABB 碰撞回调正确：两 sprite 重叠触发 OnCollision2DEnter、分离触发 Exit（脚本日志验证）；isTrigger 事件独立。
+3. 2D 模板场景：New 2D Scene 开箱可见（相机+精灵）；Play 可交互。
+4. 2D 与 3D 场景共存：透视/正交相机切换 isMain 渲染互不干扰；2D 组件不进 Jolt（无 3D 物理副作用）。
+5. 旧文件（Camera 无投影字段）打开 = 透视，零警告；序列化往返无损；500 个 BoxCollider2D 检测 < 0.5ms（统计层）。
+
+**风险：低-中。回滚**：ProjectionMode 缺省 Perspective 零变化；新组件/新模块独立删除。
+
+---
+
+## 25.9 网络多人预研 spike（c9，V0.5-15，独立分支不进 main）
+
+**裁定（用户，2026-11-18）：保留「1 周 spike 原型」，与 2a/2b 解耦。** 单独 Coder c9、独立分支 spike/network-v1（独立 worktree 开发，与 main 并行零文件冲突）；**分支代码不进 main**（spike 完成后，结论文档由主会话写入本小节「落地结论」并合入 main）。
+
+**目标**：确定性帧同步（锁步）最小原型——局域网两台机器同步移动方块。方案：输入帧同步——每帧收集本地输入 → 按帧号经网络同步 → 双方在同一帧号应用输入、各自推进模拟（引擎已有固定步进 60Hz 物理与单线程主循环，直接利用）。网络层用 WinSock2（ws2_32，Windows 平台自带，不引入新第三方库）。
+
+**文件落点（仅 spike 分支）**：`engine/include/NovaEngine/Network/` + `engine/src/Network/`（NetworkManager/NetPeer 等，自由设计）+ 主循环帧同步入口 + 示例场景/脚本。main 侧唯一落点 = 本小节「落地结论」（spike 完成后由主会话写入）。
+
+**交付物（约 1 周，与 2a 同时起）**：
+1. 可运行原型：两台机器局域网运行同一场景，一方移动方块，另一方同步，60 秒无明显偏离。
+2. 结论文档（写入本小节「落地结论」）：锁步可行性结论、成本拆解（联网层/协议/两机联调/编辑器支持）、V1.0+ 是否纳入的明确建议。
+3. ROADMAP §6 #15 行标注「已决策（见 ARCHITECTURE §25.9 落地结论）」。
+
+**验收要点（c9，spike 分支内）**：
+1. 双机局域网同步移动方块 60 秒位置一致（真机人工验证；单机双进程 127.0.0.1 先行验证）。
+2. 断开/延迟注入下不崩溃，结论中记录处理策略。
+3. 结论文档给出明确 V1.0 建议与成本拆解；结论合入 main 后 ROADMAP #15 行有标注。
+
+**风险：中**（Jolt 跨机浮点确定性未验证——spike 用「确定性积分移动方块」绕开物理同步，结论中记录 Jolt 确定性评估；WinSock2 代码全部隔离在 Network 目录）。**回滚**：分支不合并即 main 零影响；结论文档仅一段文字，可随时删。
+
+**落地结论（占位，spike 完成后由主会话填入）**：可行性 / 成本拆解 / V1.0+ 建议。
+
+---
+
+## 25.10 波 2 通用验收与回归（合波后，整合者 c0）
+
+- **合波构建**：Debug 全量零错误零第一方警告；Release 构建通过；双 exe 冒烟（编辑器守卫 25 条 + Player 场景加载）。
+- **波 1 零回归（重点）**：2000 立方体剔除+实例化（draw calls < 20、Release 60FPS）；UI 三分辨率布局；存档往返；CLI 退出码；手柄/InputMap。
+- **后处理双路径回归**：pp.enabled A/B、RGBA8 直通；SSAO/IBL 关闭时 = 2a 前逐像素基线（A/B 对比）。
+- **schema v4 回归**：demo.nova.json（旧文件）打开参数不变；全部新组件序列化往返；未知组件 warn 跳过。
+- **统计层数字随波记录**（draw calls/帧时间/tris）作为验收证据（§12.7 纪律）。
+- 编辑器守卫与序列化回归清单 18 → 25 条（内置组件数）。
+- samples 四脚本 DLL 形态行为与静态链接一致（回归）。
+- 2a 合波先跑一次全量回归，2b 合波再跑一次；两次均通过才推送（AGENTS.md 流程）。
