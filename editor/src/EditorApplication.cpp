@@ -256,6 +256,9 @@ void EditorApplication::shutdown() {
     SkyboxRenderer::shutdown();  // V0.2-7：与 Renderer 同序清理（GL 上下文仍存活）
     UIRenderer::shutdown();      // V0.3-3：动态 VBO/ui shader 释放（需 GL 上下文存活，先于 Renderer）
     PostProcess::shutdown();     // V0.3-14 波 3：后处理 shader/ping-pong 纹理释放（GL 存活期、Renderer 之前）
+    IBL::shutdown();             // V0.5-4 波 2 合波：卷积缓存纹理/BRDF LUT 释放（GL 存活期）
+    SSAO::shutdown();            // V0.5-5 波 2 合波：AO 纹理链释放（GL 存活期）
+    ParticleRenderer::shutdown();  // V0.5-6 波 2 合波：粒子 VAO/VBO/贴图缓存释放（GL 存活期）
     Renderer::shutdown();
     Logger::info("NovaEditor 退出");
     Logger::shutdown();  // 关闭日志文件（逐行已落盘）

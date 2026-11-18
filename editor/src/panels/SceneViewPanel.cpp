@@ -180,16 +180,20 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
     // → RGBA16F，否则 RGBA8 直通）；outFbo 为 LDR 输出（RGBA8、无 MSAA，
     // renderSceneToOutput 内部绘制后处理/UI 的目标）。尺寸或 hdr 模式变化 → 全删重建
     const bool hdrMode = scene->postProcess.enabled && PostProcess::hdrSupported();
+    // 波 2 合波（§25.3 + 骨架日落地裁定 4）：SSAO 开且 hdr 时挂法线/线性深度附件（MRT）；
+    // 开关变化与 hdr 模式变化同权重（都需全删重建，附件集合不同）
+    const bool normalDepth = hdrMode && scene->postProcess.ssaoEnabled;
     bool fboReady = true;
-    if (!m_fboCreated || hdrMode != m_fboHdrMode) {
+    if (!m_fboCreated || hdrMode != m_fboHdrMode || normalDepth != m_fboNormalDepth) {
         m_hdrFbo.destroy();
         m_outFbo.destroy();
-        if (!m_hdrFbo.create(w, h, 4, hdrMode) || !m_outFbo.create(w, h, 1, false)) {
+        if (!m_hdrFbo.create(w, h, 4, hdrMode, normalDepth) || !m_outFbo.create(w, h, 1, false)) {
             Logger::error("SceneView: Framebuffer 创建失败 ({}x{})", w, h);
             fboReady = false;   // m_fboCreated 保持 false，下帧重试
         } else {
             m_fboCreated = true;
             m_fboHdrMode = hdrMode;
+            m_fboNormalDepth = normalDepth;
         }
     } else if (w != m_hdrFbo.width() || h != m_hdrFbo.height()) {
         m_hdrFbo.resize(w, h);

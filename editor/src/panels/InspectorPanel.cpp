@@ -1,6 +1,7 @@
 #include "InspectorPanel.h"
 #include "AudioWidgets.h"         // 音频组件编辑（V0.3-2，本线 Coder C）
 #include "MaterialEditorWidgets.h"   // 材质编辑控件集（Inspector 与 .novamat 模态共用，V0.3-6）
+#include "ParticleWidgets.h"      // 粒子系统编辑（V0.5-6，波 2 合波接线；不匹配类型 no-op）
 #include "PhysicsWidgets.h"       // 物理组件编辑（V0.3-1，Coder A 波 2 并行创建；不匹配类型 no-op）
 #include "UIWidgets.h"            // UI 组件编辑（V0.3-3，Coder B 波 2 并行创建；不匹配类型 no-op）
 
@@ -18,6 +19,7 @@
 #include <NovaEngine/Scene/ComponentRegistry.h>
 #include <NovaEngine/Scene/DirectionalLight.h>
 #include <NovaEngine/Scene/GameObject.h>
+#include <NovaEngine/Scene/LODGroup.h>
 #include <NovaEngine/Scene/MeshRenderer.h>
 #include <NovaEngine/Scene/PrefabInstance.h>
 #include <NovaEngine/Scene/Scene.h>
@@ -249,8 +251,10 @@ void InspectorPanel::onGui(EditorContext& ctx, EditorCamera&) {
     drawMeshRenderer(ctx, go, overridesFor(overridesByType, "MeshRenderer"));
     drawCamera(ctx, go, overridesFor(overridesByType, "Camera"));
     drawDirectionalLight(ctx, go, overridesFor(overridesByType, "DirectionalLight"));
+    drawLODGroup(ctx, go);
     // V0.3 波 2：物理/音频/UI 组件编辑——widget 头漏斗分发（三个 header-only 头签名一致：
     // drawXxxComponents(ctx, comp, editMode)；各头 dynamic_cast 识别自身组件类型，不匹配 no-op）。
+    // 波 2 合波（V0.5-6）：ParticleWidgets 同签名接入。
     // 遍历 go 全部组件（getComponents 走 dynamic_cast，含派生类）。
     {
         const bool editMode = ctx.state == EditorContext::EditorState::Edit;
@@ -258,6 +262,7 @@ void InspectorPanel::onGui(EditorContext& ctx, EditorCamera&) {
             drawPhysicsComponents(ctx, comp, editMode);
             drawAudioComponents(ctx, comp, editMode);
             drawUIComponents(ctx, comp, editMode);
+            ParticleWidgets::drawParticleComponents(ctx, comp, editMode);
             // 上面的 Remove 按钮可能已释放 comp（析构指针作废）：校验存活后继续，
             // 否则终止分发（后续快照指针不可再解引用）
             bool alive = false;
@@ -456,6 +461,60 @@ void InspectorPanel::drawDirectionalLight(EditorContext& ctx, NovaEngine::GameOb
     ImGui::PopID();
     if (remove) {
         go->removeComponent<NovaEngine::DirectionalLight>();
+        ctx.markSceneDirty();
+    }
+}
+
+// ===== V0.5-3 LODGroup 编辑（波 2 合波接线，2026-11-19）：v1 上限 3 档，
+// mesh 路径 + 距离阈值列表；路径变更清运行时缓存（下帧重新解析）=====
+void InspectorPanel::drawLODGroup(EditorContext& ctx, NovaEngine::GameObject* go) {
+    NovaEngine::LODGroup* lod = go->getComponent<NovaEngine::LODGroup>();
+    if (!lod) return;
+    if (!ImGui::CollapsingHeader("LOD Group", ImGuiTreeNodeFlags_DefaultOpen)) return;
+    ImGui::PushID("lod");
+    bool remove = false;
+    const bool edit = ctx.state == EditorContext::EditorState::Edit;
+
+    if (ImGui::Checkbox("Enabled", &lod->enabled)) ctx.markSceneDirty();
+    if (ImGui::Checkbox("Cross Fade（v1 预留）", &lod->crossFade)) ctx.markSceneDirty();
+    for (size_t i = 0; i < lod->lods.size(); ++i) {
+        ImGui::PushID(static_cast<int>(i));
+        ImGui::TextUnformatted(i == 0 ? "LOD 0" : (i == 1 ? "LOD 1" : "LOD 2"));
+        std::string path = lod->lods[i].meshPath;
+        if (ImGui::InputText("Mesh", &path, ImGuiInputTextFlags_EnterReturnsTrue)) {
+            lod->lods[i].meshPath = path;
+            lod->lods[i].mesh.reset();   // 路径变更清运行时缓存（resolveMeshFor 下帧重解析）
+            ctx.markSceneDirty();
+        } else if (ImGui::IsItemDeactivatedAfterEdit()) {
+            lod->lods[i].meshPath = path;
+            lod->lods[i].mesh.reset();
+            ctx.markSceneDirty();
+        }
+        if (ImGui::DragFloat("Distance", &lod->lods[i].distance, 0.1f, 0.0f, 10000.0f))
+            ctx.markDirtyOnly();
+        if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
+        ImGui::PopID();
+    }
+    if (edit) {
+        if (lod->lods.size() < 3 && ImGui::Button("Add LOD")) {
+            lod->lods.push_back({});
+            ctx.markSceneDirty();
+        }
+        if (!lod->lods.empty()) {
+            ImGui::SameLine();
+            if (ImGui::Button("Remove Last LOD")) {
+                lod->lods.pop_back();
+                ctx.markSceneDirty();
+            }
+        }
+    }
+
+    if (!edit) ImGui::BeginDisabled();
+    if (ImGui::Button("Remove Component")) remove = true;
+    if (!edit) ImGui::EndDisabled();
+    ImGui::PopID();
+    if (remove) {
+        go->removeComponent<NovaEngine::LODGroup>();
         ctx.markSceneDirty();
     }
 }

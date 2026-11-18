@@ -11,6 +11,7 @@
 #include <NovaEngine/Assets/AssetDatabase.h>
 #include <NovaEngine/Core/Logger.h>
 #include <NovaEngine/Particles/ParticleSystem.h>
+#include <NovaEngine/Render/Renderer.h>
 #include <NovaEngine/Render/Shader.h>
 #include <NovaEngine/Render/Texture.h>
 #include <NovaEngine/Scene/GameObject.h>
@@ -127,8 +128,10 @@ void ParticleRenderer::collectAndSubmit(const Scene& scene, const RenderCamera& 
     s_lastCount = 0;
     s_lastDrawCalls = 0;
     ensureResources();
-    if (!s_shader)
+    if (!s_shader) {
+        Renderer::reportParticleStats(0, 0);
         return;
+    }
 
     // 1. 收集：全部 activeInHierarchy 的 ParticleSystem（与 MeshRenderer 同一活跃语义）
     //    → collectInstances（Play 实时池 / Edit 稳态快照）→ 分组合并实例数据
@@ -186,8 +189,10 @@ void ParticleRenderer::collectAndSubmit(const Scene& scene, const RenderCamera& 
         }
         s_lastCount += static_cast<uint32_t>(insts.size());
     });
-    if (s_lastCount == 0)
+    if (s_lastCount == 0) {
+        Renderer::reportParticleStats(0, 0);
         return;
+    }
 
     // 2. 绘制（v1 按骨架日钩子点立即绘制；透明段语义 = 混合 + 不写深度，深度测试保持——
     //    当前帧深度缓冲尚无不透明几何，遮挡行为见最终报告「排序张力」）
@@ -227,6 +232,9 @@ void ParticleRenderer::collectAndSubmit(const Scene& scene, const RenderCamera& 
 
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
+
+    // 统计上报（§25.4 验收 2 口径）：StatsPanel 经 Renderer::lastParticleCount/DrawCalls 读取
+    Renderer::reportParticleStats(s_lastCount, s_lastDrawCalls);
 }
 
 }  // namespace NovaEngine

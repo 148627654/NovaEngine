@@ -7,6 +7,9 @@
 #include <NovaEngine/Scene/Text.h>
 #include <NovaEngine/Scene/Transform.h>
 
+#include <GLFW/glfw3.h>
+#include <glad/gl.h>
+
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -95,6 +98,20 @@ static bool verifyHierarchy(const Scene& s, const char* tag) {
 int main() {
     std::printf("PlayCycleTest: 模拟编辑器 Play 往返（serialize→deserialize×N）\n");
 
+    // GL 上下文（隐藏窗口）：真实验收场景含 MeshRenderer，反序列化触发 Mesh::create
+    // （GPU 上传路径）——无上下文时 glad 函数指针为空、调用即崩溃。
+    // 波 2 合波修复（2026-11-19）：测试进程自建隐藏窗口拿上下文；失败则跳过该段。
+    glfwInit();
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    GLFWwindow* glCtx = glfwCreateWindow(64, 64, "PlayCycleTest", nullptr, nullptr);
+    if (glCtx) {
+        glfwMakeContextCurrent(glCtx);
+        if (!gladLoadGL(glfwGetProcAddress))
+            std::printf("  [WARN] glad 加载失败（GL 相关路径不可用）\n");
+    } else {
+        std::printf("  [WARN] 无法创建 GL 上下文（V05UITest 往返段将跳过）\n");
+    }
+
     Scene scene("Test");
     buildUserScene(scene);
     dumpTree(scene, "初始");
@@ -140,7 +157,7 @@ int main() {
     }
 
     // 真实验收场景往返（排查 V05UITest 保存后 ScrollList 子项丢失）
-    {
+    if (glCtx) {
         std::printf("\n[真实场景 V05UITest 往返]\n");
         auto countObjects = [](const Scene& s) {
             int n = 0;
@@ -164,6 +181,11 @@ int main() {
         std::printf("  [info] 文件往返后对象数 = %d（期望 19）\n", n2);
         std::remove(file.c_str());
         CHECK(n2 == 19, "文件往返后对象数 = 19");
+    }
+
+    if (glCtx) {
+        glfwDestroyWindow(glCtx);
+        glfwTerminate();
     }
 
     std::printf("\n%s（失败 %d 项）\n", g_failures == 0 ? "全部通过" : "存在失败", g_failures);

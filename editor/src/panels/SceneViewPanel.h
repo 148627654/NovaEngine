@@ -40,6 +40,7 @@ private:
     NovaEngine::Framebuffer m_outFbo;
     bool m_fboCreated = false;
     bool m_fboHdrMode = false;         // 上次创建时的 hdr 模式（变化 → 全删重建）
+    bool m_fboNormalDepth = false;     // 上次创建时的 MRT 附件开关（波 2 SSAO；变化 → 全删重建）
     bool m_uiConsumedWheel = false;    // 本帧 Edit 态 UI 已消费滚轮（抑制相机缩放）
     bool m_pickArmed = false;          // 左键按下待释放判定（位移阈值 3px）
     glm::vec2 m_pickPressPos{0.0f};

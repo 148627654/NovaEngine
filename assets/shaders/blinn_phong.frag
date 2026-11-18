@@ -54,6 +54,7 @@ uniform samplerCube uIrrMap;    // unit 6：irradiance 卷积（32²）
 uniform samplerCube uPrefMap;   // unit 7：prefiltered 镜面（128²，mip 链 5 级）
 uniform sampler2D uBrdfLut;     // unit 8：BRDF 积分 LUT（512²）
 uniform float uIblIntensity;    // 0 = 间接光 0（与 2a 前逐像素一致）
+uniform float uIblSkyRotation;  // 天空绕 +Y 旋转（弧度；与 skybox.frag 同款变换，默认 0）
 
 // ===== GBuffer 输出（V0.5-5 SSAO，c0 骨架日布）=====
 layout(location = 1) out vec3 oNormal;       // 视图空间法线（RGBA16F 附件 1）
@@ -157,10 +158,16 @@ void main() {
     //（程序化回退 = 既有 ambientColor，不黑屏）=====
     vec3 indirect = vec3(0.0);
     if (uIblIntensity > 0.0) {
+        // 天空旋转对齐（§25.2 合波补，2026-11-19）：与 skybox.frag 同款 +Y 旋转采样方向
+        //（旋转天空而非相机）——skyRotation≠0 时反射图与天空盒一致
+        float sr = sin(uIblSkyRotation);
+        float cr = cos(uIblSkyRotation);
+        vec3 rotN = vec3(cr * N.x + sr * N.z, N.y, -sr * N.x + cr * N.z);
         vec3 R = reflect(-V, N);                       // 世界空间反射方向
-        vec3 irradiance = texture(uIrrMap, N).rgb;     // 漫反射：irradiance 卷积（unit 6）
+        vec3 rotR = vec3(cr * R.x + sr * R.z, R.y, -sr * R.x + cr * R.z);
+        vec3 irradiance = texture(uIrrMap, rotN).rgb;  // 漫反射：irradiance 卷积（unit 6）
         // 镜面：prefiltered mip 链（unit 7，5 级）按粗糙度选 LOD（0..4）
-        vec3 prefiltered = textureLod(uPrefMap, R, roughness * 4.0).rgb;
+        vec3 prefiltered = textureLod(uPrefMap, rotR, roughness * 4.0).rgb;
         // BRDF LUT（unit 8）：(NdotV, roughness) → (scale, bias) 补偿
         vec2 brdf = texture(uBrdfLut, vec2(NdotV, roughness)).rg;
         vec3 specularIbl = prefiltered * (F * brdf.x + brdf.y);

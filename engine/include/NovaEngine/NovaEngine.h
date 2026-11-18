@@ -43,6 +43,7 @@
 #include <NovaEngine/Scene/Text.h>
 #include <NovaEngine/Scene/Button.h>
 #include <NovaEngine/Scene/PrefabInstance.h>
+#include <NovaEngine/Scene/LODGroup.h>
 
 #include <NovaEngine/Assets/AssetDatabase.h>
 #include <NovaEngine/Assets/AssetStream.h>
@@ -69,6 +70,12 @@
 #include <NovaEngine/UI/ScrollView.h>
 
 #include <NovaEngine/SaveGame/SaveGame.h>
+
+// ===== 波 2 渲染模块（V0.5-4/5/6，2026-11-19 合波接线）=====
+#include <NovaEngine/Render/IBL.h>
+#include <NovaEngine/Render/SSAO.h>
+#include <NovaEngine/Particles/ParticleSystem.h>
+#include <NovaEngine/Particles/ParticleRenderer.h>
 
 #include <NovaEngine/Serialization/PrefabSerializer.h>
 #include <NovaEngine/Serialization/SceneSerializer.h>

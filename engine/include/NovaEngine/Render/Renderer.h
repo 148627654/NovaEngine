@@ -76,12 +76,17 @@ public:
     // 调用点 = SceneRenderer 天空段（每帧；同源 HDRI 或渐变天空均会调用）。
     static void setEnvironment(uint32_t irradianceMapId, uint32_t prefilterMapId,
                                uint32_t brdfLutId, float intensity);
+    // 天空旋转对齐（§25.2 合波补）：blinn_phong.frag 的 IBL 采样方向绕 +Y 旋转（弧度），
+    // 与 SkyboxRenderer 同款变换；由 SceneRenderer 天空段每帧设置（默认 0 = 不转）
+    static void setIblSkyRotation(float radians);
     // SSAO GBuffer pass 开关（§25.3）：true 时 blinn_phong.frag 写 MRT 附件 1（法线）/附件 2（线性深度）；
     // 默认 false = 逐像素与 2a 前一致。由 SceneRenderer 每帧按 (hdr && ssaoEnabled) 设置。
     static void setGbufferPassEnabled(bool enabled);
     // 粒子统计（§25.4）：上一帧粒子数 / 粒子 draw call 数（空实现默认 0；ParticleRenderer 接入后填充）
     static uint32_t lastParticleCount();
     static uint32_t lastParticleDrawCalls();
+    // 粒子统计上报（§25.4 合波补）：由 ParticleRenderer 每帧末回写（0 = 本帧无粒子/未接入）
+    static void reportParticleStats(uint32_t count, uint32_t drawCalls);
 };
 
 }  // namespace NovaEngine

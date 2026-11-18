@@ -37,6 +37,7 @@ private:
                     const std::vector<std::string>* overrides = nullptr);
     void drawDirectionalLight(EditorContext& ctx, NovaEngine::GameObject* go,
                               const std::vector<std::string>* overrides = nullptr);
+    void drawLODGroup(EditorContext& ctx, NovaEngine::GameObject* go);   // V0.5-3 波 2 合波接线
     // 返回是否发生了整场景重建（移除脚本走 JSON 重建，旧指针全部作废）
     bool drawScripts(EditorContext& ctx, NovaEngine::GameObject* go,
                      const std::unordered_map<std::string, std::vector<std::string>>& overridesByType);

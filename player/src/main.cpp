@@ -176,6 +176,7 @@ int main(int argc, char** argv) {
     Framebuffer hdrFbo, outLdrFbo;
     bool fbosCreated = false;
     bool hdrFboIsHdr = false;
+    bool hdrFboNormalDepth = false;   // 波 2 SSAO MRT 附件开关（变化 → 全删重建）
 
     while (!window->shouldClose()) {
         window->pollEvents();
@@ -227,13 +228,16 @@ int main(int argc, char** argv) {
         }
 
         // V0.3-14：完整渲染链（场景→描边/线框注入→resolve→后处理→UI），输出到 outLdrFbo
+        // 波 2 合波（§25.3 + 骨架日落地裁定 4）：SSAO 开且 hdr 时挂法线/线性深度附件（MRT）
         const bool hdr = scene.postProcess.enabled && PostProcess::hdrSupported();
-        if (!fbosCreated || hdr != hdrFboIsHdr) {
+        const bool normalDepth = hdr && scene.postProcess.ssaoEnabled;
+        if (!fbosCreated || hdr != hdrFboIsHdr || normalDepth != hdrFboNormalDepth) {
             hdrFbo.destroy();
             outLdrFbo.destroy();
-            hdrFbo.create(fbW, fbH, 4, hdr);
+            hdrFbo.create(fbW, fbH, 4, hdr, normalDepth);
             outLdrFbo.create(fbW, fbH, 0, false);
             hdrFboIsHdr = hdr;
+            hdrFboNormalDepth = normalDepth;
             fbosCreated = true;
         } else {
             hdrFbo.resize(fbW, fbH);
@@ -262,6 +266,9 @@ int main(int argc, char** argv) {
     PostProcess::shutdown();
     UIRenderer::shutdown();
     AudioEngine::shutdown();
+    IBL::shutdown();             // V0.5-4 波 2 合波：卷积缓存纹理/BRDF LUT 释放
+    SSAO::shutdown();            // V0.5-5 波 2 合波：AO 纹理链释放
+    ParticleRenderer::shutdown();  // V0.5-6 波 2 合波：粒子 VAO/VBO/贴图缓存释放
     SkyboxRenderer::shutdown();
     Renderer::shutdown();
     Logger::info("[NovaPlayer] 退出");

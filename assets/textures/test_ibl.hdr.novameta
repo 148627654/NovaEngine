@@ -1,0 +1,7 @@
+{
+    "filter": "Trilinear",
+    "generateMipmaps": true,
+    "type": "sRGB",
+    "version": 1,
+    "wrap": "Repeat"
+}

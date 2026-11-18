@@ -271,6 +271,8 @@ void renderSceneInternal(const Scene& scene, const RenderCamera& fallbackCamera,
     } else {
         Renderer::setEnvironment(0, 0, 0, 0);
     }
+    // 天空旋转对齐（§25.2 合波补）：IBL 采样方向与天空盒同款 +Y 旋转（渐变天空无 IBL，设了无副作用）
+    Renderer::setIblSkyRotation(glm::radians(scene.skyRotation));
 
     // 5. 渲染序列：天空 → 单次遍历收集（V0.5-14 视锥剔除 + 实例化分组）→ 阴影 → grid → endFrame
     Renderer::beginFrame(renderCam, light, glm::vec4(scene.skyColor, 1.0f));

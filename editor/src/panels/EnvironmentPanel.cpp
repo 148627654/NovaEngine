@@ -59,6 +59,21 @@ void EnvironmentPanel::onGui(EditorContext& ctx, EditorCamera&) {
         if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
         if (ImGui::DragFloat("Exposure", &pp.exposure, 0.01f, 0.01f, 10.0f)) ctx.markDirtyOnly();
         if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
+        // ===== V0.5-5 SSAO（波 2 合波接线）：开关 + 半径/强度/采样数（采样数就近钳位 8/16/32）=====
+        ImGui::Separator();
+        if (ImGui::Checkbox("SSAO", &pp.ssaoEnabled)) ctx.markSceneDirty();
+        if (ImGui::DragFloat("SSAO Radius", &pp.ssaoRadius, 0.01f, 0.05f, 5.0f)) ctx.markDirtyOnly();
+        if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
+        if (ImGui::DragFloat("SSAO Strength", &pp.ssaoStrength, 0.01f, 0.0f, 5.0f)) ctx.markDirtyOnly();
+        if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
+        {
+            const char* ssaoSamples[] = {"8", "16", "32"};
+            int ssaoIdx = pp.ssaoSampleCount <= 8 ? 0 : (pp.ssaoSampleCount <= 16 ? 1 : 2);
+            if (ImGui::Combo("SSAO Samples", &ssaoIdx, ssaoSamples, 3)) {
+                pp.ssaoSampleCount = (ssaoIdx == 0) ? 8 : (ssaoIdx == 1 ? 16 : 32);
+                ctx.markSceneDirty();
+            }
+        }
         // 8bit 降级提示（§14.10：老集显无 RGB16F → 后处理运行期失效，不崩溃）
         if (!NovaEngine::PostProcess::hdrSupported())
             ImGui::TextDisabled("(HDR not supported on this GPU: post-processing disabled at runtime)");
@@ -95,6 +110,11 @@ void EnvironmentPanel::onGui(EditorContext& ctx, EditorCamera&) {
             ctx.markDirtyOnly();
         if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
         if (ImGui::DragFloat("Sky Exposure", &scene->skyExposure, 0.05f, 0.0f, 10.0f))
+            ctx.markDirtyOnly();
+        if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
+        // ===== V0.5-4 IBL（波 2 合波接线）：环境光强度（cubemap 天空自动同源烘焙 IBL；
+        // 渐变天空无 IBL 源，滑条保留但无效果；0 = 关闭间接光）=====
+        if (ImGui::DragFloat("IBL Intensity", &scene->iblIntensity, 0.01f, 0.0f, 5.0f))
             ctx.markDirtyOnly();
         if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
         ImGui::PopID();

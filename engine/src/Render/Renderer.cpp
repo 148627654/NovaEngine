@@ -87,6 +87,7 @@ uint32_t s_iblIrradiance = 0;
 uint32_t s_iblPrefilter = 0;
 uint32_t s_iblBrdfLut = 0;
 float s_iblIntensity = 0.0f;
+float s_iblSkyRotation = 0.0f;   // IBL 采样方向绕 +Y 旋转（弧度；天空段每帧设置，默认 0）
 
 // ===== V0.5-5 SSAO GBuffer pass 开关（SceneRenderer 每帧经 setGbufferPassEnabled 设置；
 // 开 = blinn_phong.frag 写 MRT 附件 1（法线）/附件 2（线性深度）；关 = 逐像素与 2a 前一致）=====
@@ -198,6 +199,7 @@ void setBlinnPhongUniforms(const std::shared_ptr<Shader>& shader,
     // 无后处理 = 1/2.2（V0.2 现行为）；HDR 模式 = 0（触发 shader 直通分支，非 pow 指数 0；
     // 波 3 后处理接管：SceneRenderer 经 setGammaMode 每帧设置，combine pass 内统一 gamma）
     shader->setFloat("uGamma", s_linearOutput ? 0.0f : 1.0f / 2.2f);
+    shader->setFloat("uIblSkyRotation", s_iblSkyRotation);   // IBL 天空旋转（默认 0）
 
     shader->setMat4("uModel", model);
 
@@ -331,12 +333,21 @@ void Renderer::setGbufferPassEnabled(bool enabled) {
     s_gbufferPass = enabled;   // 粘性：由 SceneRenderer 每帧设置（beginFrame 不重置）
 }
 
+void Renderer::setIblSkyRotation(float radians) {
+    s_iblSkyRotation = radians;   // 粘性：由 SceneRenderer 天空段每帧设置
+}
+
 uint32_t Renderer::lastParticleCount() {
     return s_lastParticleCount;   // 骨架日空实现：恒 0（ParticleRenderer 接入后填充）
 }
 
 uint32_t Renderer::lastParticleDrawCalls() {
     return s_lastParticleDrawCalls;
+}
+
+void Renderer::reportParticleStats(uint32_t count, uint32_t drawCalls) {
+    s_lastParticleCount = count;
+    s_lastParticleDrawCalls = drawCalls;
 }
 
 void Renderer::beginFrame(const RenderCamera& camera, const DirectionalLightData& light,
