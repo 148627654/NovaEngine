@@ -8,8 +8,17 @@ namespace NovaEngine {
 // IBL 环境（卷积产物）：irradiance 32² + prefiltered 128² mip 链（5 级）+ BRDF LUT 512²
 class IblEnvironment {
 public:
+    // IBL 内部构造（与 Cubemap 同约定：公开构造/析构，GPU 纹理生命周期随对象）：
+    // irr/pref 为本环境所有（析构释放）；lut 为全局共享纹理（IBL 持有，不随环境释放）
+    IblEnvironment(uint32_t irradiance, uint32_t prefilter, uint32_t brdfLut);
+    ~IblEnvironment();
     void bind(uint32_t irradianceUnit, uint32_t prefilterUnit, uint32_t brdfLutUnit) const;
     uint32_t irradianceId() const; uint32_t prefilterId() const; uint32_t brdfLutId() const;
+
+private:
+    uint32_t m_irradiance = 0;
+    uint32_t m_prefilter = 0;
+    uint32_t m_brdfLut = 0;
 };
 
 class IBL {
