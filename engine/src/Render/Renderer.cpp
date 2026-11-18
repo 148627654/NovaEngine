@@ -412,15 +412,23 @@ void Renderer::drawShadowPass(const ShadowCameraParams& shadow,
     if (!s_initialized || !s_shadowShader || items.empty() || shadow.mapSize <= 0)
         return;   // 着色器加载失败 / 空场景 / 非法尺寸：静默跳过（不崩溃）
 
-    // 懒创建：mapSize 变化时重建（Inspector 改分辨率当帧生效）
-    if (s_shadowMap.size() != shadow.mapSize && !s_shadowMap.create(shadow.mapSize))
-        return;   // 创建失败：本帧无阴影
-
-    // 保存当前 FBO 与视口（结束后恢复，调用方通常是编辑器 FBO）
+    // 保存当前 FBO 与视口（必须在懒创建之前——ShadowMap::create 结尾会
+    // glBindFramebuffer(0)：帧 0 创建帧若后捕获会把默认帧缓冲误当调用方 FBO 恢复，
+    // 本帧后续 pass 全部打在默认帧缓冲上。V0.5-5 骨架日引入 draw buffer 切换后
+    // 表现为帧 0 一次 GL_INVALID_OPERATION(0x0502)——默认 FBO 不接受
+    // COLOR_ATTACHMENTi（既有帧 0 绑定错误由 c3 二分复现并定位）
     GLint prevFbo = 0;
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFbo);
     GLint prevViewport[4] = {0, 0, 0, 0};
     glGetIntegerv(GL_VIEWPORT, prevViewport);
+
+    // 懒创建：mapSize 变化时重建（Inspector 改分辨率当帧生效）
+    if (s_shadowMap.size() != shadow.mapSize && !s_shadowMap.create(shadow.mapSize)) {
+        // 创建失败：本帧无阴影（create 可能动过 FBO/视口绑定，防御性恢复）
+        glBindFramebuffer(GL_FRAMEBUFFER, static_cast<uint32_t>(prevFbo));
+        glViewport(prevViewport[0], prevViewport[1], prevViewport[2], prevViewport[3]);
+        return;
+    }
 
     s_shadowMap.bindForWriting();
     glClear(GL_DEPTH_BUFFER_BIT);
