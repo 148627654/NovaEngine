@@ -67,6 +67,7 @@ void HierarchyPanel::onGui(EditorContext& ctx, EditorCamera&) {
 
     m_rowRects.clear();
     ImGui::BeginChild("##hier_tree", ImVec2(0.0f, 0.0f), false);
+    m_belowClip = false;
     for (GameObject* root : scene->rootObjects())
         drawNode(ctx, root);
 
@@ -118,6 +119,14 @@ void HierarchyPanel::onGui(EditorContext& ctx, EditorCamera&) {
 }
 
 void HierarchyPanel::drawNode(EditorContext& ctx, NovaEngine::GameObject* go) {
+    // 屏幕外行裁剪（V0.5-14 性能验收）：本行起点已在可视区底之下 → 自身与后续兄弟
+    // 全部跳过（父级循环同样受 m_belowClip 控制）。行高恒定，跳过不影响后续帧恢复。
+    if (m_belowClip) return;
+    if (ImGui::GetCursorScreenPos().y > ImGui::GetWindowDrawList()->GetClipRectMax().y) {
+        m_belowClip = true;
+        return;
+    }
+
     ImGui::PushID(reinterpret_cast<const void*>(static_cast<uintptr_t>(go->id())));
 
     // ---- 重命名行 ----
