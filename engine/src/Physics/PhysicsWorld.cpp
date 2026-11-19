@@ -703,7 +703,11 @@ JPH::BodyID PhysicsWorld::Impl::buildTerrainBody(Terrain* t) {
         }
     }
 
-    JPH::HeightFieldShapeSettings settings(samples.data(), toJolt(offset), toJolt(scale), res);
+    // shape offset 必须为 0：HeightFieldShape 的表面 = 体位置 + shapeOffset + scale×sample，
+    // 若两者都填世界 min 角（-hx,0,-hz）则双重偏移——碰撞面整体平移出世界范围，
+    // 物体落在 heightfield 之外直接穿透（2026-11-19 修复，harness phys 模式复现：
+    // 方块在 x=2 从 y 10 直坠 -34 无碰撞）。体位置承载世界 min 角即可。
+    JPH::HeightFieldShapeSettings settings(samples.data(), JPH::Vec3::sZero(), toJolt(scale), res);
     JPH::ShapeSettings::ShapeResult shapeRes = settings.Create();
     if (!shapeRes.IsValid()) {
         Logger::warn("[Physics] HeightFieldShape 构建失败: {}", shapeRes.GetError().c_str());
