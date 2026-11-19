@@ -33,6 +33,7 @@
 #include <NovaEngine/Scene/Rigidbody.h>
 #include <NovaEngine/Scene/Scene.h>
 #include <NovaEngine/Scene/Transform.h>
+#include <NovaEngine/Terrain/Terrain.h>   // V0.5-8：地形高度场静态体
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Core/Factory.h>
@@ -56,6 +57,7 @@
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
+#include <Jolt/Physics/Collision/Shape/HeightFieldShape.h>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
@@ -253,6 +255,11 @@ struct PhysicsWorld::Impl {
     JPH::Ref<JPH::Shape> buildPrimitive(const Collider* c, const glm::vec3& relScale);
     JPH::Ref<JPH::Shape> buildMeshShape(const MeshCollider* mc, const glm::vec3& relScale);
 
+    // —— 地形高度场（V0.5-8，c6）：HeightFieldShape 不可原地修改 → 重建路径 = 销毁 + 全量新建 ——
+    void registerTerrainHeightfield(Terrain* t);
+    void unregisterTerrainHeightfield(Terrain* t);
+    JPH::BodyID buildTerrainBody(Terrain* t);
+
     // —— 固定步进 ——
     void writeKinematics();   // kinematic/sensor：Transform → body
     void writeBackActive();   // dynamic：body → Transform（父级矩阵反解局部 TRS）
@@ -306,6 +313,7 @@ struct PhysicsWorld::Impl {
     std::unordered_map<GameObject*, JPH::BodyID> staticBodyByGo;
     std::unordered_map<uint32_t, GameObject*> goByBodyId;   // raycast / TriggerEvent 解析
     std::unordered_set<Collider*> registeredColliders;
+    std::unordered_map<const Terrain*, JPH::BodyID> terrainBody;   // V0.5-8 地形高度场体
 };
 
 PhysicsWorld::Impl::Impl(Scene& s)
@@ -663,6 +671,85 @@ void PhysicsWorld::Impl::rehostOrStatic(Collider* c) {
     rebuildStaticBody(c->gameObject());
 }
 
+// ==================== 地形高度场（V0.5-8，c6，§25.6）====================
+
+JPH::BodyID PhysicsWorld::Impl::buildTerrainBody(Terrain* t) {
+    const uint32_t res = t->resolution();
+    if (res < 2)
+        return JPH::BodyID{};
+    const GameObject* go = t->gameObject();
+    const Transform* tr = t->transform();
+    const glm::mat4 world = tr ? tr->worldMatrix() : glm::mat4(1.0f);
+    const glm::vec2 size = t->worldSize;
+    const float hx = size.x * 0.5f, hz = size.y * 0.5f;
+    const float sx = size.x / static_cast<float>(res - 1);
+    const float sz = size.y / static_cast<float>(res - 1);
+
+    // Jolt HeightField：surface = offset + scale * (x, samples[y*N+x], z)，x/y ∈ [0, N-1]。
+    // offset = 局部网格原点（min 角）的世界位置；scale.y = heightScale/65535（样本 = 原始
+    // ushort 高度）。旋转/非均匀缩放不支持（v1 限制，见 PhysicsWorld.h 声明注释）。
+    const glm::vec3 offset = glm::vec3(world * glm::vec4(-hx, 0.0f, -hz, 1.0f));
+    const glm::vec3 scale(sx, t->heightScale / 65535.0f, sz);
+
+    // 样本经 heightAt（世界米）→ ushort 回推：与渲染/阴影网格逐样本一致
+    std::vector<float> samples(static_cast<size_t>(res) * res);
+    for (uint32_t z = 0; z < res; ++z) {
+        for (uint32_t x = 0; x < res; ++x) {
+            const glm::vec3 worldPt =
+                glm::vec3(world * glm::vec4(-hx + x * sx, 0.0f, -hz + z * sz, 1.0f));
+            const float meters = t->heightAt(worldPt.x, worldPt.z) - offset.y;
+            samples[static_cast<size_t>(z) * res + x] =
+                std::clamp(meters / std::max(t->heightScale, 1e-3f) * 65535.0f, 0.0f, 65535.0f);
+        }
+    }
+
+    JPH::HeightFieldShapeSettings settings(samples.data(), toJolt(offset), toJolt(scale), res);
+    JPH::ShapeSettings::ShapeResult shapeRes = settings.Create();
+    if (!shapeRes.IsValid()) {
+        Logger::warn("[Physics] HeightFieldShape 构建失败: {}", shapeRes.GetError().c_str());
+        return JPH::BodyID{};
+    }
+    JPH::BodyCreationSettings bodySettings(shapeRes.Get(), toJoltR(offset),
+                                           JPH::Quat::sIdentity(), JPH::EMotionType::Static,
+                                           Layers::kNonMoving);
+    bodySettings.mFriction = 0.5f;
+    JPH::Body* body = bodyInterface.CreateBody(bodySettings);
+    if (body == nullptr)
+        return JPH::BodyID{};
+    const JPH::BodyID id = body->GetID();
+    bodyInterface.AddBody(id, JPH::EActivation::DontActivate);   // 静态体同样须进 broadphase
+    bodyInterface.SetUserData(id, reinterpret_cast<uint64_t>(go));
+    goByBodyId[id.GetIndexAndSequenceNumber()] = const_cast<GameObject*>(go);
+    return id;
+}
+
+void PhysicsWorld::Impl::registerTerrainHeightfield(Terrain* t) {
+    if (t == nullptr || tearingDown)
+        return;
+    if (!t->collisionEnabled) {
+        unregisterTerrainHeightfield(t);   // 关闭碰撞：拆除已注册体
+        return;
+    }
+    if (auto it = terrainBody.find(t); it != terrainBody.end()) {
+        // 重建路径（笔刷帧末/尺寸变化）：HeightFieldShape 不可原地修改 → 销毁旧体全量新建
+        destroyBody(it->second);
+        terrainBody.erase(it);
+    }
+    const JPH::BodyID id = buildTerrainBody(t);
+    if (!id.IsInvalid())
+        terrainBody[t] = id;
+}
+
+void PhysicsWorld::Impl::unregisterTerrainHeightfield(Terrain* t) {
+    if (t == nullptr || tearingDown)
+        return;   // 批量销毁期：残留 body 由 teardownAll 统一销毁
+    auto it = terrainBody.find(t);
+    if (it == terrainBody.end())
+        return;
+    destroyBody(it->second);
+    terrainBody.erase(it);
+}
+
 void PhysicsWorld::Impl::registerRigidbody(Rigidbody* rb) {
     if (rb == nullptr || bodyByRb.contains(rb) || tearingDown)
         return;   // 批量销毁期不重建（syncFromTransforms 会全量重建）
@@ -734,16 +821,19 @@ void PhysicsWorld::Impl::unregisterCollider(Collider* c) {
 
 void PhysicsWorld::Impl::teardownAll() {
     std::vector<JPH::BodyID> ids;
-    ids.reserve(bodyByRb.size() + staticBodyByGo.size());
+    ids.reserve(bodyByRb.size() + staticBodyByGo.size() + terrainBody.size());
     for (const auto& [rb, id] : bodyByRb)
         ids.push_back(id);
     for (const auto& [go, id] : staticBodyByGo)
+        ids.push_back(id);
+    for (const auto& [t, id] : terrainBody)   // V0.5-8 地形高度场体
         ids.push_back(id);
     for (const JPH::BodyID id : ids)
         destroyBody(id);
     bodyByRb.clear();
     hostByCollider.clear();
     staticBodyByGo.clear();
+    terrainBody.clear();
     registeredColliders.clear();
     synced = false;
 }
@@ -896,6 +986,9 @@ void PhysicsWorld::syncFromTransforms() {
         if (!impl.hostByCollider.contains(c))
             impl.rebuildStaticBody(c->gameObject());
     }
+    // 3) 地形高度场静态体（V0.5-8，c6；内部按 collisionEnabled 裁决）
+    for (Terrain* t : impl.scene.findComponents<Terrain>())
+        impl.registerTerrainHeightfield(t);
     impl.synced = true;
     // 诊断（验收期）：打印 body 统计，冒烟/验收可据此确认物理世界非空
     Logger::info("[Physics] syncFromTransforms 完成：动态/运动 body={}，static body={}，synced=true",
@@ -961,6 +1054,16 @@ void PhysicsWorld::unregisterRigidbody(Rigidbody* rb) { m_impl->unregisterRigidb
 void PhysicsWorld::registerCollider(Collider* c) { m_impl->registerCollider(c); }
 void PhysicsWorld::unregisterCollider(Collider* c) { m_impl->unregisterCollider(c); }
 
+// ==================== 地形高度场（V0.5-8，c6，§25.6 追加）====================
+
+void PhysicsWorld::registerTerrainHeightfieldInternal(Terrain* t) {
+    m_impl->registerTerrainHeightfield(t);
+}
+
+void PhysicsWorld::unregisterTerrainHeightfieldInternal(Terrain* t) {
+    m_impl->unregisterTerrainHeightfield(t);
+}
+
 void PhysicsWorld::addForce(Rigidbody* rb, const glm::vec3& force) {
     if (rb == nullptr)
         return;
@@ -995,6 +1098,28 @@ void PhysicsWorld::setVelocity(Rigidbody* rb, const glm::vec3& v) {
     if (it == m_impl->bodyByRb.end())
         return;
     m_impl->bodyInterface.SetLinearVelocity(it->second, toJolt(v));   // 内部自动唤醒睡眠 body
+}
+
+// ==================== 地形高度场自由函数（§25.6 追加；PhysicsWorld.h 文件尾声明）====================
+// 定位服务：terrain → GameObject → Scene → PhysicsWorld；无 scene/无 physics 时安全
+// no-op（组件未入场景窗口期）。私有入口访问经 friend 声明（PhysicsWorld.h）。
+
+void registerTerrainHeightfield(Terrain* terrain) {
+    if (terrain == nullptr)
+        return;
+    const GameObject* go = terrain->gameObject();
+    PhysicsWorld* pw = (go != nullptr && go->scene() != nullptr) ? go->scene()->physics() : nullptr;
+    if (pw != nullptr)
+        pw->registerTerrainHeightfieldInternal(terrain);
+}
+
+void unregisterTerrainHeightfield(Terrain* terrain) {
+    if (terrain == nullptr)
+        return;
+    const GameObject* go = terrain->gameObject();
+    PhysicsWorld* pw = (go != nullptr && go->scene() != nullptr) ? go->scene()->physics() : nullptr;
+    if (pw != nullptr)
+        pw->unregisterTerrainHeightfieldInternal(terrain);
 }
 
 }  // namespace NovaEngine

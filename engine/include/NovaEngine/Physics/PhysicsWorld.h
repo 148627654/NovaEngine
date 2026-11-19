@@ -50,6 +50,21 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> m_impl;
+
+    // V0.5-8 地形高度场（c6）：命名空间级自由函数桥接（文件尾声明），经
+    // terrain→GameObject→Scene→PhysicsWorld 定位后调用以下私有入口
+    void registerTerrainHeightfieldInternal(class Terrain* terrain);
+    void unregisterTerrainHeightfieldInternal(class Terrain* terrain);
+    friend void registerTerrainHeightfield(class Terrain* terrain);      // 自由函数（见文件尾声明）
+    friend void unregisterTerrainHeightfield(class Terrain* terrain);
 };
+
+// ===== V0.5-8 地形高度场（c6，§25.6 追加）=====
+// 创建/重建 Jolt HeightFieldShape 静态体（Terrain::onAwake / rebuildDirtyRegion /
+// 析构调用；重建路径 = 销毁旧体 + 全量新建——HeightFieldShape 不可原地修改）。
+// v1 限制：HeightField 为世界轴对齐 XZ 网格（Jolt HeightFieldShape 不支持旋转烘焙，
+// 地形 GO 的旋转/非均匀缩放不参与碰撞——旋转地形请改用 MeshCollider）。
+void registerTerrainHeightfield(class Terrain* terrain);
+void unregisterTerrainHeightfield(class Terrain* terrain);
 
 }  // namespace NovaEngine
