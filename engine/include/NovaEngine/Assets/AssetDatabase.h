@@ -47,7 +47,9 @@ private:
     AssetDatabase() = default;
     std::unordered_map<std::string, std::weak_ptr<Mesh>> m_meshCache;      // key = canonical 绝对路径
     std::unordered_map<std::string, std::weak_ptr<Texture>> m_textureCache;
-    std::unordered_map<std::string, std::weak_ptr<Cubemap>> m_cubemapCache;
+    // 强引用（2026-11-19 修复）：天空盒 cubemap 每帧被渲染收集消费——弱引用会让
+    // 帧末析构 → 每帧重跑 equirect 转换（GL 状态扰动 + 性能浪费）。clearCache 清空。
+    std::unordered_map<std::string, std::shared_ptr<Cubemap>> m_cubemapCache;
     std::unordered_map<std::string, std::weak_ptr<MaterialAsset>> m_materialAssetCache;
     std::unordered_map<std::string, std::weak_ptr<AudioClip>> m_audioClipCache;
     std::unordered_map<std::string, Material> m_materialCache;             // 子网格键 → 材质（importModel 旁表）

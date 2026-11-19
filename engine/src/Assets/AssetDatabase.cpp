@@ -315,10 +315,9 @@ std::shared_ptr<Cubemap> AssetDatabase::getCubemap(const std::filesystem::path& 
     const std::filesystem::path abs = resolveAssetAbs(relativePath);
     const std::string key = cacheKeyFor(abs);
 
-    // 缓存命中（weak_ptr 失效时锁失败，走重载）
+    // 缓存命中（强引用：天空盒每帧消费，不再每帧重建转换）
     if (auto it = m_cubemapCache.find(key); it != m_cubemapCache.end())
-        if (auto cubemap = it->second.lock())
-            return cubemap;
+        return it->second;
 
     // 目录 → 6 面图（固定文件名 px/nx/py/ny/pz/nz）；文件 → equirect。
     // 目录判定：磁盘 is_directory；pak 挂载时目录不落盘 → 按「任一面文件存在」探测。
@@ -446,7 +445,7 @@ void AssetDatabase::clearCache() {
 void AssetDatabase::releaseUnused() {
     std::erase_if(m_meshCache, [](const auto& kv) { return kv.second.expired(); });
     std::erase_if(m_textureCache, [](const auto& kv) { return kv.second.expired(); });
-    std::erase_if(m_cubemapCache, [](const auto& kv) { return kv.second.expired(); });
+    // cubemap 为强引用缓存（2026-11-19）：releaseUnused 不清——由 clearCache 显式清空
     std::erase_if(m_materialAssetCache, [](const auto& kv) { return kv.second.expired(); });
     std::erase_if(m_audioClipCache, [](const auto& kv) { return kv.second.expired(); });
 }
