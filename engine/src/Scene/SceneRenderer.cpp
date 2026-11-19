@@ -9,6 +9,7 @@
 
 #include <NovaEngine/Scene/SceneRenderer.h>
 
+#include <NovaEngine/Animation/SkeletalMeshRenderer.h>
 #include <NovaEngine/Assets/AssetDatabase.h>
 #include <NovaEngine/Assets/MaterialAsset.h>
 #include <NovaEngine/Core/Logger.h>
@@ -296,16 +297,35 @@ void renderSceneInternal(const Scene& scene, const RenderCamera& fallbackCamera,
     std::vector<SceneItem> items;
     scene.forEachObject([&](GameObject* go) {
         if (!go->activeInHierarchy()) return;
-        const MeshRenderer* mr = go->getComponent<MeshRenderer>();
-        if (!mr || !mr->mesh) return;
         const Transform* t = go->transform();
         if (!t) return;
+        const glm::mat4 world = t->worldMatrix();
+        // V0.5-9 蒙皮网格（波 2 2b 合波裁定 A，2026-11-19，c7 请求）：SMR 与 MeshRenderer
+        // 同路径收集——走既有 submit/剔除/阴影/材质双轨；无 LOD 替换；每个 SMR 实例
+        // 自建 GPU Mesh（指针唯一 → 实例化分组自然不命中）；骨骼矩阵由 Animator 每帧
+        // 经 Mesh::setBoneMatrices 上传。提取失败的回退静态网格同样经此路径提交。
+        if (const SkeletalMeshRenderer* smr = go->getComponent<SkeletalMeshRenderer>()) {
+            if (smr->mesh) {
+                if (Renderer::frustumCullingEnabled() &&
+                    !frustum.intersects(transformAabb(smr->mesh->aabb(), world))) {
+                    Renderer::markCulled();
+                } else {
+                    const Material& smat = smr->material.materialAsset
+                                               ? smr->material.materialAsset->material()
+                                               : smr->material;
+                    if (shadowEnabled && smat.blendMode == BlendMode::Opaque)
+                        shadowItems.push_back(ShadowItem{smr->mesh, world});
+                    items.push_back(SceneItem{smr->mesh, smat, world});
+                }
+            }
+        }
+        const MeshRenderer* mr = go->getComponent<MeshRenderer>();
+        if (!mr || !mr->mesh) return;
         // V0.5-3 LOD（§25.0 遍历扩展点）：mesh 来源替换——resolveMeshFor 无 LODGroup/无可用档
         // → nullptr 回退 mr->mesh（= 旧路径零变化）；剔除/材质双轨/实例化分组/阴影收集逻辑
         // 不变，全部使用同一替代结果
         std::shared_ptr<Mesh> mesh = LODGroup::resolveMeshFor(go, renderCam.position);
         if (!mesh) mesh = mr->mesh;
-        const glm::mat4 world = t->worldMatrix();
         // 世界 AABB：局部 AABB 8 角点经世界矩阵变换取包围盒（非均匀缩放/旋转精确）；
         // 锥体外 → 跳过 submit 与阴影收集（被剔除物体不写阴影贴图，无幽灵阴影）
         if (Renderer::frustumCullingEnabled() &&
