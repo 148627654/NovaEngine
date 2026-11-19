@@ -10,6 +10,10 @@
 #include "ShadowMap.h"
 
 namespace NovaEngine {
+class Shader;   // setShadowUniforms 参数（实现于 Renderer.cpp）
+}  // namespace NovaEngine
+
+namespace NovaEngine {
 
 struct RenderCamera {
     glm::mat4 view;
@@ -79,6 +83,10 @@ public:
     // 天空旋转对齐（§25.2 合波补）：blinn_phong.frag 的 IBL 采样方向绕 +Y 旋转（弧度），
     // 与 SkyboxRenderer 同款变换；由 SceneRenderer 天空段每帧设置（默认 0 = 不转）
     static void setIblSkyRotation(float radians);
+    // 阴影 uniform 统一出口（§25.6 合波补）：为自含光照 shader（地形）绑定阴影贴图到
+    // unit 1 + uShadowEnabled/uLightViewProj/uShadowBias/uShadowMapSize（与
+    // setBlinnPhongUniforms 同款）；本帧无阴影 pass 时仅 uShadowEnabled=0
+    static void setShadowUniforms(const std::shared_ptr<Shader>& shader);
     // SSAO GBuffer pass 开关（§25.3）：true 时 blinn_phong.frag 写 MRT 附件 1（法线）/附件 2（线性深度）；
     // 默认 false = 逐像素与 2a 前一致。由 SceneRenderer 每帧按 (hdr && ssaoEnabled) 设置。
     static void setGbufferPassEnabled(bool enabled);

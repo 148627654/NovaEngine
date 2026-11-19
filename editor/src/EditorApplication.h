@@ -1,4 +1,5 @@
 #pragma once
+#include <chrono>
 #include <filesystem>
 #include <memory>
 #include <vector>
@@ -64,6 +65,9 @@ private:
     void applyEditorCameraFromScene();
     void showMainMenu();
     void handleGlobalShortcuts();
+    // ===== 脚本 DLL 热重载（V0.5-7 波 2 2b 合波接线，§25.5 触发流程）=====
+    void reloadScriptsFlow();   // spawn 构建 NovaGame → 成功 → ScriptRuntime::reload
+    void pollScriptDll();       // mtime 轮询（1s 节流；Edit 触发 / Play 记变化待退出后触发）
 
     std::unique_ptr<NovaEngine::Window> m_window;
     std::unique_ptr<NovaEngine::Scene> m_scene;
@@ -76,6 +80,12 @@ private:
     GizmoController m_gizmo;
     std::vector<std::filesystem::path> m_pendingDrops;  // GLFW 拖放回调写入，update 末尾消费
     bool m_firstFrame = true;
+
+    // 脚本热重载状态（V0.5-7）：Auto Reload 开关 + mtime 轮询
+    bool m_autoReloadScripts = true;
+    std::chrono::steady_clock::time_point m_lastDllPoll{};
+    long long m_lastDllMtime = 0;    // 上次观察到的 NovaGame.dll mtime（0 = 未初始化/文件缺失）
+    bool m_dllChangedInPlay = false; // Play 期间检测到 DLL 变化（退出 Play 后触发一次）
 
     // 未保存确认状态机（V0.2-2）
     PendingAction m_pendingAction = PendingAction::None;

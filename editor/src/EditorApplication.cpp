@@ -3,6 +3,7 @@
 #include "DragDrop.h"
 #include "Packager.h"
 #include "PrefabManager.h"
+#include "panels/AnimatorPanel.h"
 #include "panels/AssetBrowserPanel.h"
 #include "panels/BuildSettingsPanel.h"
 #include "panels/ConsolePanel.h"
@@ -12,6 +13,7 @@
 #include "panels/InspectorPanel.h"
 #include "panels/SceneViewPanel.h"
 #include "panels/StatsPanel.h"
+#include "panels/TerrainPanel.h"
 
 #include <imgui.h>
 #include <imgui_internal.h>   // DockBuilder* API（ImGui 1.90+ 从 imgui.h 移入 internal）
@@ -22,6 +24,9 @@
 #include <glad/gl.h>
 
 #include <NovaEngine/NovaEngine.h>
+#include <NovaEngine/Scripting/ScriptRuntime.h>
+
+#include <cstdlib>   // std::system（脚本热重载的构建 spawn）
 
 #include <chrono>
 #include <cwchar>
@@ -223,6 +228,14 @@ void EditorApplication::init() {
     inputBindingsPanel->open = false;
     m_inputBindingsPanel = inputBindingsPanel.get();
     m_panels.push_back(std::move(inputBindingsPanel));
+    // Terrain（V0.5-8 波 2 2b 合波接线，第 10 面板）：默认关，View 菜单打开；dock 底部 Tab
+    auto terrainPanel = std::make_unique<TerrainPanel>();
+    terrainPanel->open = false;
+    m_panels.push_back(std::move(terrainPanel));
+    // Animator（V0.5-9 波 2 2b 合波接线，第 11 面板）：默认关，View 菜单打开；dock 底部 Tab
+    auto animatorPanel = std::make_unique<AnimatorPanel>();
+    animatorPanel->open = false;
+    m_panels.push_back(std::move(animatorPanel));
 
     // 默认加载示例场景（不存在则保持空场景）
     const std::filesystem::path demo =
@@ -360,6 +373,10 @@ void EditorApplication::update(float dt) {
     if (m_context.state == EditorContext::EditorState::Play)
         updateAudioListener(m_scene.get(), m_camera);
 
+#ifdef NOVA_SCRIPTS_DLL
+    pollScriptDll();   // 脚本 DLL mtime 轮询（V0.5-7；Edit 触发 / Play 记变化）
+#endif
+
     showMainMenu();
     handleGlobalShortcuts();
 
@@ -423,6 +440,8 @@ void EditorApplication::buildDockLayout(ImGuiID dockspaceId) {
     ImGui::DockBuilderDockWindow("Assets", dockBottom);
     ImGui::DockBuilderDockWindow("Stats", dockBottom);
     ImGui::DockBuilderDockWindow("Input Bindings", dockBottom);  // V0.5-11：底部 Tab
+    ImGui::DockBuilderDockWindow("Terrain", dockBottom);         // V0.5-8：底部 Tab
+    ImGui::DockBuilderDockWindow("Animator", dockBottom);        // V0.5-9：底部 Tab
     ImGui::DockBuilderDockWindow("Scene", dockMain);
     ImGui::DockBuilderFinish(dockspaceId);
 }
@@ -434,6 +453,10 @@ void EditorApplication::showMainMenu() {
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("New Scene", "Ctrl+N", false, editMode)) newScene();
+            // 2D 模板（V0.5-10 波 2 2b 合波接线）：从 assets/scenes/2DTemplate.nova.json 创建
+            // （与 Open Scene 同流：判脏确认；打开后 Ctrl+S 会存回模板路径——与打开任意资产场景一致）
+            if (ImGui::MenuItem("New 2D Scene", nullptr, false, editMode))
+                openScene(std::filesystem::path("assets/scenes/2DTemplate.nova.json"));
             if (ImGui::MenuItem("Open Scene...", "Ctrl+O", false, editMode)) openSceneDialog();
             ImGui::Separator();
             if (ImGui::MenuItem("Save Scene", "Ctrl+S", false, editMode)) saveScene();
@@ -497,6 +520,16 @@ void EditorApplication::showMainMenu() {
                 ImGui::MenuItem(panel->name().c_str(), nullptr, &panel->open);
             ImGui::EndMenu();
         }
+        // 脚本热重载（V0.5-7 波 2 2b 合波接线）：Edit 态可用；Play 态灰显（快照含旧类型）
+#ifdef NOVA_SCRIPTS_DLL
+        if (ImGui::BeginMenu("Scripts")) {
+            if (ImGui::MenuItem("Reload Scripts", "Ctrl+Shift+R", false,
+                                editMode && ScriptRuntime::isLoaded()))
+                reloadScriptsFlow();
+            if (ImGui::MenuItem("Auto Reload", nullptr, &m_autoReloadScripts)) {}
+            ImGui::EndMenu();
+        }
+#endif
         ImGui::EndMainMenuBar();
     }
 }
@@ -516,6 +549,12 @@ void EditorApplication::handleGlobalShortcuts() {
     if (ctrl && Input::isKeyPressed(Key::S)) saveScene();
     if (ctrl && Input::isKeyPressed(Key::N)) newScene();
     if (ctrl && Input::isKeyPressed(Key::O)) openSceneDialog();
+#ifdef NOVA_SCRIPTS_DLL
+    // Ctrl+Shift+R：脚本热重载（V0.5-7；仅 Edit 态——Play 快照含旧类型）
+    if (ctrl && shift && Input::isKeyPressed(Key::R) &&
+        m_context.state == EditorContext::EditorState::Edit)
+        reloadScriptsFlow();
+#endif
 
     // F8：Stats 面板开关（V0.2-11）
     if (Input::isKeyPressed(Key::F8) && m_statsPanel)
@@ -977,5 +1016,76 @@ void EditorApplication::applyEditorCameraFromScene() {
     m_camera.yaw = m_scene->editorCameraYaw;
     m_camera.pitch = m_scene->editorCameraPitch;
 }
+
+#ifdef NOVA_SCRIPTS_DLL
+// ===== 脚本 DLL 热重载（V0.5-7 波 2 2b 合波接线；契约触发流程 §25.5）=====
+
+namespace {
+// NovaGame.dll 的 mtime（秒粒度；文件缺失/IO 失败 → 0 = 未初始化语义）
+long long dllMtimeOrZero() {
+    std::error_code ec;
+    const auto t = std::filesystem::last_write_time(NOVA_GAME_DLL_PATH, ec);
+    if (ec) return 0;
+    return std::chrono::duration_cast<std::chrono::seconds>(t.time_since_epoch()).count();
+}
+}  // namespace
+
+void EditorApplication::reloadScriptsFlow() {
+    using namespace NovaEngine;
+    if (m_context.state != EditorContext::EditorState::Edit) return;   // Play 态严禁（快照含旧类型）
+    if (!ScriptRuntime::isLoaded()) {
+        Logger::warn("[ScriptReload] NovaGame.dll 未加载（先编译 samples 或等待首次构建），跳过");
+        return;
+    }
+    // 1. spawn 构建并等待退出；失败 → 构建输出进 Console、旧 DLL 保持运行、不调 reload
+    const std::string cmd = "cmake --build \"" NOVA_PROJECT_ROOT
+                            "/build\" --config " NOVA_BUILD_CONFIG " --target NovaGame";
+    Logger::info("[ScriptReload] 构建 NovaGame…");
+    const int rc = std::system(cmd.c_str());
+    if (rc != 0) {
+        Logger::error("[ScriptReload] NovaGame 构建失败（退出码 {}），旧 DLL 保持运行", rc);
+        m_lastDllMtime = dllMtimeOrZero();   // 记录当前 mtime，防轮询反复重试
+        return;
+    }
+    // 2. 重载（成功/失败日志已含重载脚本数与字段恢复数或 lastError）
+    if (!ScriptRuntime::reload(*m_scene)) {
+        Logger::error("[ScriptReload] 热重载失败：{}", ScriptRuntime::lastError());
+        m_lastDllMtime = dllMtimeOrZero();
+        return;
+    }
+    Logger::info("[ScriptReload] 热重载完成（脚本字段按对象 ID 原位恢复）");
+    m_lastDllMtime = dllMtimeOrZero();
+    // 整场景 JSON 重建后全部 GO/组件指针作废；选中集以 ID 存储，每帧对已销毁 ID 清理——
+    // 有效 ID 按新实例自然恢复，无需额外重解析
+}
+
+void EditorApplication::pollScriptDll() {
+    using namespace NovaEngine;
+    if (!m_autoReloadScripts) return;
+    const auto now = std::chrono::steady_clock::now();
+    if (now - m_lastDllPoll < std::chrono::seconds(1)) return;   // 1s 节流
+    m_lastDllPoll = now;
+
+    const long long mtime = dllMtimeOrZero();
+    if (mtime == 0) return;                        // DLL 未编译（首启）——不触发
+    if (m_lastDllMtime == 0) {                     // 首次观察：仅记录，不触发
+        m_lastDllMtime = mtime;
+        return;
+    }
+    if (m_context.state == EditorContext::EditorState::Play) {
+        if (mtime != m_lastDllMtime) {             // Play 中跳过重载，退出后补触发一次
+            m_dllChangedInPlay = true;
+            m_lastDllMtime = mtime;
+        }
+        return;
+    }
+    if (m_dllChangedInPlay) {                      // 退出 Play 后的补触发
+        m_dllChangedInPlay = false;
+        reloadScriptsFlow();
+        return;
+    }
+    if (mtime != m_lastDllMtime) reloadScriptsFlow();
+}
+#endif   // NOVA_SCRIPTS_DLL
 
 }  // namespace NovaEditor

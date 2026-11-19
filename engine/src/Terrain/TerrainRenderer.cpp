@@ -379,14 +379,14 @@ void TerrainRenderer::collectAndSubmit(const Scene& scene, const RenderCamera& c
         s_shader->setFloat("uRoughness", 0.9f);
         s_shader->setFloat("uMetallic", 0.0f);
 
-        // 贴图绑定（unit 约定见 terrain.frag 头注释；albedo[1] 与 shadow unit 1 共址——
-        // 本波 uShadowEnabled 恒 0，shadow 采样不执行，无冲突）
+        // 贴图绑定（unit 约定见 terrain.frag 头注释；2b 合波：albedo 迁至 unit 10-13，
+        // 让出 unit 1 给阴影贴图——原 albedo[1] 与 shadow unit 1 共址冲突）
         for (int i = 0; i < 4; ++i) {
             s_shader->setInt("uUseAlbedoMap[" + std::to_string(i) + "]",
                              g.albedoTex[i] ? 1 : 0);
             if (g.albedoTex[i])
-                g.albedoTex[i]->bind(static_cast<uint32_t>(i));
-            s_shader->setInt("uAlbedoMap[" + std::to_string(i) + "]", i);
+                g.albedoTex[i]->bind(static_cast<uint32_t>(10 + i));
+            s_shader->setInt("uAlbedoMap[" + std::to_string(i) + "]", 10 + i);
             s_shader->setInt("uUseNormalMap[" + std::to_string(i) + "]",
                              g.normalTex[i] ? 1 : 0);
             if (g.normalTex[i])
@@ -404,12 +404,10 @@ void TerrainRenderer::collectAndSubmit(const Scene& scene, const RenderCamera& c
             s_shader->setFloat("uTileSize[" + std::to_string(i) + "]",
                                std::max(t->layers[i].tileSize, 1e-3f));
 
-        // ===== 阴影（§25.6「阴影采样同 unit 约定」）：unit 1 + blinn_phong 同款 uniform。
-        // 本波 C++ 恒关（接缝，见最终报告）：钩子点在 drawShadowPass 之前，Renderer 的
-        // 阴影状态/深度纹理无公开访问器（Renderer.h 非 c6 独占文件）；地形只 cast（进
-        // shadowItems），不 receive。合波日 c0 补访问器 + 移绘制点到 shadow pass 后即可接通。
-        s_shader->setInt("uShadowMap", 1);
-        s_shader->setInt("uShadowEnabled", 0);
+        // ===== 阴影接收（§25.6「阴影采样同 unit 约定」，2b 合波接通）：统一出口
+        // Renderer::setShadowUniforms（unit 1 + blinn_phong 同款 uniform）；
+        // 调用点已移至 drawShadowPass 之后（SceneRenderer 合波），阴影贴图此刻就绪
+        Renderer::setShadowUniforms(s_shader);
 
         // ===== IBL（unit 6/7/8 由 Renderer::setEnvironment 在天空段绑定）：强度按
         // SceneRenderer 同条件推导（cubemap 天空且路径非空）；env 加载失败时 cubemap

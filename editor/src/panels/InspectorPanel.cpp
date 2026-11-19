@@ -21,6 +21,9 @@
 #include <NovaEngine/Scene/GameObject.h>
 #include <NovaEngine/Scene/LODGroup.h>
 #include <NovaEngine/Scene/MeshRenderer.h>
+#include <NovaEngine/Animation/SkeletalMeshRenderer.h>
+#include <NovaEngine/Scene/BoxCollider2D.h>
+#include <NovaEngine/Scene/SpriteRenderer.h>
 #include <NovaEngine/Scene/PrefabInstance.h>
 #include <NovaEngine/Scene/Scene.h>
 #include <NovaEngine/Scene/Transform.h>
@@ -252,6 +255,9 @@ void InspectorPanel::onGui(EditorContext& ctx, EditorCamera&) {
     drawCamera(ctx, go, overridesFor(overridesByType, "Camera"));
     drawDirectionalLight(ctx, go, overridesFor(overridesByType, "DirectionalLight"));
     drawLODGroup(ctx, go);
+    drawSpriteRenderer(ctx, go);
+    drawBoxCollider2D(ctx, go);
+    drawSkeletalMeshRenderer(ctx, go);
     // V0.3 波 2：物理/音频/UI 组件编辑——widget 头漏斗分发（三个 header-only 头签名一致：
     // drawXxxComponents(ctx, comp, editMode)；各头 dynamic_cast 识别自身组件类型，不匹配 no-op）。
     // 波 2 合波（V0.5-6）：ParticleWidgets 同签名接入。
@@ -515,6 +521,111 @@ void InspectorPanel::drawLODGroup(EditorContext& ctx, NovaEngine::GameObject* go
     ImGui::PopID();
     if (remove) {
         go->removeComponent<NovaEngine::LODGroup>();
+        ctx.markSceneDirty();
+    }
+}
+
+// ===== V0.5-10 2D 组件编辑（波 2 2b 合波接线，2026-11-19）=====
+void InspectorPanel::drawSpriteRenderer(EditorContext& ctx, NovaEngine::GameObject* go) {
+    NovaEngine::SpriteRenderer* sr = go->getComponent<NovaEngine::SpriteRenderer>();
+    if (!sr) return;
+    if (!ImGui::CollapsingHeader("Sprite Renderer", ImGuiTreeNodeFlags_DefaultOpen)) return;
+    ImGui::PushID("sprite");
+    bool remove = false;
+    const bool edit = ctx.state == EditorContext::EditorState::Edit;
+
+    // 路径变更同步刷新运行时贴图（渲染收集只读 sr->texture 成员，§25.8 合波接缝）
+    std::string path = sr->texturePath;
+    if (ImGui::InputText("Texture", &path, ImGuiInputTextFlags_EnterReturnsTrue)) {
+        sr->texturePath = path;
+        sr->texture = path.empty() ? nullptr
+                                   : NovaEngine::AssetDatabase::instance().getTexture(path);
+        ctx.markSceneDirty();
+    } else if (ImGui::IsItemDeactivatedAfterEdit()) {
+        sr->texturePath = path;
+        sr->texture = path.empty() ? nullptr
+                                   : NovaEngine::AssetDatabase::instance().getTexture(path);
+        ctx.markSceneDirty();
+    }
+    if (ImGui::ColorEdit4("Color", glm::value_ptr(sr->color))) ctx.markDirtyOnly();
+    if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
+    if (ImGui::Checkbox("Flip X", &sr->flipX)) ctx.markSceneDirty();
+    if (ImGui::Checkbox("Flip Y", &sr->flipY)) ctx.markSceneDirty();
+    if (ImGui::DragInt("Sorting Layer", &sr->sortingLayer, 0.1f, 0, 100)) ctx.markDirtyOnly();
+    if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
+    if (ImGui::DragInt("Order In Layer", &sr->orderInLayer, 0.1f, -1000, 1000)) ctx.markDirtyOnly();
+    if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
+    if (ImGui::DragFloat("Pixels Per Unit", &sr->pixelsPerUnit, 1.0f, 0.01f, 10000.0f))
+        ctx.markDirtyOnly();
+    if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
+
+    if (!edit) ImGui::BeginDisabled();
+    if (ImGui::Button("Remove Component")) remove = true;
+    if (!edit) ImGui::EndDisabled();
+    ImGui::PopID();
+    if (remove) {
+        go->removeComponent<NovaEngine::SpriteRenderer>();
+        ctx.markSceneDirty();
+    }
+}
+
+void InspectorPanel::drawBoxCollider2D(EditorContext& ctx, NovaEngine::GameObject* go) {
+    NovaEngine::BoxCollider2D* bc = go->getComponent<NovaEngine::BoxCollider2D>();
+    if (!bc) return;
+    if (!ImGui::CollapsingHeader("Box Collider 2D", ImGuiTreeNodeFlags_DefaultOpen)) return;
+    ImGui::PushID("bc2d");
+    bool remove = false;
+    const bool edit = ctx.state == EditorContext::EditorState::Edit;
+
+    if (ImGui::DragFloat2("Center", glm::value_ptr(bc->center), 0.05f)) ctx.markDirtyOnly();
+    if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
+    glm::vec2 size = bc->size;
+    if (ImGui::DragFloat2("Size", glm::value_ptr(size), 0.05f, 0.001f, 10000.0f))
+        ctx.markDirtyOnly();
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+        bc->size = glm::max(size, glm::vec2(0.001f));   // 非法尺寸防御（反序列化同款钳制）
+        ctx.markSceneDirty();
+    }
+    if (ImGui::Checkbox("Is Trigger", &bc->isTrigger)) ctx.markSceneDirty();
+
+    if (!edit) ImGui::BeginDisabled();
+    if (ImGui::Button("Remove Component")) remove = true;
+    if (!edit) ImGui::EndDisabled();
+    ImGui::PopID();
+    if (remove) {
+        go->removeComponent<NovaEngine::BoxCollider2D>();
+        ctx.markSceneDirty();
+    }
+}
+
+// ===== V0.5-9 蒙皮渲染器编辑（波 2 2b 合波接线；材质编辑复用材质库双轨，v1 只展示路径与骨架）=====
+void InspectorPanel::drawSkeletalMeshRenderer(EditorContext& ctx, NovaEngine::GameObject* go) {
+    NovaEngine::SkeletalMeshRenderer* smr =
+        go->getComponent<NovaEngine::SkeletalMeshRenderer>();
+    if (!smr) return;
+    if (!ImGui::CollapsingHeader("Skinned Mesh Renderer", ImGuiTreeNodeFlags_DefaultOpen))
+        return;
+    ImGui::PushID("smr");
+    bool remove = false;
+    const bool edit = ctx.state == EditorContext::EditorState::Edit;
+
+    std::string path = smr->meshPath;
+    if (ImGui::InputText("Mesh", &path, ImGuiInputTextFlags_EnterReturnsTrue)) {
+        smr->meshPath = path;
+        ctx.markSceneDirty();
+        // 网格重建归场景反序列化/资产重载（运行时 mesh 缓存由 SMR 反序列化维护）
+    } else if (ImGui::IsItemDeactivatedAfterEdit()) {
+        smr->meshPath = path;
+        ctx.markSceneDirty();
+    }
+    ImGui::TextDisabled("(骨骼 %zu 根)", smr->skeleton.bones.size());
+
+    if (!edit) ImGui::BeginDisabled();
+    if (ImGui::Button("Remove Component")) remove = true;
+    if (!edit) ImGui::EndDisabled();
+    ImGui::PopID();
+    if (remove) {
+        go->removeComponent<NovaEngine::SkeletalMeshRenderer>();
         ctx.markSceneDirty();
     }
 }

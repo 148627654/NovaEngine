@@ -337,6 +337,20 @@ void Renderer::setIblSkyRotation(float radians) {
     s_iblSkyRotation = radians;   // 粘性：由 SceneRenderer 天空段每帧设置
 }
 
+void Renderer::setShadowUniforms(const std::shared_ptr<Shader>& shader) {
+    // 与 setBlinnPhongUniforms 的阴影段同款（§25.6 合波补）：地形等自含 shader 复用
+    if (s_shadowActive) {
+        s_shadowMap.bindForReading(1);
+        shader->setInt("uShadowMap", 1);
+        shader->setInt("uShadowEnabled", 1);
+        shader->setMat4("uLightViewProj", s_shadowParams.lightViewProj);
+        shader->setFloat("uShadowBias", s_shadowParams.bias);
+        shader->setFloat("uShadowMapSize", static_cast<float>(s_shadowParams.mapSize));
+    } else {
+        shader->setInt("uShadowEnabled", 0);
+    }
+}
+
 uint32_t Renderer::lastParticleCount() {
     return s_lastParticleCount;   // 骨架日空实现：恒 0（ParticleRenderer 接入后填充）
 }

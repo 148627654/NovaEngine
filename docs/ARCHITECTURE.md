@@ -2553,6 +2553,12 @@ public:
 - **卸载时序铁律**：先替换全部脚本组件实例，再 FreeLibrary；反序列化在新 DLL 加载后进行（新工厂创建）。
 - 编辑器编译期注入：`NOVA_GAME_DLL_PATH="${CMAKE_BINARY_DIR}/samples/$<CONFIG>/NovaGame.dll"`、`NOVA_BUILD_CONFIG="$<CONFIG>"`。
 
+**2b 落地裁定（2026-11-19，c5 提交 e2fdcc6，经主会话确认）**——§25.5 冻结方案的 3 处机制替换（契约意图达成，机制落地调整）：
+1. **导出机制替换**：WINDOWS_EXPORT_ALL_SYMBOLS 不扫描静态库成员（CMake 文档限制，实测 objects.txt 仅含 exe 自身 .obj）——改为从 NovaEngine.lib 生成去重 .def（editor/player CMakeLists 内嵌 Python 单遍解析，<10s，按 .lib 时间戳缓存；ENABLE_EXPORTS + /DEF + /WHOLEARCHIVE）。「导出全部引擎符号」意图达成，机制替换。
+2. **双 DLL 形态**：DLL 导入表按模块名解析，单 NovaGame.dll 无法同时服务两个 exe——编辑器形态 NovaGame（--target NovaGame，热重载对象）+ Player 形态 NovaGamePlayer（Packager 拷贝），OUTPUT_NAME 均 NovaGame.dll 分居 samples/ 与 player/<Config>/。
+3. **整场景 JSON 重建替代逐组件替换**：冻结 GameObject 接口无「按指针移除组件」（removeComponent<T> 按 typeId 匹配，反序列化挂载的脚本组件 typeId=0 不可命中）——reload = 全场景 JSON 快照 → 清旧工厂 → 中间重建（旧实例在 FreeLibrary 前安全虚析构）→ FreeLibrary → LoadLibrary 新 DLL → 再重建按「对象 ID+组件下标」恢复字段。副作用：reload 后全场景 GO/组件指针作废、内置组件 onAwake 重跑。
+4. 工厂缺失裁定：新 DLL 加载成功但脚本类型被删 → warn + 丢弃该组件、返回 true（契约字面「工厂缺失保留旧 DLL」会把用户有意删除的脚本永久复活，未采纳）。
+
 **编辑器触发流程（契约）**：
 1. 菜单「Scripts → Reload Scripts」+ Ctrl+Shift+R（Edit 态可用；Play 态灰显——Play 快照含旧类型）。
 2. 编辑器 spawn `cmake --build <NOVA_PROJECT_ROOT>/build --config <NOVA_BUILD_CONFIG> --target NovaGame` 并等待退出；失败 → 编译输出进 Console，**旧 DLL 保持运行**（不调用 reload）。

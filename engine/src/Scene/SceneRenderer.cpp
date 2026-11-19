@@ -378,13 +378,18 @@ void renderSceneInternal(const Scene& scene, const RenderCamera& fallbackCamera,
     }
 
     // ===== 遍历扩展点（§25.0 冻结语义，骨架日布；空实现默认 = 零影响）=====
-    // 遍历结束后、阴影 pass 前：地形（castShadows 时把地形项追加进 shadowItems）
-    // 与粒子（合并实例数据提交；绘制顺序由 c4 在实现内保证「粒子最后」）
-    TerrainRenderer::collectAndSubmit(scene, renderCam, frustum, shadowItems);
+    // 遍历结束后、阴影 pass 前：粒子（合并实例数据提交；排序张力 v1 备案——§25.4
+    // 「粒子最后」与冻结钩子点的折中，如需调整由合波日评估一行移动）
     ParticleRenderer::collectAndSubmit(scene, renderCam);
 
     if (shadowEnabled) Renderer::drawShadowPass(shadowParams, shadowItems);
     if (scene.showGrid) Renderer::drawGrid(scene.fogColor);
+
+    // 地形（V0.5-8 2b 合波接线）：移至阴影 pass 之后绘制——阴影贴图此刻已渲染（地形可
+    // 接收阴影，Renderer::setShadowUniforms）；深度缓冲此刻只有天空（z=1），地形写入深度
+    // 后，endFrame 的不透明几何自然被地形正确遮挡（原钩子点在阴影前，深度/阴影均不可用）
+    TerrainRenderer::collectAndSubmit(scene, renderCam, frustum, shadowItems);
+
     Renderer::endFrame();
 
     // V0.5-10 2D 精灵：透明段，全部 3D 之后绘制（(sortingLayer, orderInLayer, 视距) 排序后提交）

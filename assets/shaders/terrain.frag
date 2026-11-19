@@ -24,7 +24,7 @@ uniform vec3 uAmbient;
 
 // ===== 4 层材质（splat R/G/B/A 对应 0..3；空路径 = 白/无，C++ 侧开关置 0）=====
 uniform int uUseAlbedoMap[4];
-uniform sampler2D uAlbedoMap[4];   // unit 0-3
+uniform sampler2D uAlbedoMap[4];   // unit 10-13（2b 合波迁址：unit 1 让给阴影贴图）
 uniform int uUseNormalMap[4];
 uniform sampler2D uNormalMap[4];   // unit 4-7
 uniform vec4 uTileSize;            // 每层平铺尺寸（米/次）

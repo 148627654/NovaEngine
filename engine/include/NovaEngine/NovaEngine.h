@@ -77,5 +77,15 @@
 #include <NovaEngine/Particles/ParticleSystem.h>
 #include <NovaEngine/Particles/ParticleRenderer.h>
 
+// ===== 波 2 2b 模块（V0.5-7/8/9/10，2026-11-19 2b 合波接线）=====
+#include <NovaEngine/Scene/SpriteRenderer.h>
+#include <NovaEngine/Scene/BoxCollider2D.h>
+#include <NovaEngine/Physics/Physics2D.h>
+#include <NovaEngine/Terrain/Terrain.h>
+#include <NovaEngine/Terrain/TerrainRenderer.h>
+#include <NovaEngine/Animation/SkeletalMeshRenderer.h>
+#include <NovaEngine/Animation/Animator.h>
+#include <NovaEngine/Scripting/ScriptRuntime.h>
+
 #include <NovaEngine/Serialization/PrefabSerializer.h>
 #include <NovaEngine/Serialization/SceneSerializer.h>

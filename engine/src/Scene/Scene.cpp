@@ -4,6 +4,7 @@
 #include <NovaEngine/Core/Logger.h>
 #include <NovaEngine/Core/Events.h>
 #include <NovaEngine/Physics/PhysicsWorld.h>
+#include <NovaEngine/Physics/Physics2D.h>
 #include <NovaEngine/Scripting/Behaviour.h>
 #include <algorithm>
 #include <functional>
@@ -174,6 +175,10 @@ void Scene::update(float dt) {
     };
     for (const auto& root : m_rootObjects)
         broadcast(root.get());
+
+    // 2D 碰撞求解（V0.5-10 波 2 2b 合波接线，§25.8 固定点）：onUpdate 广播之后、协程推进之前——
+    // 事件同步 publish，脚本本帧即可收到；2D 与 3D（Jolt，广播前步进）顺序互不依赖
+    Physics2D::step(*this);
 
     // 协程推进（普通 yield：NextFrame/AfterSeconds/…）——advanceCoroutines 是 Behaviour 私有，
     // Scene 是 friend（§14.6 帧内顺序第 c 步）。裁定：enabled=false 不暂停协程（与 Unity 一致）；
