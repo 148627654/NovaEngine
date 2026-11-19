@@ -1,7 +1,9 @@
-// BoxCollider2D.cpp —— 骨架日桩（V0.5-10）：接口冻结于 §25.8；增强实现归 c8（本文件为 c8 独占）。
-// 序列化按契约键名往返（center/size/isTrigger）。
+// BoxCollider2D.cpp —— 2D AABB 碰撞体组件（V0.5-10，c8 定稿；接口冻结于 §25.8）
+// 序列化按契约键名往返（center/size/isTrigger）。纯数据组件：重叠检测与事件投递在
+// Physics2D::step（v1 无刚体动力学，移动由脚本/Transform 驱动；独立于 Jolt）。
 #include <NovaEngine/Scene/BoxCollider2D.h>
 
+#include <NovaEngine/Core/Logger.h>
 #include <NovaEngine/Scene/ComponentRegistry.h>
 
 #include <nlohmann/json.hpp>
@@ -33,6 +35,10 @@ void BoxCollider2D::onSerialize(nlohmann::json& out) const {
 void BoxCollider2D::onDeserialize(const nlohmann::json& in) {
     center = jsonToVec2(in.value("center", nlohmann::json()), glm::vec2(0.0f));
     size = jsonToVec2(in.value("size", nlohmann::json()), glm::vec2(1.0f));
+    if (size.x <= 0.0f || size.y <= 0.0f) {   // 非法尺寸回退默认（半宽≤0 无有效 AABB）
+        Logger::warn("BoxCollider2D 反序列化：size ({}, {}) 非法，回退 (1, 1)", size.x, size.y);
+        size = glm::vec2(1.0f);
+    }
     isTrigger = in.value("isTrigger", false);
 }
 

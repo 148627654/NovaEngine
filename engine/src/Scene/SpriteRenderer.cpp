@@ -1,5 +1,10 @@
-// SpriteRenderer.cpp —— 骨架日桩（V0.5-10）：接口冻结于 §25.8；增强实现归 c8（本文件为 c8 独占）。
-// 序列化按契约键名往返 + 贴图经 AssetDatabase 解析（渲染收集分支已在 SceneRenderer 布好）。
+// SpriteRenderer.cpp —— 2D 精灵渲染组件（V0.5-10，c8 定稿；接口冻结于 §25.8）
+// 序列化按契约键名往返（texturePath/color/flipX/flipY/sortingLayer/orderInLayer/pixelsPerUnit）；
+// 贴图在反序列化时经 AssetDatabase 解析（srgb=true，失败回退白块不崩溃——SceneRenderer 精灵
+// 路径兜底白纹理）。quad 几何（尺寸 = 贴图像素 / pixelsPerUnit）与渲染收集在 SceneRenderer
+// （c0 骨架日冻结），本组件只持数据。
+// 已知接缝（归合波）：编辑器 Inspector 运行时改 texturePath 需同步刷新 texture 字段
+// （或重走 onDeserialize）——渲染收集只读 texture 成员。
 #include <NovaEngine/Scene/SpriteRenderer.h>
 
 #include <NovaEngine/Assets/AssetDatabase.h>
@@ -51,6 +56,10 @@ void SpriteRenderer::onDeserialize(const nlohmann::json& in) {
     sortingLayer = in.value("sortingLayer", 0);
     orderInLayer = in.value("orderInLayer", 0);
     pixelsPerUnit = in.value("pixelsPerUnit", 100.0f);
+    if (pixelsPerUnit <= 0.0f) {   // 非法值回退默认（尺寸 = 像素/PPU，PPU≤0 无意义）
+        Logger::warn("SpriteRenderer 反序列化：pixelsPerUnit {} 非法，回退 100", pixelsPerUnit);
+        pixelsPerUnit = 100.0f;
+    }
 }
 
 }  // namespace NovaEngine

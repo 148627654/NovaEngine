@@ -1,0 +1,259 @@
+{
+    "editorCamera": {
+        "distance": 10.0,
+        "pitch": 0.0,
+        "target": [
+            0.0,
+            0.5,
+            0.0
+        ],
+        "yaw": 0.0
+    },
+    "environment": {
+        "ambientColor": [
+            0.15000000596046448,
+            0.15000000596046448,
+            0.18000000715255737
+        ],
+        "fogColor": [
+            0.18000000715255737,
+            0.2199999988079071,
+            0.3499999940395355
+        ],
+        "postProcess": {
+            "bloomIntensity": 0.5,
+            "bloomLevels": 3,
+            "bloomThreshold": 1.0,
+            "enabled": false,
+            "exposure": 1.0
+        },
+        "showGrid": false,
+        "skyColor": [
+            0.12999999523162842,
+            0.15000000596046448,
+            0.2199999988079071
+        ],
+        "skyCubemapPath": "",
+        "skyExposure": 1.0,
+        "skyHorizonColor": [
+            0.33000001311302185,
+            0.3799999952316284,
+            0.5
+        ],
+        "skyMode": "Gradient",
+        "skyRotation": 0.0,
+        "skyZenithColor": [
+            0.2199999988079071,
+            0.30000001192092896,
+            0.47999998927116394
+        ]
+    },
+    "name": "2DTemplate",
+    "objects": [
+        {
+            "active": true,
+            "components": [
+                {
+                    "position": [
+                        0.0,
+                        0.0,
+                        -10.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "type": "Transform"
+                },
+                {
+                    "clearColor": [
+                        0.12999999523162842,
+                        0.15000000596046448,
+                        0.2199999988079071,
+                        1.0
+                    ],
+                    "farPlane": 100.0,
+                    "fov": 60.0,
+                    "isMain": true,
+                    "nearPlane": 0.10000000149011612,
+                    "projectionMode": "Orthographic",
+                    "orthoSize": 5.0,
+                    "type": "Camera"
+                }
+            ],
+            "id": 16840732146653812701,
+            "name": "Main Camera",
+            "parent": 0
+        },
+        {
+            "active": true,
+            "components": [
+                {
+                    "position": [
+                        0.0,
+                        0.5,
+                        0.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "type": "Transform"
+                },
+                {
+                    "color": [
+                        1.0,
+                        0.41999998688697815,
+                        0.25,
+                        1.0
+                    ],
+                    "flipX": false,
+                    "flipY": false,
+                    "orderInLayer": 0,
+                    "pixelsPerUnit": 100.0,
+                    "sortingLayer": 0,
+                    "texturePath": "",
+                    "type": "SpriteRenderer"
+                },
+                {
+                    "center": [
+                        0.0,
+                        0.0
+                    ],
+                    "isTrigger": false,
+                    "size": [
+                        1.0,
+                        1.0
+                    ],
+                    "type": "BoxCollider2D"
+                }
+            ],
+            "id": 16840732146653812703,
+            "name": "Hero",
+            "parent": 0
+        },
+        {
+            "active": true,
+            "components": [
+                {
+                    "position": [
+                        0.9000000953674316,
+                        0.5,
+                        0.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "type": "Transform"
+                },
+                {
+                    "color": [
+                        0.30000001192092896,
+                        0.550000011920929,
+                        1.0,
+                        1.0
+                    ],
+                    "flipX": false,
+                    "flipY": false,
+                    "orderInLayer": 1,
+                    "pixelsPerUnit": 100.0,
+                    "sortingLayer": 0,
+                    "texturePath": "",
+                    "type": "SpriteRenderer"
+                },
+                {
+                    "center": [
+                        0.0,
+                        0.0
+                    ],
+                    "isTrigger": false,
+                    "size": [
+                        1.0,
+                        1.0
+                    ],
+                    "type": "BoxCollider2D"
+                }
+            ],
+            "id": 16840732146653812704,
+            "name": "Crate",
+            "parent": 0
+        },
+        {
+            "active": true,
+            "components": [
+                {
+                    "position": [
+                        -1.399999976158142,
+                        0.5,
+                        0.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "type": "Transform"
+                },
+                {
+                    "color": [
+                        0.30000001192092896,
+                        0.8999999761581421,
+                        0.4000000059604645,
+                        1.0
+                    ],
+                    "flipX": false,
+                    "flipY": false,
+                    "orderInLayer": 0,
+                    "pixelsPerUnit": 100.0,
+                    "sortingLayer": 0,
+                    "texturePath": "",
+                    "type": "SpriteRenderer"
+                },
+                {
+                    "center": [
+                        0.0,
+                        0.0
+                    ],
+                    "isTrigger": true,
+                    "size": [
+                        1.0,
+                        1.0
+                    ],
+                    "type": "BoxCollider2D"
+                }
+            ],
+            "id": 16840732146653812705,
+            "name": "Pickup",
+            "parent": 0
+        }
+    ],
+    "version": 4
+}

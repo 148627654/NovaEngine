@@ -2,6 +2,8 @@
 #include <NovaEngine/Scene/ComponentRegistry.h>
 #include <nlohmann/json.hpp>
 
+#include <string>
+
 namespace NovaEngine {
 
 namespace {
@@ -26,6 +28,10 @@ void Camera::onSerialize(nlohmann::json& out) const {
     out["farPlane"] = farPlane;
     out["clearColor"] = nlohmann::json::array({clearColor.x, clearColor.y, clearColor.z, clearColor.w});
     out["isMain"] = isMain;
+    // V0.5-10 2D 投影（§25.8 键名）：projectionMode 字符串 + orthoSize（正交半高，米）
+    out["projectionMode"] =
+        projectionMode == ProjectionMode::Orthographic ? "Orthographic" : "Perspective";
+    out["orthoSize"] = orthoSize;
 }
 
 void Camera::onDeserialize(const nlohmann::json& in) {
@@ -35,6 +41,12 @@ void Camera::onDeserialize(const nlohmann::json& in) {
     clearColor = jsonToVec4(in.value("clearColor", nlohmann::json()),
                             glm::vec4(0.18f, 0.22f, 0.35f, 1.0f));
     isMain = in.value("isMain", false);
+    // V0.5-10 2D 投影：键缺失（旧文件）→ 缺省 Perspective = 旧行为零变化；
+    // 未知字符串回退 Perspective（畸形文件不崩溃）
+    const std::string mode = in.value("projectionMode", std::string("Perspective"));
+    projectionMode =
+        mode == "Orthographic" ? ProjectionMode::Orthographic : ProjectionMode::Perspective;
+    orthoSize = in.value("orthoSize", 5.0f);
 }
 
 }  // namespace NovaEngine
