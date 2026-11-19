@@ -14,6 +14,9 @@
 #include <windows.h>   // SetConsoleOutputCP + GetModuleFileNameW（须在 glad 之前）
 
 #include <NovaEngine/NovaEngine.h>
+#ifdef NOVA_SCRIPTS_DLL
+#include <NovaEngine/Scripting/ScriptRuntime.h>   // V0.5-7：脚本 DLL 热重载运行时（exe 目录/NovaGame.dll）
+#endif
 
 #include <glad/gl.h>                    // glViewport
 #include <GLFW/glfw3.h>                  // glfwGetWindowSize（窗口逻辑尺寸；GLFW_INCLUDE_NONE 已定义）
@@ -149,6 +152,14 @@ int main(int argc, char** argv) {
 
     // 6. 场景管理（V0.3-12 波 3）：读 build 列表（缺失/损坏 → 空列表 + warn，不崩溃）
     SceneManager::init();
+
+#ifdef NOVA_SCRIPTS_DLL
+    // 6.5 脚本 DLL（V0.5-7）：exe 目录/NovaGame.dll（Packager 拷贝入发布目录）。
+    //   失败仅 warn——场景加载时脚本组件反序列化 warn 跳过，场景其余正常（§25.5）
+    ScriptRuntime::setDllPath(exeDir / "NovaGame.dll");
+    if (!ScriptRuntime::load())
+        Logger::warn("[NovaPlayer] 脚本 DLL 加载失败，脚本组件将跳过（{}）", ScriptRuntime::lastError());
+#endif
 
     // 7. 场景加载（AssetStream：先查 pak 再查磁盘）+ Play 启动
     Scene scene("Player");

@@ -405,10 +405,32 @@ bool Packager::buildPlayer(const fs::path& sceneJsonPath, const fs::path& output
         return false;
     }
 
+    // 7.5 拷贝脚本 DLL（V0.5-7）：Player 形态 NovaGame.dll（Player 启动按 exe 目录加载，
+    //    其引擎符号引用绑定 NovaPlayer.exe 导出）。缺失视为打包失败（场景脚本会丢）
+#ifdef NOVA_SCRIPTS_DLL
+    const fs::path gameDll(NOVA_GAME_PLAYER_DLL_PATH);
+    const fs::path gameDllOut = outputDir / "NovaGame.dll";
+    if (!fileExists(gameDll)) {
+        Logger::error("打包失败：NovaGame.dll 不存在: {}（请先构建 NovaGamePlayer target）",
+                      gameDll.string());
+        return false;
+    }
+    copyEc.clear();
+    fs::copy_file(gameDll, gameDllOut, fs::copy_options::overwrite_existing, copyEc);
+    if (copyEc) {
+        Logger::error("打包失败：拷贝 NovaGame.dll 失败: {}（{}）", gameDllOut.string(),
+                      copyEc.message());
+        return false;
+    }
+#endif
+
     // 8. Console 报告产物清单
     Logger::info("Build Player 成功 —— 产物清单:");
     Logger::info("  [pak] {}（{} 个文件，场景 {}）", pakPath.string(), files.size(), sceneRel);
     Logger::info("  [exe] {}", exePath.string());
+#ifdef NOVA_SCRIPTS_DLL
+    Logger::info("  [dll] {}", gameDllOut.string());
+#endif
     Logger::info("  运行方式: {} --scene {}（自动挂载同目录 {}，也可 --pak 显式指定）",
                  exePath.string(), sceneRel, pakPath.filename().string());
     return true;
