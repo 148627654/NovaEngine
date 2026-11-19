@@ -27,7 +27,7 @@ out vec2 vUV;
 
 void main() {
     float hC = texture(uHeightMap, aUV).r;
-    vec2 texel = 1.0 / float(uHeightRes);
+    vec2 texel = vec2(1.0 / float(uHeightRes));
     // 有限差分法线（CLAMP 边界单侧差，与 CPU 重算法线一致；见 blinn_phong.frag 光照互指）
     float hL = texture(uHeightMap, aUV - vec2(texel.x, 0.0)).r;
     float hR = texture(uHeightMap, aUV + vec2(texel.x, 0.0)).r;

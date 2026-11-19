@@ -991,8 +991,9 @@ void PhysicsWorld::syncFromTransforms() {
         impl.registerTerrainHeightfield(t);
     impl.synced = true;
     // 诊断（验收期）：打印 body 统计，冒烟/验收可据此确认物理世界非空
-    Logger::info("[Physics] syncFromTransforms 完成：动态/运动 body={}，static body={}，synced=true",
-                 impl.rbByBodyId.size(), impl.staticBodyByGo.size());
+    Logger::info("[Physics] syncFromTransforms 完成：动态/运动 body={}，static body={}，"
+                 "terrain heightfield={}，synced=true",
+                 impl.rbByBodyId.size(), impl.staticBodyByGo.size(), impl.terrainBody.size());
 }
 
 bool PhysicsWorld::raycast(const glm::vec3& origin, const glm::vec3& direction,

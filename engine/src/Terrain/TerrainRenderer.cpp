@@ -328,9 +328,12 @@ void TerrainRenderer::collectAndSubmit(const Scene& scene, const RenderCamera& c
         if (!tr)
             return;
 
-        // 高度图路径变化（反序列化/Inspector 改路径）→ self-healing 重载 CPU 高度
+        // 高度图路径变化（Inspector 改路径）→ self-healing 重载 CPU 高度。
+        // 首帧（g.res==0）跳过重载：构造/反序列化已加载（避免同帧重复读盘）
         TerrainGpu& g = s_cache[t];
-        if (t->heightmapPath != g.heightmapPath) {
+        if (g.res == 0) {
+            g.heightmapPath = t->heightmapPath;
+        } else if (t->heightmapPath != g.heightmapPath) {
             g.heightmapPath = t->heightmapPath;
             t->loadHeightmap();   // 失败 warn 保持平面（不崩溃）
         }
@@ -428,6 +431,15 @@ void TerrainRenderer::collectAndSubmit(const Scene& scene, const RenderCamera& c
         glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(g.indexCount), GL_UNSIGNED_INT,
                        nullptr);
         glBindVertexArray(0);
+
+        // 冒烟诊断（c6 验收用）：首次地形绘制后查一次 GL error（后续帧不查防刷屏）
+        static bool s_glErrorChecked = false;
+        if (!s_glErrorChecked) {
+            s_glErrorChecked = true;
+            const GLenum err = glGetError();
+            if (err != GL_NO_ERROR)
+                Logger::warn("[TerrainRenderer] 首帧地形绘制后 GL error: 0x{:04X}", err);
+        }
 
         // castShadows 时地形进 shadowItems（CPU 位移网格与顶点着色器位移逐样本一致）
         if (shadowEnabled && g.shadowMesh)

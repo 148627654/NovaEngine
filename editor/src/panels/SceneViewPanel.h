@@ -31,6 +31,8 @@ private:
     void focusGameObject(EditorCamera& camera, NovaEngine::GameObject* go);
     // Play 态顶部工具栏（V0.2-13/V0.3-10 子集）：分辨率预设 / Render Scale / Follow Selected
     void drawPlayToolbar(EditorContext& ctx);
+    // Edit 态顶部工具栏（V0.5-8，c6）：「Terrain Brush」开关（场景含 Terrain 时可用）
+    void drawEditToolbar(EditorContext& ctx);
     // Follow Selected：把主相机 Transform 设到 选中对象世界位置 + 记录偏移（朝向不变）
     void applyFollowSelected(EditorContext& ctx);
 
@@ -50,6 +52,10 @@ private:
     // Show Colliders（V0.3-1 波 2 编辑器接线）：Play 工具栏开关 → 渲染时
     // physics()->debugDraw 收集线段 + Renderer::drawLines 绘制（Edit 态不显示不收集）
     bool m_showColliders = false;
+    // 地形笔刷（V0.5-8，c6）：Edit 态工具栏开关 + 左键拖拽刷（设置取自
+    // TerrainBrushSettings 单例——TerrainPanel dock 接线前用默认值可用）
+    bool m_terrainBrushEnabled = false;
+    bool m_brushStrokeActive = false;   // 本笔刷拖拽期间置位（收笔推一次撤销快照）
 };
 
 }  // namespace NovaEditor

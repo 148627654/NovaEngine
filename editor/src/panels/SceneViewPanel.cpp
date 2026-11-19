@@ -1,5 +1,7 @@
 #include "SceneViewPanel.h"
 
+#include "TerrainPanel.h"   // TerrainBrushSettings（地形笔刷设置单例，V0.5-8）
+
 #include "../DragDrop.h"
 #include "../EditorCamera.h"
 #include "../EditorContext.h"
@@ -21,6 +23,7 @@
 #include <NovaEngine/Scene/Scene.h>
 #include <NovaEngine/Scene/SceneRenderer.h>
 #include <NovaEngine/Scene/Transform.h>
+#include <NovaEngine/Terrain/Terrain.h>       // 地形笔刷 raycast/applyBrush（V0.5-8，c6）
 #include <NovaEngine/UI/UIRenderer.h>         // 运行时 UI 输入（V0.3-3；渲染已迁入 renderSceneToOutput 管线）
 
 // glfwGetTime（Play toast 时间戳）用；顺序要求与 EditorApplication 一致：
@@ -140,8 +143,9 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
     ctx.viewportScreenMax = ImGui::GetWindowPos() + ImGui::GetWindowSize();
 
     // Play 态顶部工具栏（V0.2-13/V0.3-10 子集）：分辨率预设 / Render Scale / Follow Selected。
-    // Edit 态完全不变（不显示工具栏）。
+    // Edit 态工具栏（V0.5-8，c6）：「Terrain Brush」开关（场景含 Terrain 时可用）。
     if (playMode) drawPlayToolbar(ctx);
+    else drawEditToolbar(ctx);
 
     const ImVec2 vpPos = ImGui::GetCursorScreenPos();
     const ImVec2 vpSize = ImGui::GetContentRegionAvail();
@@ -338,8 +342,47 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
     if (editMode && !gizmoActive && (windowHovered || camera.isInteracting()))
         camera.update(Time::deltaTime(), vpPosF, vpSizeF, m_uiConsumedWheel);
 
-    // 射线-AABB 拾取（位移阈值 3px、Ctrl 加选、gizmo 悬停抑制；仅 Edit 态）
-    handlePicking(ctx, camera, vpPosF, vpSizeF, hovered);
+    // ===== 地形笔刷（V0.5-8，c6）：Edit 态工具栏开关 + 左键拖拽在地形上刷 =====
+    // 射线 raycast 命中 Terrain（多地形取最近）；设置来自 TerrainBrushSettings 单例
+    // （TerrainPanel 同源；面板 dock 接线前用默认值）。相机旋转/平移用右键/中键，
+    // 左键无冲突；gizmo 拖拽/悬停抑制（优先 gizmo）。
+    if (editMode && m_terrainBrushEnabled && hovered && !gizmoActive &&
+        !camera.isInteracting()) {
+        const ImGuiIO& mio = ImGui::GetIO();
+        if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            const glm::vec2 mouse(mio.MousePos.x, mio.MousePos.y);
+            const auto [origin, dir] = camera.screenPointToRay(mouse, vpPosF, vpSizeF);
+            NovaEngine::Terrain* best = nullptr;
+            glm::vec3 hit(0.0f);
+            float bestDist = std::numeric_limits<float>::max();
+            for (NovaEngine::Terrain* t : scene->findComponents<NovaEngine::Terrain>()) {
+                glm::vec3 hitLocal(0.0f);
+                if (t->raycast(origin, dir, hitLocal)) {
+                    const float d = glm::length(hitLocal - origin);
+                    if (d < bestDist) { bestDist = d; best = t; hit = hitLocal; }
+                }
+            }
+            if (best) {
+                TerrainBrushSettings& brush = TerrainBrushSettings::instance();
+                best->applyBrush(hit, brush.radius, brush.strength, brush.mode);
+                ctx.markDirtyOnly();        // 拖拽中间帧只置脏（防刷撤销栈）
+                m_brushStrokeActive = true;
+            }
+        } else if (m_brushStrokeActive) {
+            m_brushStrokeActive = false;
+            ctx.markSceneDirty();           // 收笔：推一次撤销快照
+        }
+    }
+    // 帧末：全部地形脏区域重建（法线 + 碰撞；Terrain 内部按帧节流每帧最多一次，
+    // GPU 上传由 TerrainRenderer 在渲染钩子内检测版本变化完成）
+    if (editMode && scene)
+        for (NovaEngine::Terrain* t : scene->findComponents<NovaEngine::Terrain>())
+            t->rebuildDirtyRegion();
+
+    // 射线-AABB 拾取（位移阈值 3px、Ctrl 加选、gizmo 悬停抑制；仅 Edit 态；
+    // 笔刷开启时跳过拾取——左键属于刷子）
+    if (!m_terrainBrushEnabled)
+        handlePicking(ctx, camera, vpPosF, vpSizeF, hovered);
 
     // F 聚焦（§6.2）
     if (editMode && hovered && Input::isKeyPressed(Key::F) && !ImGui::GetIO().WantCaptureKeyboard)
@@ -442,6 +485,25 @@ void SceneViewPanel::drawPlayToolbar(EditorContext& ctx) {
     // 不序列化不置脏；渲染路径见 onGui 的 Play 分支）
     ImGui::SameLine();
     ImGui::Checkbox("Show Colliders", &m_showColliders);
+    ImGui::Separator();
+}
+
+void SceneViewPanel::drawEditToolbar(EditorContext& ctx) {
+    // V0.5-8（c6）：「Terrain Brush」开关（Edit 态，场景含 Terrain 时可用——
+    // 无 Terrain 灰置）。开启后左键拖拽在地形上刷（raycast 命中），设置见 TerrainPanel。
+    using namespace NovaEngine;
+    const bool hasTerrain = ctx.scene != nullptr &&
+                            !ctx.scene->findComponents<Terrain>().empty();
+    if (!hasTerrain && m_terrainBrushEnabled)
+        m_terrainBrushEnabled = false;   // 地形被删除：自动关刷
+    if (!hasTerrain)
+        ImGui::BeginDisabled();
+    const bool clicked = ImGui::Button(m_terrainBrushEnabled ? "Terrain Brush [ON]"
+                                                             : "Terrain Brush");
+    if (!hasTerrain)
+        ImGui::EndDisabled();
+    if (clicked)
+        m_terrainBrushEnabled = !m_terrainBrushEnabled;
     ImGui::Separator();
 }
 

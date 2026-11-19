@@ -22,6 +22,7 @@ add_executable(NovaEditor
     src/panels/StatsPanel.cpp
     src/panels/BuildSettingsPanel.cpp
     src/panels/InputBindingsPanel.cpp   # V0.5-11：输入绑定面板（整合者补入显式源清单）
+    src/panels/TerrainPanel.cpp         # V0.5-8：地形面板（c6；dock 接线归合波日 c0）
     # Dear ImGui（docking）核心源码
     ${imgui_SOURCE_DIR}/imgui.cpp
     ${imgui_SOURCE_DIR}/imgui_draw.cpp
