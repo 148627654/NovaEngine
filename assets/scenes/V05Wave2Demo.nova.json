@@ -11,11 +11,11 @@
         "skyZenithColor": [0.22, 0.3, 0.48],
         "skyCubemapPath": "assets/textures/test_ibl.hdr",
         "skyRotation": 0.0,
-        "skyExposure": 1.0,
+        "skyExposure": 0.3,
         "postProcess": {
             "enabled": true,
             "bloomThreshold": 1.0,
-            "bloomIntensity": 0.3,
+            "bloomIntensity": 0.15,
             "bloomLevels": 3,
             "exposure": 1.0,
             "ssaoEnabled": true,
@@ -24,7 +24,7 @@
             "ssaoSampleCount": 16
         },
         "ibl": {
-            "iblIntensity": 1.0
+            "iblIntensity": 0.3
         }
     },
     "editorCamera": {
@@ -92,7 +92,7 @@
                 },
                 {
                     "type": "MeshRenderer",
-                    "meshPath": "builtin:plane",
+                    "mesh": "builtin:plane",
                     "material": {
                         "albedo": [0.55, 0.55, 0.58],
                         "albedoMap": "",
@@ -123,7 +123,7 @@
                 },
                 {
                     "type": "MeshRenderer",
-                    "meshPath": "builtin:plane",
+                    "mesh": "builtin:plane",
                     "material": {
                         "albedo": [0.5, 0.52, 0.56],
                         "albedoMap": "",
@@ -154,7 +154,7 @@
                 },
                 {
                     "type": "MeshRenderer",
-                    "meshPath": "builtin:sphere",
+                    "mesh": "builtin:sphere",
                     "material": {
                         "albedo": [0.9, 0.9, 0.95],
                         "albedoMap": "",
@@ -185,7 +185,7 @@
                 },
                 {
                     "type": "MeshRenderer",
-                    "meshPath": "builtin:cube",
+                    "mesh": "builtin:cube",
                     "material": {
                         "albedo": [0.7, 0.6, 0.5],
                         "albedoMap": "",
@@ -216,7 +216,7 @@
                 },
                 {
                     "type": "MeshRenderer",
-                    "meshPath": "builtin:cube",
+                    "mesh": "builtin:cube",
                     "material": {
                         "albedo": [0.65, 0.55, 0.45],
                         "albedoMap": "",
@@ -247,7 +247,7 @@
                 },
                 {
                     "type": "MeshRenderer",
-                    "meshPath": "builtin:cube",
+                    "mesh": "builtin:cube",
                     "material": {
                         "albedo": [0.65, 0.55, 0.45],
                         "albedoMap": "",
@@ -311,7 +311,7 @@
                 },
                 {
                     "type": "MeshRenderer",
-                    "meshPath": "builtin:sphere",
+                    "mesh": "builtin:sphere",
                     "material": {
                         "albedo": [0.6, 0.62, 0.6],
                         "albedoMap": "",

@@ -86,11 +86,6 @@ bool buildAttachments(uint32_t& outFbo, uint32_t& outMsaaColor, uint32_t& outDep
         glDrawBuffers(3, drawBuffers);
     }
 
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        return false;
-    }
-
     // resolve 纹理（ImGui::Image 显示用；HDR 时 RGBA16F，blit 同格式）
     glGenTextures(1, &outResolveTex);
     glBindTexture(GL_TEXTURE_2D, outResolveTex);
@@ -105,6 +100,18 @@ bool buildAttachments(uint32_t& outFbo, uint32_t& outMsaaColor, uint32_t& outDep
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glBindTexture(GL_TEXTURE_2D, 0);
 
+    // 无 MSAA：resolve 纹理直接挂主 FBO——必须在完整性检查之前（2026-11-19 修复：原实现
+    // 首次检查在附件 0 挂载之前，MRT + 无 MSAA 组合下附件 0 缺失 → 完整性检查必失败 →
+    // create 降级重试仍失败 → 渲染静默跳过；编辑器 MSAA 路径不受影响，samples=1 调用方全灭）
+    if (!msaa) {
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, outResolveTex, 0);
+    }
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        return false;
+    }
+
     if (msaa) {
         glGenFramebuffers(1, &outResolveFbo);
         glBindFramebuffer(GL_FRAMEBUFFER, outResolveFbo);
@@ -118,9 +125,6 @@ bool buildAttachments(uint32_t& outFbo, uint32_t& outMsaaColor, uint32_t& outDep
             const GLenum drawBuffers[3] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2};
             glDrawBuffers(3, drawBuffers);
         }
-    } else {
-        // 无 MSAA：当前绑定仍是 outFbo，resolve 纹理直接挂主 FBO
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, outResolveTex, 0);
     }
 
     const bool complete = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
