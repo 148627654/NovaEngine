@@ -142,7 +142,13 @@ void SceneSerializer::deserialize(Scene& target, const std::string& json) {
     for (const auto& obj : objectsNode) {
         if (!obj.is_object())
             continue;
-        const uint64_t id = safeGet(obj, "id", uint64_t(UUID::kInvalid));
+        // id 硬化（2026-11-19）：超出 uint64 范围的 JSON 整数会被解析成浮点——
+        // 浮点→uint64 强转是 UB（实测 cvttsd2si 越界饱和为 0x8000…），一律视为无效
+        // 重新生成（此前只会打「冲突或无效」警告但值已是垃圾）
+        const uint64_t id = (obj.contains("id") && obj["id"].is_number() &&
+                             !obj["id"].is_number_float())
+                                ? safeGet(obj, "id", uint64_t(UUID::kInvalid))
+                                : uint64_t(UUID::kInvalid);
         const std::string name = safeGet(obj, "name", std::string("GameObject"));
         GameObject* go = target.instantiate(id, name);
         go->setActiveSelf(safeGet(obj, "active", true));

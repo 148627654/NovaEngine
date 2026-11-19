@@ -237,6 +237,15 @@ void EditorApplication::init() {
     animatorPanel->open = false;
     m_panels.push_back(std::move(animatorPanel));
 
+    // 脚本 DLL 初始加载（V0.5-7 波 2 2b 合波修复：此前漏接，编辑器启动即加载——
+    // 必须在场景加载之前，脚本组件反序列化才能命中注册表；失败仅 warn，场景其余正常）
+#ifdef NOVA_SCRIPTS_DLL
+    ScriptRuntime::setDllPath(NOVA_GAME_DLL_PATH);
+    if (!ScriptRuntime::load())
+        Logger::warn("[ScriptRuntime] NovaGame.dll 加载失败（脚本组件将跳过；先编译 samples）: {}",
+                     ScriptRuntime::lastError());
+#endif
+
     // 默认加载示例场景（不存在则保持空场景）
     const std::filesystem::path demo =
         AssetDatabase::projectRoot() / "assets" / "scenes" / "demo.nova.json";
