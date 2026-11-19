@@ -281,6 +281,9 @@ void EditorApplication::shutdown() {
     IBL::shutdown();             // V0.5-4 波 2 合波：卷积缓存纹理/BRDF LUT 释放（GL 存活期）
     SSAO::shutdown();            // V0.5-5 波 2 合波：AO 纹理链释放（GL 存活期）
     ParticleRenderer::shutdown();  // V0.5-6 波 2 合波：粒子 VAO/VBO/贴图缓存释放（GL 存活期）
+    TerrainRenderer::shutdown();  // V0.5-8 波 2 合波补：地形 VAO/VBO/阴影网格缓存释放（GL 存活期；
+                                  // 缺失时静态缓存内的 shared_ptr<Mesh> 在上下文死后析构 → 退出崩溃，
+                                  // 2026-11-19 harness 复现）
     Renderer::shutdown();
     Logger::info("NovaEditor 退出");
     Logger::shutdown();  // 关闭日志文件（逐行已落盘）
