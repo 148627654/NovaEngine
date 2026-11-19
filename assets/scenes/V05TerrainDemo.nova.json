@@ -1,0 +1,146 @@
+{
+    "version": 4,
+    "name": "TerrainDemo",
+    "environment": {
+        "skyColor": [0.18, 0.22, 0.35],
+        "ambientColor": [0.15, 0.15, 0.18],
+        "showGrid": false,
+        "fogColor": [0.18, 0.22, 0.35],
+        "skyMode": "Gradient",
+        "skyHorizonColor": [0.55, 0.62, 0.72],
+        "skyZenithColor": [0.22, 0.3, 0.48],
+        "skyCubemapPath": "",
+        "skyRotation": 0.0,
+        "skyExposure": 1.0,
+        "postProcess": {
+            "enabled": false,
+            "bloomThreshold": 1.0,
+            "bloomIntensity": 0.5,
+            "bloomLevels": 5,
+            "exposure": 1.0
+        },
+        "ibl": {
+            "iblIntensity": 1.0
+        }
+    },
+    "editorCamera": {
+        "target": [0.0, 5.0, 0.0],
+        "distance": 30.0,
+        "yaw": 0.6,
+        "pitch": -0.35
+    },
+    "objects": [
+        {
+            "id": 20000000000000000021,
+            "name": "Main Camera",
+            "active": true,
+            "parent": 0,
+            "components": [
+                {
+                    "type": "Transform",
+                    "position": [0.0, 14.0, 45.0],
+                    "rotation": [0.0, 1.0, 0.0, 6.123234262925839e-17],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "Camera",
+                    "fov": 60.0,
+                    "near": 0.1,
+                    "far": 1000.0,
+                    "isMain": true
+                }
+            ]
+        },
+        {
+            "id": 20000000000000000022,
+            "name": "Sun",
+            "active": true,
+            "parent": 0,
+            "components": [
+                {
+                    "type": "Transform",
+                    "position": [0.0, 5.0, 0.0],
+                    "rotation": [-0.3535766899585724, 0.3535766899585724, -0.14639034867286682, 0.853543758392334],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "DirectionalLight",
+                    "castShadows": true,
+                    "color": [1.0, 0.95, 0.85],
+                    "intensity": 1.2,
+                    "shadowBias": 0.0005,
+                    "shadowMapSize": 2048,
+                    "shadowRange": 200.0
+                }
+            ]
+        },
+        {
+            "id": 20000000000000000023,
+            "name": "地形(工具栏Terrain Brush可刷)",
+            "active": true,
+            "parent": 0,
+            "components": [
+                {
+                    "type": "Transform",
+                    "position": [0.0, 0.0, 0.0],
+                    "rotation": [0.0, 0.0, 0.0, 1.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "Terrain",
+                    "heightmapPath": "assets/terrains/terrain_smoke.png",
+                    "splatmapPath": "",
+                    "worldSize": [100.0, 100.0],
+                    "heightScale": 10.0,
+                    "collisionEnabled": true,
+                    "layers": [
+                        {"albedo": "", "normal": "", "tileSize": 10.0},
+                        {"albedo": "", "normal": "", "tileSize": 10.0},
+                        {"albedo": "", "normal": "", "tileSize": 10.0},
+                        {"albedo": "", "normal": "", "tileSize": 10.0}
+                    ]
+                }
+            ]
+        },
+        {
+            "id": 20000000000000000024,
+            "name": "掉落方块(看地形碰撞)",
+            "active": true,
+            "parent": 0,
+            "components": [
+                {
+                    "type": "Transform",
+                    "position": [2.0, 10.0, 0.0],
+                    "rotation": [0.0, 0.0, 0.0, 1.0],
+                    "scale": [1.0, 1.0, 1.0]
+                },
+                {
+                    "type": "MeshRenderer",
+                    "meshPath": "builtin:cube",
+                    "material": {
+                        "albedo": [0.9, 0.35, 0.2],
+                        "albedoMap": "",
+                        "alpha": 1.0,
+                        "blendMode": "Opaque",
+                        "emissionColor": [0.0, 0.0, 0.0],
+                        "emissionIntensity": 1.0,
+                        "emissionMap": "",
+                        "metallic": 0.0,
+                        "metallicMap": "",
+                        "normalMap": "",
+                        "roughness": 0.5
+                    }
+                },
+                {
+                    "type": "BoxCollider",
+                    "isTrigger": false,
+                    "center": [0.0, 0.0, 0.0],
+                    "halfExtents": [0.5, 0.5, 0.5]
+                },
+                {
+                    "type": "Rigidbody"
+                }
+            ]
+        }
+    ]
+}
