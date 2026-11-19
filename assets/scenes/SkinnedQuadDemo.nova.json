@@ -1,0 +1,248 @@
+{
+ "version": 4,
+ "name": "SkinnedQuadDemo",
+ "editorCamera": {
+  "distance": 4.0,
+  "pitch": -0.35,
+  "target": [
+   0.0,
+   0.5,
+   0.0
+  ],
+  "yaw": 0.0
+ },
+ "environment": {
+  "ambientColor": [
+   0.15,
+   0.15,
+   0.18
+  ],
+  "fogColor": [
+   0.18,
+   0.22,
+   0.35
+  ],
+  "postProcess": {
+   "bloomIntensity": 0.5,
+   "bloomLevels": 3,
+   "bloomThreshold": 1.0,
+   "enabled": false,
+   "exposure": 1.0
+  },
+  "showGrid": true,
+  "skyColor": [
+   0.18,
+   0.22,
+   0.35
+  ],
+  "skyCubemapPath": "",
+  "skyExposure": 1.0,
+  "skyHorizonColor": [
+   0.5,
+   0.55,
+   0.7
+  ],
+  "skyMode": "Gradient",
+  "skyRotation": 0.0,
+  "skyZenithColor": [
+   0.25,
+   0.35,
+   0.65
+  ]
+ },
+ "objects": [
+  {
+   "id": 7000000000000000001,
+   "name": "Main Camera",
+   "active": true,
+   "parent": 0,
+   "components": [
+    {
+     "type": "Transform",
+     "position": [
+      0.0,
+      0.5,
+      3.0
+     ],
+     "rotation": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+     ],
+     "scale": [
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    {
+     "type": "Camera",
+     "clearColor": [
+      0.18,
+      0.22,
+      0.35,
+      1.0
+     ],
+     "farPlane": 1000.0,
+     "fov": 60.0,
+     "isMain": true,
+     "nearPlane": 0.1
+    }
+   ]
+  },
+  {
+   "id": 7000000000000000002,
+   "name": "Directional Light",
+   "active": true,
+   "parent": 0,
+   "components": [
+    {
+     "type": "Transform",
+     "position": [
+      3.0,
+      5.0,
+      2.0
+     ],
+     "rotation": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+     ],
+     "scale": [
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    {
+     "type": "DirectionalLight",
+     "castShadows": true,
+     "color": [
+      1.0,
+      0.95,
+      0.85
+     ],
+     "intensity": 1.2,
+     "shadowBias": 0.0005,
+     "shadowMapSize": 2048,
+     "shadowRange": 60.0
+    }
+   ]
+  },
+  {
+   "id": 7000000000000000003,
+   "name": "SkinnedQuad",
+   "active": true,
+   "parent": 0,
+   "components": [
+    {
+     "type": "Transform",
+     "position": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "rotation": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+     ],
+     "scale": [
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    {
+     "type": "SkeletalMeshRenderer",
+     "mesh": "assets/models/SkinnedQuad.gltf",
+     "material": {
+      "albedo": [
+       0.8,
+       0.4,
+       0.2
+      ],
+      "albedoMap": "",
+      "alpha": 1.0,
+      "blendMode": "Opaque",
+      "emissionColor": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "emissionIntensity": 1.0,
+      "emissionMap": "",
+      "metallic": 0.0,
+      "metallicMap": "",
+      "normalMap": "",
+      "roughness": 0.6,
+      "roughnessMap": ""
+     }
+    },
+    {
+     "type": "Animator",
+     "defaultState": 0,
+     "states": [
+      {
+       "name": "Idle",
+       "clip": "bend",
+       "speed": 0.5,
+       "loop": true
+      },
+      {
+       "name": "Walk",
+       "clip": "sway",
+       "speed": 1.0,
+       "loop": true
+      }
+     ],
+     "transitions": [
+      {
+       "from": 0,
+       "to": 1,
+       "duration": 0.25,
+       "conditions": [
+        {
+         "parameter": "Speed",
+         "op": "Greater",
+         "value": 0.5
+        }
+       ]
+      },
+      {
+       "from": 1,
+       "to": 0,
+       "duration": 0.25,
+       "conditions": [
+        {
+         "parameter": "Speed",
+         "op": "Less",
+         "value": 0.5
+        }
+       ]
+      }
+     ],
+     "parameters": [
+      {
+       "name": "Speed",
+       "type": "Float",
+       "value": 0.0
+      },
+      {
+       "name": "Running",
+       "type": "Bool",
+       "value": false
+      },
+      {
+       "name": "Jump",
+       "type": "Trigger"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
