@@ -1,4 +1,6 @@
 #include <NovaEngine/Render/Primitives.h>
+#include <NovaEngine/Render/Renderer.h>   // isInitialized（V1.0 波 1 骨架日 GL 守卫）
+#include <NovaEngine/Core/Logger.h>
 
 #include <algorithm>
 #include <cmath>
@@ -44,6 +46,12 @@ void addCubeFace(MeshData& out, const glm::vec3& n, const glm::vec3& t) {
 }  // namespace
 
 std::shared_ptr<Mesh> Primitives::cube() {
+    // ===== V1.0 波 1 骨架日（§26.0 冻结项 2）：GL 就绪守卫 =====
+    // 无 GL 直接返回 nullptr（不写入函数内 static 缓存，上下文就绪后的下次调用正常构建）
+    if (!Renderer::isInitialized()) {
+        Logger::warn("[Primitives] GL 未初始化，无法创建内置图元 cube");
+        return nullptr;
+    }
     MeshData data;
     data.name = "Cube";
     // 六个面（+X/-X/+Y/-Y/+Z/-Z），法线与切线保证 UV 连续
@@ -61,6 +69,11 @@ std::shared_ptr<Mesh> Primitives::cube() {
 }
 
 std::shared_ptr<Mesh> Primitives::sphere(int segments) {
+    // GL 就绪守卫（§26.0 冻结项 2；不缓存 nullptr）
+    if (!Renderer::isInitialized()) {
+        Logger::warn("[Primitives] GL 未初始化，无法创建内置图元 sphere");
+        return nullptr;
+    }
     // UV 球参数化：环向 segments 段，极向 rings 环（北极 φ=0 → 南极 φ=π，+Y 向上）
     segments = std::max(3, segments);
     const int rings = std::max(2, segments / 2);
@@ -110,6 +123,11 @@ std::shared_ptr<Mesh> Primitives::sphere(int segments) {
 }
 
 std::shared_ptr<Mesh> Primitives::plane(float size) {
+    // GL 就绪守卫（§26.0 冻结项 2；不缓存 nullptr）
+    if (!Renderer::isInitialized()) {
+        Logger::warn("[Primitives] GL 未初始化，无法创建内置图元 plane");
+        return nullptr;
+    }
     MeshData data;
     data.name = "Plane";
     const float h = size * 0.5f;

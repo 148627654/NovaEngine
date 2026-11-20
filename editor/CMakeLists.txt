@@ -6,27 +6,15 @@
 # - NOVA_SCRIPTS_DLL=OFF（回滚）：NovaScripts 以 OBJECT 库 .obj 直接并入
 # - 保持控制台子系统（stdout 日志可见，§11.11）
 
+# V1.0 波 1 骨架日（§26.0 冻结项 1）：src/ 显式源清单 → GLOB_RECURSE 自动收集。
+# 背景：三起 LNK2019 事故（PrefabManager/BuildSettingsPanel/InputBindingsPanel 漏入显式清单）。
+# 注意：GLOB 无 CONFIGURE_DEPENDS（§26.7-1 裁定，保持简单）——新增 .cpp 后需重新 configure；
+# imgui/imguizmo 源保持显式（GLOB 只收 src/，防误收第三方源双定义）。
+file(GLOB_RECURSE NOVA_EDITOR_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
+
 add_executable(NovaEditor
-    src/main.cpp
-    src/EditorApplication.cpp
-    src/EditorContext.cpp
-    src/EditorCamera.cpp
-    src/GizmoController.cpp
-    src/DragDrop.cpp
-    src/UndoRedoManager.cpp
-    src/PrefabManager.cpp   # DevOps 补入：C 线波 4 新文件，漏入显式源清单 → LNK2019（9 个 PrefabManager 符号）
-    src/Packager.cpp
-    src/panels/SceneViewPanel.cpp
-    src/panels/HierarchyPanel.cpp
-    src/panels/InspectorPanel.cpp
-    src/panels/EnvironmentPanel.cpp
-    src/panels/ConsolePanel.cpp
-    src/panels/AssetBrowserPanel.cpp
-    src/panels/StatsPanel.cpp
-    src/panels/BuildSettingsPanel.cpp
-    src/panels/InputBindingsPanel.cpp   # V0.5-11：输入绑定面板（整合者补入显式源清单）
-    src/panels/TerrainPanel.cpp         # V0.5-8：地形面板（c6；dock 接线归合波日 c0）
-    src/panels/AnimatorPanel.cpp   # V0.5-9：动画状态机面板（c7 动画；接线归合波日）
+    ${NOVA_EDITOR_SOURCES}
     # Dear ImGui（docking）核心源码
     ${imgui_SOURCE_DIR}/imgui.cpp
     ${imgui_SOURCE_DIR}/imgui_draw.cpp

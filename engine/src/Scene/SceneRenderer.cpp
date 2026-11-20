@@ -280,6 +280,7 @@ void renderSceneInternal(const Scene& scene, const RenderCamera& fallbackCamera,
     // 天空 = 单输出 pass（只写 location 0）：MRT FBO 下切 A0，防唯一输出广播写入法线/
     // 线性深度附件（V0.5-5 SSAO，c3 探针复现；SkyboxRenderer 自身不改 draw buffer 状态）
     glDrawBuffer(GL_COLOR_ATTACHMENT0);
+    NE_GPU_SCOPE("sky");   // V1.0-1 GPU 计时段（§26.0 骨架日；Profiler 关闭 = 零开销）
     SkyboxRenderer::draw(glm::inverse(renderCam.projection * renderCam.view), renderCam.position,
                          scene.skyMode, scene.skyHorizonColor, scene.skyZenithColor,
                          skyCube, scene.skyRotation, scene.skyExposure);
@@ -382,6 +383,7 @@ void renderSceneInternal(const Scene& scene, const RenderCamera& fallbackCamera,
     // 「粒子最后」与冻结钩子点的折中，如需调整由合波日评估一行移动）
     ParticleRenderer::collectAndSubmit(scene, renderCam);
 
+    NE_GPU_SCOPE("shadow");   // V1.0-1 GPU 计时段（§26.0 骨架日；Profiler 关闭 = 零开销）
     if (shadowEnabled) Renderer::drawShadowPass(shadowParams, shadowItems);
     if (scene.showGrid) Renderer::drawGrid(scene.fogColor);
 
@@ -455,7 +457,11 @@ uint32_t SceneRenderer::renderSceneToOutput(const Scene& scene, const RenderCame
     // 后处理（或 RGBA8 直通 blit）→ UI（outLdrFbo 内，§14.3 渲染顺序：HDR→post→UI→显示）
     PostProcess::resize(hdrFbo.width(), hdrFbo.height());
     outLdrFbo.bind();
-    PostProcess::apply(hdrFbo.colorTextureId(), pp);
+    {
+        NE_GPU_SCOPE("post");   // V1.0-1 GPU 计时段（§26.0 骨架日；Profiler 关闭 = 零开销）
+        PostProcess::apply(hdrFbo.colorTextureId(), pp);
+    }
+    NE_GPU_SCOPE("ui");   // V1.0-1 GPU 计时段（§26.0 骨架日；Profiler 关闭 = 零开销）
     UIRenderer::render(scene, outLdrFbo.width(), outLdrFbo.height());
     outLdrFbo.unbind();
     return outLdrFbo.colorTextureId();

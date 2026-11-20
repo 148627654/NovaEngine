@@ -32,6 +32,7 @@ class Renderer {
 public:
     static void init();       // gladLoadGL(glfwGetProcAddress) + 全局状态（深度测试/背面剔除/UBO）
     static void shutdown();
+    static bool isInitialized();   // V1.0 波 1 骨架日（§26.0 冻结项 2）：GL 就绪查询（Mesh/Primitives 守卫用）
     static void beginFrame(const RenderCamera& camera, const DirectionalLightData& light,
                            const glm::vec4& clearColor);    // 清屏 + 填充每帧 UBO
     static void submit(std::shared_ptr<Mesh> mesh, const Material& material,

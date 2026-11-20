@@ -89,3 +89,7 @@
 
 #include <NovaEngine/Serialization/PrefabSerializer.h>
 #include <NovaEngine/Serialization/SceneSerializer.h>
+
+// ===== V1.0 波 1 骨架日（§26.0 冻结项 5，2026-11-20）=====
+#include <NovaEngine/Profiling/Profiler.h>
+#include <NovaEngine/Assets/AssetReferenceScanner.h>

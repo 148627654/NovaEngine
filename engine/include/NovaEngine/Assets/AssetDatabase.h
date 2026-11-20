@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <vector>
 #include <NovaEngine/Audio/AudioClip.h>
+#include <NovaEngine/Profiling/Profiler.h>   // MemorySnapshot（V1.0 波 1 骨架日，§26.0 冻结项 4）
 #include <NovaEngine/Render/Cubemap.h>
 #include <NovaEngine/Render/Material.h>
 #include <NovaEngine/Render/Mesh.h>
@@ -42,6 +43,10 @@ public:
     std::shared_ptr<AudioClip> getAudioClip(const std::filesystem::path& relativePath);
     void clearCache();       // 菜单 Reload Assets（修改文件后手动刷新）
     void releaseUnused();
+    // ===== V1.0 波 1 骨架日（§26.0 冻结项 4）：内存快照统计 =====
+    // 声明已冻结：实现归 cG（波 1，贴图/立方体/材质资产计数）+ cR（波 3 收口校准）；
+    // Profiler::memorySnapshot 转发本接口 + 活动场景统计
+    static MemorySnapshot memorySnapshot();
 
 private:
     AssetDatabase() = default;

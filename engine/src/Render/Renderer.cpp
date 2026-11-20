@@ -2,6 +2,7 @@
 #include <NovaEngine/Render/Shader.h>
 #include <NovaEngine/Render/Texture.h>
 #include <NovaEngine/Core/Logger.h>
+#include <NovaEngine/Profiling/Profiler.h>   // NE_GPU_SCOPE（V1.0 波 1 骨架日，§26.0 冻结项 3）
 
 #include <glad/gl.h>     // 约定：先 glad 后 GLFW（GLFW_INCLUDE_NONE 已定义，顺序本身无冲突）
 #include <GLFW/glfw3.h>
@@ -229,6 +230,8 @@ void setBlinnPhongUniforms(const std::shared_ptr<Shader>& shader,
 }
 
 }  // namespace
+
+bool Renderer::isInitialized() { return s_initialized; }
 
 void Renderer::init() {
     if (s_initialized) return;
@@ -525,6 +528,8 @@ void Renderer::endFrame() {
             glDepthFunc(GL_LEQUAL);
 
             // opaque 普通项照旧绘制（深度照写）
+            // V1.0-1 GPU 计时段（§26.0 骨架日；Profiler 关闭 = 零开销空操作；实例化批在段外，备案）
+            NE_GPU_SCOPE("opaque");
             for (auto it = s_queue.begin(); it != transparentBegin; ++it) {
                 setBlinnPhongUniforms(s_blinnPhong, it->material, it->model, s_gbufferPass);
                 it->mesh->draw();
@@ -552,6 +557,8 @@ void Renderer::endFrame() {
         }
 
         // transparent：标准 alpha 混合 + 禁深度写（深度仍测试，保证被 opaque 正确遮挡）
+        // V1.0-1 GPU 计时段（§26.0 骨架日；Profiler 关闭 = 零开销空操作）
+        NE_GPU_SCOPE("transparent");
         if (s_blinnPhong && transparentCount > 0) {
             s_blinnPhong->bind();
             glEnable(GL_BLEND);

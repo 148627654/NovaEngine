@@ -5,6 +5,7 @@
 #include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>
 #include <NovaEngine/Render/Renderer.h>
+#include <NovaEngine/Profiling/Profiler.h>   // NE_GPU_SCOPE（V1.0 波 1 骨架日，§26.0 冻结项 3：本头即宏入口）
 
 namespace NovaEngine {
 

@@ -1,5 +1,6 @@
 #include <NovaEngine/Render/Mesh.h>
 #include <NovaEngine/Render/Shader.h>
+#include <NovaEngine/Render/Renderer.h>   // isInitialized（V1.0 波 1 骨架日 GL 守卫）
 #include <NovaEngine/Core/Logger.h>
 
 #include <glad/gl.h>   // 先 glad 后 GLFW 是项目约定（GLFW_INCLUDE_NONE 已定义，顺序本身无冲突）
@@ -111,6 +112,14 @@ void copyUniformsToSkinned(GLuint fromProgram, Shader& to) {
 }  // namespace
 
 std::shared_ptr<Mesh> Mesh::create(const MeshData& data) {
+    // ===== V1.0 波 1 骨架日（§26.0 冻结项 2）：GL 就绪守卫 =====
+    // 无 GL 上下文（NovaTests 等无窗口进程）→ nullptr + warn，防 glGen* 空指针崩溃；
+    // 运行期必先 Renderer::init（编辑器/Player 启动路径），行为零变化；
+    // 历史遗留 PlayCycleTest 无 GL 崩溃（KNOWN-ISSUES 2026-11-18 段）就此闭环
+    if (!Renderer::isInitialized()) {
+        Logger::warn("[Mesh] GL 未初始化，跳过网格上传：%s", data.name.c_str());
+        return nullptr;
+    }
     // 蒙皮网格（V0.5-9）：skinnedVertices 非空 → 蒙皮布局路径（§25.0 冻结：空则旧路径零变化）
     const bool skinned = !data.skinnedVertices.empty();
     if ((!skinned && data.vertices.empty()) || data.indices.empty()) {

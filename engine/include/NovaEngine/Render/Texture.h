@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -33,6 +34,9 @@ public:
     int width() const;
     int height() const;
     uint32_t handle() const;
+    // ===== V1.0 波 1 骨架日（§26.0 冻结项 4）：GPU 占用字节 =====
+    // 声明已冻结：实现归 cG（压缩 = 块字节；未压缩 = w*h*4）
+    size_t sizeBytes() const;
 
 private:
     Texture() = default;
