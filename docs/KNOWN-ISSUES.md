@@ -308,3 +308,20 @@ Wave 2 审查无 P0；两条 P1 已修复（见下段「已修复项」）。以
 - **编辑器退出崩溃隐患**：TerrainRenderer::shutdown 未接入 EditorApplication::shutdown——静态地形缓存内 shared_ptr<Mesh> 在 GL 上下文销毁后的静态析构期执行 glDelete → 潜在退出崩溃（harness 复现 exit 139）。已补接（77ca9c2）。
 - **AnimatorPanel 默认关闭**：用户选中带 Animator 对象后"看不到面板"——改为启动默认开启（3528dc2）。
 - **已知限制确认（非 bug，预期管理）**：骨骼本身不渲染（无骨骼可视化，V1.0 可选）；Edit 态粒子为稳态快照（时间冻结）；编辑器保存场景会用完整浮点精度重排数值格式（无损）。
+
+## 2026-11-20 V1.0 波 1 交付与审查记录（代码闭环，GUI 交互项待人工验收）
+
+四条线并行交付 → Reviewer 审查（有条件通过：无 P0，1 P1 + 13 P2）→ 修复 → 合波接线。机器级验证全绿：NovaTests 56 项 Debug/Release 双配置全过、双 exe 冒烟（编辑器 --quit/--headless --import exit 0、Player 12s 稳定）、CI workflow 本地语法校验。
+
+- **P1：NOVA_HAS_BC7ENC 宏缺失（压缩链路整体惰性）**：cG 的 bc7enc 实现被编译期守卫挡住走占位回退，验收 1/3/5 无法达成。修复：engine/CMakeLists.txt 加 PUBLIC 编译定义（cT）。实测：CLI --import 日志 terrain_smoke 512² BC1 1048576→174776 B、test_ibl.hdr 128×64 32768→5480 B，压缩链路端到端生效。
+- **P1（存量引擎 bug）：Transform::localMatrix thread_local 求值顺序**：worldMatrix() 中「父级递归（内部覆写同一 thread_local 静态）× 自身 localMatrix()」两操作数求值顺序不定——父/子同时脏时子级世界矩阵错算（实测 父(10,0,0)+子局部(1,2,3)→(20,0,0)），编辑器遍历父先查故潜伏未爆。修复：localMatrix 改按值返回（无外部调用者，签名变更安全；cT 测试「父先查」规避注释同步失效）。
+- **P1（存量引擎 bug）：setParent keepWorldTransform 跳变**：旧实现把旧世界矩阵直接 decompose 成局部 TRS，仅新父级为恒等时世界位置保持成立。修复：先换算 local = inv(newParentWorld) × world 再 decompose（GameObject.cpp）。
+- **P2-1：BinaryCache corrupt()「损坏即删」不生效**：ifstream 仍打开时 remove 被 Windows 共享冲突静默吞。修复：先读后删（流析构后再 remove）+ 删除失败 warn 可见（cG，含文件锁句柄回归测试）。
+- **P2-2：Profiler::clear() GPU 查询悬挂**：面板 Clear 落在 NE_GPU_SCOPE 段内时查询永不出队，4 帧后槽位复用触发 GL_INVALID_OPERATION。修复：clear() 先补 glEndQuery 收尾（cR，新增回归场景）。
+- **P2-3：memorySnapshot 每帧 per-object 堆分配**：getComponents 按值 vector 拷贝 × 每对象每帧。修复：GameObject::componentCount() 直读计数（主会话）。
+- **P2-5：导入设置 NormalMap 勾选与 colorSpace 交互覆盖**：勾选后再改回 sRGB 会被下次加载静默覆盖。修复：NormalMap 勾选期间锁定 Color Space 下拉（主会话）。
+- **P2-11：FrameRecord::memory 不重置**：异常路径显示旧帧快照。修复：beginFrame 打开新帧槽时重置（cR）。另：P2-6/P2-7（.novameta compression 键锁定 + NormalMap 保真回归 + TestMemory 注释）已由 cT 补用例（新增 10 断言）。
+- **契约偏差批准备案（评审实据通过，已回写 ARCHITECTURE §26）**：① 压缩缓存用 payloadType 4（契约初稿写 3，但 3 已被 TextureRGBFloat 占用，用 3 会误删既有 HDR 缓存）；② 能力查询用 glGetInternalformativ（GL_TEXTURE_COMPRESSED 是纹理对象状态非能力查询，首张导入恒 false 会全量误判）；③ TextureImportSettings 追加 isNormalMap（BC5 自动策略使能 + 修复 KNOWN-ISSUES #5 NormalMap 往返有损）。追认 2 项：Texture::createFromCompressed 新入口、Profiling/ProfilerSections.h 新公共头。
+- **构建环境**：bc7enc FetchContent 与旧 build 目录平台缓存冲突（configure 报 generator platform 不匹配）——--fresh 重配置解决；全新目录/CI（fresh clone）不受影响。
+- **遗留转后续波次**：Packager 收集段不收集 AudioSource.clipPath/normalMap 等贴图（预检会拦缺失但存在资产不进 pak——波 2 #11 发布流水线一并修）；流式 blend∈(0,1) 双分量共享同一 ma_decoder 游标（需听测复现，候选 ma_data_source_splitter）；Texture.cpp 上传路径无 GL 守卫（NovaTests 贴图真值断言前置，后续补）；AssetReferenceScanner 目录级 moveAsset 不重写目录内文件级引用（验收只要求文件级，扩展场景）；resolveAssetAbs 复刻待抽公共入口；Scene.cpp 私有头 include 待提公共入口。
+- **待人工验收（GUI 交互）**：① Profiler 面板（Window→Profiler：录制 10s 帧时间线/点击定位/CPU 段堆叠条/GPU 6 段/内存分类）；② 纹理压缩 A/B 目测 + 导入日志 before/after 数字；③ Reference Checker（Assets 菜单/AssetBrowser 右键：删贴图→扫描命中→打包失败清单→Move Asset 重链）；④ Mixer（Audio 菜单：四滑条实时生效 + Save 后重启保持）；⑤ 音频听测（fadeIn/Out 无爆音、流式 BGM 内存平稳、快速进出 Play 无爆音）；⑥ 重父子 keepWorld 世界位置保持（P1 修复目测）。
