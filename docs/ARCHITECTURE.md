@@ -2874,3 +2874,788 @@ public:
 - 编辑器守卫与序列化回归清单 18 → 25 条（内置组件数）。
 - samples 四脚本 DLL 形态行为与静态链接一致（回归）。
 - 2a 合波先跑一次全量回归，2b 合波再跑一次；两次均通过才推送（AGENTS.md 流程）。
+
+---
+
+# V1.0 波 1 契约（2026-11-20 冻结）
+
+> 范围：V1.0-9（测试框架+CI）/ #1（Profiler 完整版）/ #6（纹理压缩与批量导入）/ #7（资产引用完整性）/ #8（音频完善）。
+> 分工：cT（V1.0_Coder_Tooling，#9）/ cR（V1.0_Coder_Runtime，#1）/ cG（V1.0_Coder_Rendering，#6）/ cA（V1.0_Coder_AssetsAudio，#7+#8）四线并行；共享文件窗口 = 骨架日 + 合波日。V1.0 无专职 c0，整合职责由主会话执行（V0.5 波 2 合波「主会话执行」同款先例）。
+> 本节号承接 §25，新增 §26–§28 三章（对应 V1.0 三个波）；每节含：文件落点、公共签名（头文件级）、序列化键名、验收要点、风险与回滚。
+
+## 26.0 总则：三波总览、所有权分区、冻结头总清单与第三方库裁定
+
+**三波总览（依赖铁律）**：
+
+| 波 | 功能（编号） | 线 | 依赖排序理由 |
+|---|---|---|---|
+| 波 1（约 1.5 周） | #9 / #1 / #6 / #7 / #8 | cT / cR / cG / cA×2 | #9 测试先行（回归防护覆盖后续全部波，历史事故点转测试）；#1 内存统计是 #13 前置；#6 压缩产物供 #1 内存面板展示（同波骨架日定接口）；#7 打包预检给 #11 让路；#8 为 #10 提供 BGM/总线 |
+| 波 2（约 2 周） | #2 / #3 / #4 / #5 / #11 | cR×2 / cG×2 / cT | #2 异步加载为架构级变化（ROADMAP §10-D），接口先冻结再实现；#3 与 #2 同域（cR 域内顺序：#3 先 M 级速赢 → #2 L 级）；#4 改后处理链、#5 改材质提交路径——渲染共享文件最密集，骨架日一次性化解；#11 依赖 #7（预检，波 1 已交付）与 build.novabuild 多场景收集（静态扫描，不等 #2 实现完成） |
+| 波 3（约 1.5–2 周） | #13 / #12 / #10 / #14 | cR / cT / cC×2 | #13 审计 #1（内存统计）与 #2（场景切换）的产物；#10 依赖 #1/#2/#3/#8/#11 全部合波后开工；#14 最后（以实际代码为准） |
+
+**波 1 文件所有权严格分区（并行安全前提）**：
+
+| 线 | 目录/文件 | 说明 |
+|---|---|---|
+| cT | tests/、cmake/、.github/workflows/ | tests/CMakeLists.txt 重写；Dependencies.cmake 增补 Catch2 + bc7enc_rdo（裁定见下） |
+| cR | engine/include\|src/Profiling/（新目录全部）、engine/src/Scene/Scene.cpp（update 测量段）、editor/src/panels/ProfilerPanel.h/.cpp（新增） | Scene.cpp 波 1 内 cR 独占（其余线不碰） |
+| cG | engine/include\|src/Assets/{TextureLoader,TextureMeta,BinaryCache,AssetDatabase}.h/.cpp、engine/include\|src/Render/Texture.h/.cpp、editor/src/panels/AssetBrowserPanel.cpp（导入设置压缩下拉） | 纹理压缩全链路 |
+| cA | engine/include\|src/Assets/AssetReferenceScanner.h/.cpp（新增）、engine/include\|src/Audio/*、engine/include\|src/Scene/AudioSource.h/.cpp、editor/src/Packager.cpp（打包预检）、editor/src/panels/{ReferenceCheckerPanel,MixerPanel}.h/.cpp（新增） | AudioSource 为 Scene/ 目录波 1 唯一跨目录特例；其余 Scene/ 文件一律不动 |
+| 主会话（骨架日/合波日） | 见下方清单 | 唯一合法触碰共享文件者 |
+
+**骨架日清单（波 1 第 0 天，主会话执行，一次性完成）**：
+1. editor/CMakeLists.txt：`src/*.cpp` + `src/panels/*.cpp` 显式清单 → `file(GLOB_RECURSE ...)` 收敛为自动收集（imgui/imguizmo 源保持显式）——终结三起 LNK2019 类事故（PrefabManager/BuildSettingsPanel/InputBindingsPanel 均已备案）；新面板 .cpp 从此自动收录。
+2. Render/Mesh.h 的 create 与 Primitives：GL 就绪守卫（glad 未加载 → 返回 nullptr + Logger::warn）——运行期行为零变化（运行期必先 Renderer::init）；历史遗留 PlayCycleTest 无 GL 崩溃（KNOWN-ISSUES 2026-11-18 段）就此闭环。
+3. Scene/SceneRenderer.h：GPU timer 查询包裹宏 `NE_GPU_SCOPE(name)` 定义 + renderSceneToOutput 内 6 处 pass 包裹（shadow/sky/opaque/transparent/post/ui；空实现默认 = 关闭时零开销）。GL 不支持计时查询 → 段恒 0（Profiler 面板显示 "n/a"）。
+4. Assets/AssetDatabase.h：`static MemorySnapshot memorySnapshot();` 声明（MemorySnapshot 定义于 Profiling/Profiler.h，assets→profiling include 合法）；Render/Texture.h：`sizeBytes()` 声明（cG 实现）。
+5. NovaEngine.h 伞头追加 include（Profiling/Profiler.h、Assets/AssetReferenceScanner.h）。
+6. 骨架日结束后共享文件冻结，任何 Coder 不得再触碰（越界改动 = 合波回退，§24.0/§25.0 同纪律）。
+
+**合波日清单（主会话）**：面板 dock 接线（ProfilerPanel/ReferenceCheckerPanel/MixerPanel）+ 菜单接线（Window→Profiler、Assets→Reference Checker、Audio→Mixer）、AssetBrowser 右键入口（Reference Checker）、EditorApplication::run 与 player/src/main.cpp 的 Profiler beginFrame/endFrame + pushSection 接线、编辑器守卫与序列化回归清单核对（内置组件数 25 不变——波 1 无新组件）、NovaTests 跑绿、双 exe 冒烟。
+
+**V1.0 冻结接口变更总表（三波合计；签名见各子节，均为「追加式」或「新入口」，既有签名零变更）**：
+
+1. Render/Mesh.h + Primitives：GL 就绪守卫（波 1 骨架日；运行期零变化）
+2. Scene/SceneRenderer.h：NE_GPU_SCOPE 宏包裹（波 1 骨架日，空实现默认）；+renderScenesToOutput 新入口（波 2 骨架日；renderSceneToOutput/renderScene 保留转发）
+3. Render/Texture.h：+sizeBytes()（波 1，cG 追加式）
+4. Assets/AssetDatabase.h：+memorySnapshot()（波 1 骨架日声明、cG 实现、波 3 cR 收口校准）
+5. Assets/BinaryCache.h：+loadTextureCompressed/saveTextureCompressed（波 1，追加式 payloadType 3）
+6. Assets/TextureMeta.h：TextureImportSettings +compression 字段（波 1，追加式缺省 Auto）
+7. Audio/AudioEngine.h：+AudioBus/+setBusVolume/busVolume/playStreaming/setBus/fadeIn/fadeOut/loadSettings/saveSettings（波 1，追加式）
+8. Scene/AudioSource.h：+bus/stream/fadeInSeconds/fadeOutSeconds（波 1，追加式缺省零值）
+9. Scene/SceneManager.h：+loadSceneAsync/unloadScene/loadedScenes/updateAll/setSceneParam/getSceneParam/clearSceneParams + SceneUnloaded 事件（波 2，追加式）
+10. Assets/AsyncLoader.h：新增（波 2）
+11. Physics/PhysicsWorld.h：+raycastAll/overlapSphere/overlapBox/setLayerName/layerName/setCollisionEnabled/collisionEnabled（波 2，追加式）；PhysicsTypes.h：RaycastHit +hitObject（追加式）
+12. Scene/Collider.h：+layer/friction/restitution（波 2，追加式缺省兜底）
+13. Scene/CharacterController.h：新增组件（波 2，内置组件数 25→26）
+14. Scene/Scene.h：+physicsCollisionMatrix/physicsLayerNames（波 2，environment.physics 段）
+15. Render/PostProcess.h：PostProcessSettings +lutPath/lutIntensity/dofEnabled/dofFocusDistance/dofAperture/vignetteEnabled/vignetteIntensity/grainEnabled/grainAmount（波 2，追加式缺省全关）；PostProcess +setLut（追加式）
+16. Render/Material.h：+shaderOverride/shaderGraphPath（波 2 骨架日；operator== 扩展含 shaderGraphPath）
+17. 新增头：Profiling/Profiler.h、Assets/AssetReferenceScanner.h（波 1）；Render/ColorGrading.h、ShaderGraph/{ShaderGraphAsset,ShaderGraphCodeGen}.h（波 2）
+18. GLSL：改 post_combine.frag（LUT/vignette/grain 段，波 2 骨架日）；新 post_dof.frag；Shader Graph 生成 shader 复用 blinn_phong.vert + 引擎 uniform 契约
+19. CMake：editor/CMakeLists.txt src/ 改 GLOB_RECURSE（波 1 骨架日）；Dependencies.cmake +catch2 v3.16.0 +bc7enc_rdo（波 1，cT）；tests/CMakeLists.txt 重写（NovaTests + ctest）；project VERSION 0.1.0 → 1.0.0 + cmake/version.rc.in + editor/player RC 接入（波 2 骨架日/合波，cT）
+20. 序列化 schema：场景 JSON version 保持 4（三波全部纯增量——新字段缺省兜底、旧文件往返无损、未知组件 warn 跳过）；新资产类型 assets/shadergraphs/*.novashadergraph（v1）、assets/audio/audio-settings.novaaudio（v1）；.novameta +compression 字段（增量）；build.novabuild 保持 v1；BinaryCache 新增压缩 payloadType（版本不 bump，缓存键扩展）；.cube 为数据文件非资产类型
+21. Packager：buildPlayer 开头加引用预检（波 1，cA）；+buildRelease 新入口（波 2，cT；buildPlayer 保留语义不变）
+
+**通用纪律**：新组件接入序列化零改动 SceneSerializer（ComponentRegistry 按名分发 + NE_REGISTER_COMPONENT 自注册，组件 .cpp 末尾放宏）；engine/CMakeLists.txt 为 GLOB_RECURSE（新 .cpp 自动收录）；editor/CMakeLists.txt GLOB 化后新面板自动收录（改 CMake 后需重 configure）；无新组件波次不更新守卫数；渲染改动必须附统计层数字（ROADMAP §12-7 纪律）。
+
+**第三方库裁定（V1.0 共 2 个新依赖，均已批准）**：
+1. **Catch2 v3.16.0（V1.0-9，批准）**：BSL-1.0；FetchContent 一条命令，Catch2WithMain target + catch_discover_tests 接 ctest。自研手写断言宏成本 1–2 天，但参数化/分区/报告器/IDE 集成/CI 集成全部缺失且需长期维护——集成成本远低于自研。接入：Dependencies.cmake `FetchContent_Declare(catch2 GIT_REPOSITORY https://github.com/catchorg/Catch2.git GIT_TAG v3.16.0 GIT_SHALLOW TRUE)` 并入 MakeAvailable 列表（tag 2026-09 发布，DevOps 配置期核实）。
+2. **bc7enc_rdo（V1.0-6，批准）**：MIT/Unlicense 双许可，单源文件家族覆盖 BC1–BC7 编码（含 RDO）；仓库无 tag → pin master commit（stb 同款纪律，DevOps 核实写入）。否决项：自研 BC7（64 模式搜索空间，正确实现 >2 人周且质量难达标）、DirectXTex（DX/DDK 依赖重）、stb_dxt（无 BC7）、NVTT（体积大）。接入：Populate 成静态库，**仅编 bc7enc.cpp + rgbcx.cpp**（ISPC 加速器与 lodepng 不编）。
+3. 其余 12 项全部自研或消费既有库能力：miniaudio 内置 fade（ma_sound_set_fade_in_milliseconds）与文件流式播放（ma_sound_init_from_file）、Jolt CharacterVirtual（§27.2）均属既有依赖的能力消费，非新库。
+
+## 26.1 测试框架 + CI（cT，V1.0-9）
+
+**文件落点**：tests/CMakeLists.txt（重写）、tests/*.cpp（PlayCycleTest.cpp 迁入）、cmake/Dependencies.cmake（Catch2 段）、.github/workflows/ci.yml（新增）。
+
+**tests/CMakeLists.txt 目标形态**：
+
+```cmake
+add_executable(NovaTests
+    TestMain.cpp TestScene.cpp TestSerialization.cpp TestAssets.cpp TestMath.cpp
+    TestInput.cpp TestSaveGame.cpp TestSceneManager.cpp TestMemory.cpp)   # 或 GLOB tests/*.cpp（排除实现头）
+target_link_libraries(NovaTests PRIVATE NovaEngine Catch2::Catch2WithMain)
+catch_discover_tests(NovaTests)   # ctest 注册（本地: ctest --test-dir build -C Debug）
+```
+
+- PlayCycleTest 原用例 catch 化迁入 TestScene.cpp；原 PlayCycleTest target 删除（「用后即删」注释兑现）。
+- **无 GL 上下文纪律**：测试进程不 init GL——Mesh 上传路径靠 §26.0 骨架日 GL 守卫跳过；场景往返测试用含 MeshRenderer 的场景 JSON（onDeserialize 的 GPU 上传自动降级，材质/meshPath 字段语义照常验证）。
+- **测试 harness 必须 try/catch 防弹窗**（2026-11-19 c7 教训备案：deserialize 类型不符字段抛 type_error 未捕获 → 测试进程 abort 弹窗挂死）。
+
+**覆盖清单（对照 KNOWN-ISSUES 历史事故点逐条转测试）**：
+1. 序列化往返：ComponentRegistry 全部内置组件类型逐一（当前 25 项）——「meshPath 字段名」事故（V05Wave2Demo 全白）转成正反用例；未知组件 warn 跳过；version 1/2/3/4 旧文件读取兜底。
+2. 场景操作：createGameObject 父指针（2026-11-16 层级拍平事故）、setParent/重父子、destroy 队列、Play 快照往返（原 PlayCycleTest）。
+3. 资产缓存：BinaryCache 载荷往返 + 损坏文件删除重导 + 缓存键稳定性；meta serialize 稳定文本。
+4. 数学：Frustum AABB 相交（含边界）、退化用例。
+5. InputMap 默认绑定往返；SaveGame 原子写与浅校验；SceneManager 入队/切换/DDOL 迁移（无 GL 可跑）。
+6. 协程基础推进/销毁回收；事件 swap-flush。
+7. 崩溃防御族：畸形 JSON（无 Transform）、nlohmann 类型不符字段（safeGet 路径）。
+
+**CI（.github/workflows/ci.yml）**：push/PR 触发 windows-latest；`cmake -S . -B build`（VS2022 生成器，Python 已预装）→ Debug 全量构建 → `ctest -C Debug --output-on-failure` → Release 全量构建 → 失败时归档 Logs/。仓库 git@github.com:148627654/NovaEngine.git。**注意**：CI 机器无 GPU——NovaTests 不得依赖 GL（纪律见上）；编辑器/Player 完整冒烟由 DevOps 本机执行（CI 只跑 NovaTests）。
+
+**验收要点（cT，照抄细化 ROADMAP §7-9）**：
+1. CI 全绿（构建+测试）：push 后 workflow 完成、Debug/Release 双构建零错误、NovaTests 全部通过。
+2. 序列化往返测试覆盖全部组件类型（25 项逐一）；破坏性改动被 CI 拦截（故意破坏一处字段名 → 对应用例红）。
+3. 本地 ctest 全绿；历史事故点用例 ≥ 6 族可对照 KNOWN-ISSUES 事故条目。
+4. 不破坏本地构建（DevOps 双配置验证）。
+
+**风险：低。回滚**：删 tests/ 与 workflow；Dependencies.cmake 删 catch2 段。**序列化**：无。
+
+## 26.2 Profiler 完整版（cR，V1.0-1）
+
+**文件落点**：engine/include/NovaEngine/Profiling/Profiler.h + engine/src/Profiling/Profiler.cpp（新目录，独占）；editor/src/panels/ProfilerPanel.h/.cpp（新增）；Scene.cpp 测量段（波 1 独占）；SceneRenderer GPU 包裹（骨架日）。
+
+```cpp
+// engine/include/NovaEngine/Profiling/Profiler.h
+namespace NovaEngine {
+
+// 内存快照（V1.0-1；V1.0-6 填贴图压缩字节、V1.0-13 收口校准）
+struct MemorySnapshot {
+    size_t meshVertexBytes = 0;     // 顶点+索引字节（MeshData 上传时累计）
+    size_t textureBytes = 0;        // GPU 贴图占用估算：未压缩 = w*h*4；压缩 = 块数据字节（Texture::sizeBytes 汇总）
+    size_t audioBytes = 0;          // AudioClip 解码 PCM 字节（stream=true 的流式源不计入）
+    size_t cubemapBytes = 0;
+    size_t materialAssetCount = 0;
+    size_t objectCount = 0, componentCount = 0;   // 活动场景统计
+    size_t loadedSceneCount = 0;    // V1.0-2 落地后生效（波 1 恒 1）
+};
+
+// 帧记录（环形缓冲）
+struct FrameRecord {
+    uint64_t frameNumber = 0;
+    float frameMs = 0.0f;
+    float sectionMs[kMaxSections];      // 定长数组（见下）；未上报 = -1
+    float gpuPassMs[kMaxGpuPasses];     // shadow/sky/opaque/transparent/post/ui；延迟 3 帧回读
+    MemorySnapshot memory;
+};
+
+class Profiler {
+public:
+    static constexpr uint32_t kCapacity = 600;   // 10 秒 @60FPS（sizeof(FrameRecord) 实现时自测并写入汇报）
+    static constexpr int kMaxSections = 64;
+    static constexpr int kMaxGpuPasses = 6;
+    static void beginFrame();        // 帧首（Stats::beginFrame 之后）
+    static void endFrame();          // 帧末（swapBuffers 前）
+    static void pushSection(const char* name, float ms);   // 命名分段；同名累加；名字表帧末定型
+    static const FrameRecord* frame(uint32_t index);       // 0 = 最旧；越界 nullptr
+    static uint32_t frameCount();
+    static uint32_t capacity();
+    static void clear();
+    static MemorySnapshot memorySnapshot();   // 转发 AssetDatabase::memorySnapshot + 活动场景统计
+    static float lastOverheadMs();   // 自身开销自测（验收 <1ms 证据）
+};
+}
+```
+
+- **CPU 火焰图**：两档——模块档（update/physics/render/ui 由主循环 pushSection）与脚本档（Scene::update 广播循环内按脚本类型名累计 onUpdate 耗时，`pushSection("script:" + 类名, ms)`；kMaxSections=64 上限，超出合并为 "script:其他"）。宏 `NE_PROFILE_SCOPE(name)` 供引擎内部随手插桩。
+- **GPU timer**：GL_TIME_ELAPSED query 环形（延迟 3 帧回读防管线停顿）；每帧最多 6 段（骨架日包裹点）。
+- **ProfilerPanel**：帧时间线（600 帧环形折线，点击定位某帧）+ 该帧 CPU 段条形图（火焰图简版：横向堆叠条）+ GPU 段 + 内存分类表；F8 是 Stats，Profiler 走 Window 菜单 + 工具栏按钮（接线合波日）。
+- **接线**：EditorApplication::run 与 player/main.cpp 的 beginFrame/endFrame + pushSection 调用点（合波日，两处）。
+
+**序列化**：无（纯运行时数据，不进场景 JSON）。
+
+**验收要点（cR，照抄细化 ROADMAP §7-1）**：
+1. 录制 10 秒帧数据定位到最慢脚本函数：demo 场景挂 5 个不同耗时脚本，Profiler 面板可见脚本名分段耗时排序，与代码逻辑一致。
+2. GPU 各 pass 耗时可见（shadow/opaque/post 数值随场景复杂度变化；不支持计时查询的机器段显示 n/a 不崩溃）。
+3. 内存分类统计与实际一致：载入 10 张 1024² 贴图 → textureBytes ≈ 40MB（未压缩）或压缩后显著下降（V1.0-6 联动）；二次切换场景后数字回落。
+4. Profiler 自身开销 < 1ms（lastOverheadMs 自测 + Stats 帧时间 A/B）。
+5. 统计层（F8）与 Profiler 共存无冲突。
+
+**风险：低-中。回滚**：删 Profiling/ 目录 + 面板 + 骨架日钩子还原（钩子空实现默认即旧行为）。**shader**：无。
+
+## 26.3 纹理压缩与批量导入（cG，V1.0-6）
+
+**文件落点**：engine/include|src/Assets/{TextureLoader,TextureMeta,BinaryCache,AssetDatabase}.h/.cpp、engine/include|src/Render/Texture.h/.cpp（sizeBytes）、editor/src/panels/AssetBrowserPanel.cpp（导入设置模态压缩下拉）；cmake/Dependencies.cmake 由 cT 加 bc7enc 段（§26.0）。
+
+**压缩格式裁定**：BC7（RGBA）/ BC1（RGB）/ BC5（RG 法线）。自动策略：meta compression=Auto 时——法线贴图（.novameta colorSpace=Linear 且用途为法线）→ BC5；贴图含有效 alpha 通道 → BC7；其余 → BC1。GPU 能力查询（GL_TEXTURE_COMPRESSED 下查 GL_COMPRESSED_RGBA_BPTC_UNORM / GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM / GL_COMPRESSED_RGBA_S3TC_DXT1_EXT）：不支持所选 → 逐级回退（BC7→BC1→未压缩 RGBA8），warn 一次。能力标志进缓存键（GPU 能力变化 → 键变自动重导）。
+
+**接口（追加式）**：
+
+```cpp
+// Assets/TextureMeta.h 追加
+enum class TextureCompression { Auto, None, BC1, BC7, BC5 };
+struct TextureImportSettings {
+    // ...既有字段不变...
+    TextureCompression compression = TextureCompression::Auto;   // 追加（.novameta 文本增量，旧 meta 读缺省 Auto）
+};
+
+// Assets/BinaryCache.h 追加（压缩载荷 payloadType 3）
+// [format:u8][w:u32][h:u32][mipCount:u8][blockBytes:u64][块数据]
+// format: 0=BC7 1=BC1 2=BC5；mip 链由编码器逐级生成（压缩纹理不可 glGenerateMipmap）
+static bool loadTextureCompressed(const std::string& key, int& outFormat, int& outW, int& outH,
+                                  std::vector<uint8_t>& outBlocks);
+static bool saveTextureCompressed(const std::string& key, int format, int w, int h,
+                                  const std::vector<uint8_t>& blocks);
+// 缓存键 = makeKey(源字节, meta 文本 + ";comp=<format>;caps=<能力标志>")（makeKey extraText 语义不变）
+
+// Render/Texture.h 追加
+size_t sizeBytes() const;   // 压缩 = 块字节；未压缩 = w*h*4
+```
+
+- 编码时机：AssetDatabase::getTexture 导入路径——解码 RGBA8 →（Auto 且 GPU 支持）→ bc7enc 编码（BC7 高质模式）→ 压缩缓存落盘 → glCompressedTexImage2D 上传（含 mip 链）；meta compression=None 或 GPU 不支持 → 既有 RGBA8 路径零变化。
+- **不做**：不产出 .dds 资产文件（压缩产物 = BinaryCache 缓存，延续「二进制缓存仅是解码产物缓存」原则 ROADMAP §1.3-3）；不做运行时压缩（全部离线）。
+- 批量导入：CLI --import 全量导入即全量压缩重缓存（改 meta compression 后缓存键变 → 自动重导，无需新 CLI 参数）。
+- Profiler 联动：textureBytes 上报压缩后字节（「纹理内存统计」= Profiler 面板内存分类 + 导入日志逐贴图 before/after 字节）。
+- AssetBrowser 导入设置模态加 compression 下拉（Auto/None/BC1/BC7/BC5 + 说明）。
+
+**序列化键名**：.novameta 追加 `"compression": "auto"|"none"|"bc1"|"bc7"|"bc5"`（旧文件缺省 auto，零警告）。场景 JSON 不变。
+
+**验收要点（cG，照抄细化 ROADMAP §7-6）**：
+1. 压缩后 GPU 内存显著下降（Profiler 可见）：10 张 1024² 带 alpha 贴图 textureBytes 从 ≈40MB 降至 ≈13MB（BC7）。
+2. 画质损失可接受：压缩前后同屏 A/B 目测（BC7 高质模式）；法线贴图 BC5 后光照无明显变差。
+3. 批量导入时间可接受：CLI --import 全量（demo 全部资产）耗时记录；二次导入命中缓存 <2s。
+4. 压缩格式不支持时自动回退：强制 None / 模拟不支持（能力标志注入）→ RGBA8 路径照常，warn 一次。
+5. 二进制缓存兼容：旧 RGBA8 缓存照常读取（payloadType 0 不动）；损坏压缩缓存删除重导。
+
+**风险：中。回滚**：压缩路径默认 Auto 且回退链完整——最坏情况 = 未压缩旧行为；删 bc7enc 段 + 压缩分支即全回滚。**shader**：无。**新库**：bc7enc_rdo（已批准，§26.0）。
+
+## 26.4 资产引用完整性（cA，V1.0-7）
+
+**文件落点**：engine/include/NovaEngine/Assets/AssetReferenceScanner.h + engine/src/Assets/AssetReferenceScanner.cpp（新模块，独占）；editor/src/Packager.cpp（预检，波 1 内 cA 独占）；editor/src/panels/ReferenceCheckerPanel.h/.cpp（新增）。
+
+```cpp
+// engine/include/NovaEngine/Assets/AssetReferenceScanner.h
+namespace NovaEngine {
+struct AssetReference {
+    std::string assetPath;    // 项目相对路径（被引用的资产）
+    std::string kind;         // "mesh"/"texture"/"materialAsset"/"cubemap"/"audioClip"/"prefab"/"scene"/"font"/"terrainHeightmap"/"lut"/"shaderGraph"
+    std::string fromFile;     // 引用方文件（场景/材质/预制体/build 列表路径）
+};
+
+class AssetReferenceScanner {
+public:
+    static std::vector<AssetReference> scanScene(const std::filesystem::path& scenePath);
+    static std::vector<AssetReference> scanMaterial(const std::filesystem::path& matPath);
+    static std::vector<AssetReference> scanPrefab(const std::filesystem::path& prefabPath);  // 递归嵌套，深度上限 8 防环（§22 既有纪律）
+    static std::vector<AssetReference> scanProject();   // assets/ 全量：场景+.novamat+.novaprefab+build.novabuild
+    // 移动资产：磁盘移动 + 全项目引用重写（场景 JSON/.novamat/.novaprefab/build.novabuild）
+    // 重写保序无损（nlohmann::json 读改写，键序 std::map 稳定；浮点精度既有「无损重排」备案）；
+    // 返回被重写的引用数；移动失败/目标已存在 → -1 + Logger::error
+    static int moveAsset(const std::filesystem::path& from, const std::filesystem::path& to);
+    // 存在性判定经 AssetStream（pak 命中优先、磁盘回退——与既有资产读取语义一致）
+};
+}
+```
+
+- **覆盖形态清单（cA 先出清单再实现，V1.0_Coder_AssetsAudio 工作流程要求）**：场景 JSON 路径字段全集——MeshRenderer.mesh、Material{albedoMap/normalMap/metallicMap/roughnessMap/emissionMap}Path、materialAssetPath、skyCubemapPath、AudioSource.clipPath、PrefabInstance.prefabPath、Terrain.heightmapPath、Text.fontPath；.novamat 贴图路径；.novaprefab 递归全部路径；build.novabuild 场景条目。**V1.0-4/5 新路径（lutPath/shaderGraphPath）波 2 合波日由主会话按本节 kind 约定补两行扫描（契约预留 kind 常量，实现留扩展位）**。
+- **打包前完整性检查（并入 V0.5-1）**：Packager::buildPlayer 开头调用 scanScene(场景)+逐引用存在性检查 → 任一缺失：逐条 Logger::error（含引用方文件）→ 返回 false 不产出 pak——「打包遇缺失引用直接失败并列出清单」。
+- ReferenceCheckerPanel：扫描按钮（全项目）+ 缺失列表（kind/缺失路径/引用方，双击打开引用方文件定位）+ Move Asset 对话框（移动/重命名 + 全项目重链）+ 修复后复扫。
+
+**序列化**：无新 schema（只读扫描 + 重写时保持原 JSON 结构；重写不 bump version）。
+
+**验收要点（cA，照抄细化 ROADMAP §7-7）**：
+1. 删除贴图后扫描器列出所有引用缺失场景（含 .novamat/.novaprefab 内部引用，逐条 kind 正确）。
+2. 移动资产后引用自动更新：移动一张贴图（改名+换目录）→ 全部引用方 JSON 路径更新 → 场景打开无 warn、画面不变。
+3. 打包遇缺失引用直接失败并列出清单：删一个被引用贴图 → buildPlayer 返回 false、日志逐条、不产出 pak。
+4. 扫描/重写不损坏文件：全项目往返扫描零误报（所有存在的引用零告警）。
+
+**风险：低-中。回滚**：预检钩子删一行；扫描器独立模块。**注意**：重写引用方文件是「编辑资产文件」——必须在扫描通过且用户确认后执行（面板交互：先扫后修），不静默改文件。
+
+## 26.5 音频完善（cA，V1.0-8）
+
+**文件落点**：engine/include|src/Audio/AudioEngine.h/.cpp（追加式）、engine/include|src/Scene/AudioSource.h/.cpp（追加字段）、editor/src/panels/MixerPanel.h/.cpp（新增）。AudioSource 为 Scene/ 目录波 1 唯一跨目录特例（§26.0 表）。
+
+```cpp
+// engine/include/NovaEngine/Audio/AudioEngine.h 追加（既有签名零变更）
+enum class AudioBus : uint8_t { Master = 0, Music, Sfx, Ui, Count };   // 4 总线固定
+// 总线音量：Master 与既有 setMasterVolume 同源（同一变量，两入口等价）
+static void setBusVolume(AudioBus bus, float v);
+static float busVolume(AudioBus bus);
+// 流式播放：miniaudio ma_sound_init_from_file（文件流式解码，不整载 PCM）;
+// relPath 经 AssetStream（pak 兼容）；失败返回 0
+static AudioHandle playStreaming(const std::filesystem::path& relPath, AudioBus bus,
+                                 float volume, bool loop, float spatialBlend,
+                                 float minDistance, float maxDistance);
+static void setBus(AudioHandle h, AudioBus bus);           // 播放中改总线
+static void fadeIn(AudioHandle h, float seconds);          // miniaudio 内置 ma_sound_set_fade_in_milliseconds
+static void fadeOut(AudioHandle h, float seconds);         // （库能力消费，非新依赖）
+// 音频设置持久化（assets/audio/audio-settings.novaaudio，version 1）：
+//   { "version":1, "master":1.0, "buses":{ "music":1.0, "sfx":1.0, "ui":1.0 } }
+// 缺失/损坏 → 内置默认 + warn，不崩溃
+static bool loadSettings(const std::filesystem::path& relPath);
+static bool saveSettings(const std::filesystem::path& relPath);
+```
+
+```cpp
+// engine/include/NovaEngine/Scene/AudioSource.h 追加字段（序列化缺省兜底）
+int bus = 0;                 // AudioBus 枚举值（0=Master）
+bool stream = false;         // true = 流式播放（长 BGM）；false = 既有整载 PCM 路径
+float fadeInSeconds = 0.0f, fadeOutSeconds = 0.0f;   // 0 = 无淡变
+```
+
+- 播放路径：AudioSource::Play——stream=false 走既有 play(clip)；stream=true 走 playStreaming（clipPath 直接给路径，不预解码 AudioClip、不进 m_audioClipCache）；onAwake/析构 stop 语义不变（流式句柄同池管理）。fadeOutSeconds>0 时 Stop 前先 fadeOut（延迟 stop 的实现自选，验收只认「无爆音」）。
+- 接线：AudioEngine::init 后编辑器 main 与 player main 调用 loadSettings（缺省路径 assets/audio/audio-settings.novaaudio；缺失自动生成默认文件——与 .novameta 同纪律；两处接线归合波日）。
+- **与 V1.0-12 编辑器设置的边界（冻结裁定）**：音频设置 = 引擎级（Player 可读，随项目 assets/ 走、随 pak 打包）；编辑器偏好（吸附值/主题/快捷键/最近文件）= 编辑器级（%APPDATA%/NovaEngine/editor-settings.json，波 3）。两者不合并。
+- MixerPanel：Master/Music/Sfx/Ui 四滑条 + Save/Reload；调节实时生效（setBusVolume 即时应用于活动句柄）。
+
+**序列化键名**：AudioSource 组件段追加 `"bus":0,"stream":false,"fadeInSeconds":0.0,"fadeOutSeconds":0.0`（旧文件缺省零值，场景 JSON version 4 不变）。新资产类型：assets/audio/audio-settings.novaaudio（version 1）。
+
+**验收要点（cA，照抄细化 ROADMAP §7-8）**：
+1. 音量总线调节实时生效：MixerPanel 拉 SFX 滑条 → 场景中音效即时变音量；Master 与 setMasterVolume 行为一致。
+2. 长 BGM 流式播放内存平稳：≥3 分钟音频，stream=true 时 Profiler audioBytes 不含该 BGM PCM（对比 stream=false 的整载峰值），播放无卡顿。
+3. 淡入淡出无爆音：fadeIn/fadeOut 2s 循环听测；快速进出 Play 无爆音（既有验收项回归）。
+4. 设置保存：改总线音量 → Save → 重启编辑器 → 音量保持（audio-settings.novaaudio 往返）。
+
+**风险：低。回滚**：追加式接口，删面板与字段即回滚。**注意**：stream=true 的 AudioClip 不再进 m_audioClipCache（避免双路径缓存语义混乱）。
+
+## 26.6 波 1 整体验收（合波后）
+
+- 合波构建：Debug 全量零错误零第一方警告；Release 构建通过；双 exe 冒烟（编辑器守卫 25 条 + Player 场景加载）。
+- NovaTests 全绿（本地 ctest）；CI workflow 文件本地语法校验（首次 push 后验证 runner 侧）。
+- Profiler 面板：demo 录制 10s 帧数据、脚本分段可见；内存分类数字合理。
+- 纹理压缩：Profiler textureBytes 压缩前后对比数字；CLI --import 退出码 0 且二次 <2s。
+- 引用扫描 + 打包预检：删贴图 → 扫描命中 + buildPlayer 失败清单。
+- 混音器：总线滑条实时生效；音频设置往返。
+- 全量回归 V0.2/V0.3/V0.5 验收清单（重点：Play 快照恢复、序列化 v4 往返、热重载 DLL、后处理双路径）。
+- 统计层数字随波记录（ROADMAP §12-7 纪律）。
+
+## 26.7 波 1 风险（给 DevOps/Reviewer）
+
+1. editor/CMakeLists.txt GLOB 化：imgui/imguizmo 源保持显式——GLOB 只收 src/，若误收 imgui 源会双定义（评审核对）；GLOB 无 CONFIGURE_DEPENDS（保持简单，新文件需重 configure——DevOps 知悉）。
+2. 压缩缓存键含能力标志：getTexture 每次导入查 GL 压缩能力——缓存键稳定性测试必含（§26.3 验收 5）；BC7 编码耗时（1024² 约 0.5–2s）首次导入可接受，DevOps 记录数字。
+3. Profiler 环形缓冲：kCapacity=600 时 sizeof(FrameRecord) ≈ 330B → 总量 ≈ 200KB，可接受；cR 实现时用 sizeof 自测写入汇报（若 >5MB 回报 Architect 重议）。
+4. GPU timer 延迟回读：query 对象复用环形，未就绪跳过（不阻塞）；不支持扩展 → 段恒 0 且面板标 n/a。
+5. AudioSource.stream 与热重载/序列化共存：追加字段缺省零值 → 旧场景行为零变化（回归点）。
+6. 打包预检的路径归一：扫描器 kind/路径与 Packager 收集清单必须同口径（相对项目根、正斜杠、无 ".."）——评审对照。
+7. Catch2/bc7enc FetchContent 在无网环境配置失败——既有全部依赖同纪律（首次配置需网），无新增风险。
+8. NovaTests 链接 NovaEngine 含 Jolt：测试进程无 GL 但 PhysicsWorld 构造起 job 线程——测试退出须完整析构 Scene，防悬挂线程挂死 ctest。
+
+---
+
+# V1.0 波 2 契约（2026-11-20 冻结）
+
+> 范围：V1.0-2（多场景工作流）/ #3（物理增强）/ #4（色彩分级与后期完善）/ #5（可视化着色器编辑器）/ #11（发布流水线）。
+> 分工：cR（#2+#3，域内顺序：#3 先 M 级速赢 → #2 L 级架构）/ cG（#4+#5，域内顺序：#4 先 → #5）/ cT（#11）；渲染共享文件（SceneRenderer/Material/SceneSerializer/post_combine.frag）最密集，骨架日一次性化解。
+> 本节号承接 §26，新增 §27 一章。
+
+## 27.0 总则：所有权分区、骨架日纪律与冻结头变更
+
+**文件所有权严格分区（并行安全前提）**：
+
+| 线 | 独占文件 | 共享文件接触 |
+|---|---|---|
+| cR | engine/include\|src/Assets/AsyncLoader.h/.cpp（新）、Scene/SceneManager.h/.cpp、Scene/CharacterController.h/.cpp（新）、Physics/PhysicsWorld.h/.cpp、Physics/PhysicsTypes.h、Scene/Collider.h/.cpp、editor/src/panels/PhysicsLayersPanel.h/.cpp（新）、editor/src/panels/PhysicsWidgets.h | 无（SceneSerializer 环境段/ComponentRegistry/SceneRenderer 多场景入口由主会话骨架日布） |
+| cG | engine/include\|src/Render/PostProcess.h/.cpp、Render/ColorGrading.h/.cpp（新）、ShaderGraph/（新目录全部）、assets/shaders/post_dof.frag（新）、editor/src/panels/EnvironmentPanel.cpp（Color Grading 折叠区）、editor/src/panels/ShaderGraphPanel.h/.cpp（新） | 无（Material.h 字段/post_combine.frag LUT 段/SceneSerializer 环境字段由主会话骨架日布） |
+| cT | cmake/（version.rc.in 新）、顶层 CMakeLists.txt（project VERSION）、player/CMakeLists.txt、player/src/main.cpp、editor/src/Packager.cpp（buildRelease）、editor/res/app.ico（新）、.github/workflows/ci.yml（release 打包 job 扩展） | 无 |
+| 主会话（骨架日/合波日） | 见清单 | SceneRenderer.h/.cpp、Material.h、Scene.h（environment.physics）、SceneSerializer.cpp（environment.physics + postProcess 新字段）、ComponentRegistry.cpp、NovaEngine.h、post_combine.frag、editor/src/panels/InspectorPanel.cpp、editor/src/EditorApplication.cpp |
+
+**骨架日清单（波 2 第 0 天，主会话执行）**：
+1. SceneRenderer.h：`renderScenesToOutput(...)` 新入口声明（§27.1 签名）+ 实现 = renderSceneToOutput 的多场景包装（旧入口保留转发，单场景行为零变化）。
+2. Material.h：+shaderOverride（shared_ptr<Shader> 前向声明）+shaderGraphPath（§27.4）；operator== 扩展含 shaderGraphPath（实例化分组键）。
+3. Scene.h：+physicsCollisionMatrix/physicsLayerNames 字段声明；SceneSerializer.cpp：environment.physics 段读写 + environment.postProcess 新字段（§27.3）读写——两处一次完成。
+4. ComponentRegistry.cpp：CharacterController link-guard +1（内置组件 25→26）。
+5. post_combine.frag：LUT 采样/渐晕/颗粒段（§27.3 位置裁定：ACES 后、gamma 前）。
+6. NovaEngine.h 伞头：+Assets/AsyncLoader.h、Scene/CharacterController.h、Render/ColorGrading.h、ShaderGraph/ShaderGraphAsset.h。
+7. 顶层 CMakeLists.txt：project VERSION 0.1.0 → 1.0.0。
+8. 骨架日结束后共享文件冻结（同纪律）。
+
+**合波日清单（主会话）**：面板 dock 接线（ShaderGraphPanel/PhysicsLayersPanel）、EnvironmentPanel Color Grading 区接线、InspectorPanel 接线（CharacterController 区路由 PhysicsWidgets、材质区 shaderGraphPath 拖放+Detach）、EditorApplication Play 循环与 player main 的主循环接线（§27.1 清单：updateAll/flushPendingLoad/flushPendingResults）、AssetBrowser 右键 New→Shader Graph、守卫与序列化回归清单 25→26 条、NovaTests 跑绿（+波 2 新用例）、双 exe 冒烟。
+
+**波 2 冻结头变更总清单**：
+1. Scene/SceneManager.h：+loadSceneAsync/unloadScene/loadedScenes/updateAll/setSceneParam/getSceneParam/clearSceneParams + SceneUnloaded 事件（追加式）
+2. Assets/AsyncLoader.h：新增（§27.1 签名）
+3. Scene/SceneRenderer.h：+renderScenesToOutput（新入口；renderSceneToOutput/renderScene 保留）
+4. Physics/PhysicsWorld.h：+raycastAll/overlapSphere/overlapBox/setLayerName/layerName/setCollisionEnabled/collisionEnabled（追加式）；PhysicsTypes.h：RaycastHit +hitObject（追加式）
+5. Scene/Collider.h：+layer/friction/restitution（追加式缺省兜底）
+6. Scene/CharacterController.h：新增组件（注册表 +1）
+7. Scene/Scene.h：+physicsCollisionMatrix/physicsLayerNames（environment.physics 段）
+8. Render/PostProcess.h：PostProcessSettings +lutPath/lutIntensity/dofEnabled/dofFocusDistance/dofAperture/vignetteEnabled/vignetteIntensity/grainEnabled/grainAmount（追加式缺省全关）；PostProcess +setLut（追加式）
+9. Render/Material.h：+shaderOverride/shaderGraphPath（追加式；operator== 扩展）
+10. 新增头：Render/ColorGrading.h、ShaderGraph/{ShaderGraphAsset,ShaderGraphCodeGen}.h
+11. GLSL：改 post_combine.frag（LUT/vignette/grain）；新 post_dof.frag；Shader Graph 生成 shader 复用 blinn_phong.vert + 引擎 uniform 契约
+12. CMake：project VERSION 1.0.0；cmake/version.rc.in；player/CMakeLists.txt +RC；editor/CMakeLists.txt +RC（GLOB 已覆盖源）
+13. 序列化：场景 JSON version 4 不变（environment.physics/environment.postProcess 新字段/Collider 新字段/CharacterController 新组件/material 段 shaderGraphPath 全部纯增量）；新资产类型 assets/shadergraphs/*.novashadergraph（version 1）；.cube 为数据文件（非资产类型，Packager 收集归 cT）
+
+## 27.1 多场景工作流（cR，V1.0-2）
+
+**架构裁定（ROADMAP §10-D 落地）**：唯一新线程 = 资产加载线程。铁律：线程只做 CPU 侧（JSON 解析、MeshData/贴图解码、Assimp）；GPU 上传（Mesh::create/Texture 创建/材质资产解析挂 GPU）一律回主线程 flush 执行；物理、渲染、脚本、UI 保持主线程。
+
+```cpp
+// engine/include/NovaEngine/Assets/AsyncLoader.h
+namespace NovaEngine {
+// 后台资产加载（V1.0-2）：单工作线程 + 任务队列（std::thread + mutex + condition_variable）
+class AsyncLoader {
+public:
+    static void init();       // 引擎启动（Renderer::init 之后）；线程启动即阻塞等待任务
+    static void shutdown();   // 停止 + join（丢弃未完成任务；须先于 Renderer::shutdown）
+    // 入队场景加载：线程内 = 读 JSON + 全部资产 CPU 解码（MeshData/贴图像素/材质资产）
+    // → 结果封装成主线程执行体（GPU 上传 + 场景挂载）入结果队列
+    static bool loadSceneAsync(const std::string& name, bool additive);  // 经 SceneManager 解析路径；查无 → false
+    static void flushPendingResults();   // 主线程帧末（SceneManager::flushPendingLoad 之前）：依次执行结果体
+    static float progress();             // 0..1（完成/总数；无任务 = 1）
+    static uint32_t generation();        // 取消语义：每次 reset/加载目标变更递增，旧代际结果作废
+    static void reset();                 // 清队列 + generation++（退出 Play/LoadScene 时调用）
+};
+}
+```
+
+```cpp
+// engine/include/NovaEngine/Scene/SceneManager.h 追加（追加式，既有语义零变化）
+static bool loadSceneAsync(const std::string& name, bool additive = false);   // 入队异步（帧末生效）；失败同 loadScene
+static bool unloadScene(const std::string& name);   // 仅 additive 场景可卸载；activeScene 卸载 = error + false
+static const std::vector<Scene*>& loadedScenes();   // activeScene 在前（渲染/update 顺序）
+static void updateAll(float dt);                    // 全部已加载场景 update（activeScene 先；替代单 activeScene::update 调用点）
+// 场景间参数：loadScene/loadSceneAsync 调用瞬间快照参数表；新场景脚本 onStart 期间可读
+static void setSceneParam(const std::string& key, const std::string& jsonValue);
+static std::string getSceneParam(const std::string& key);    // 无 → 空串
+static void clearSceneParams();
+struct SceneUnloaded { std::string name; };        // 卸载完成事件（Events::post 延迟投递）
+```
+
+- **每 Scene 独立 PhysicsWorld 已成立**（Scene 级服务）：additive 场景自带物理世界，updateAll 内各自 step（帧内顺序：主场景先）。
+- **渲染合并**：renderScenesToOutput——环境（天空/IBL/雾/后处理参数）与相机取 scenes[0]（主场景）；对象遍历合并全部场景（剔除/阴影/透明排序/实例化分组跨场景统一收集）；additive 场景不画自己的天空。
+- **帧内顺序扩展（§15 修订）**：pollEvents → SceneManager::updateAll{flush+物理+onUpdate+协程+事件} → AsyncLoader::flushPendingResults → SceneManager::flushPendingLoad → AudioEngine::setListener → renderScenesToOutput → 显示。两处主循环（EditorApplication Play 循环 / player main）按此重排（接线归 cT，清单由本节提供）。
+- **取消语义**：loadScene 同步路径与 loadSceneAsync 共用代际——任一新的加载请求先 reset()（旧结果作废不挂载）。
+- **退出 Play**：全部 additive 场景卸载 → 编辑场景快照还原（既有语义）；Play 中 LoadScene 的 DDOL 迁移（§14.9）对 additive 场景同样生效（DDOL 子树随主场景迁移）。
+- **内存回落**：unloadScene 内 Scene 析构后显式调用 AssetDatabase::releaseUnused()（波 3 增强审计）。
+- **编辑器侧 v1 最小化**：Build Settings 不变（additive 由脚本 API 驱动）；可选 Play 工具栏已加载场景列表（合波日一行，可选）。多场景打包收集见 §27.5。
+
+**序列化**：无新场景 schema；build.novabuild 不变（additive 是运行时概念）。
+
+**验收要点（cR，照抄细化 ROADMAP §7-2）**：
+1. 大厅+关卡 additive 共存：Play 中脚本 loadSceneAsync("Level", true) → 大厅保持渲染，关卡场景对象异步出现（进度条 = progress() 驱动的 UI 示例）。
+2. 切换无全黑帧：异步加载期间主场景持续渲染（无长停顿；帧时间尖峰记录于统计层）。
+3. 后台加载不卡主线程：加载期与空载期主线程帧时间对比（统计层数字）。
+4. 卸载后内存回落：unloadScene 后 memorySnapshot（Profiler）回落到加载前基线（±10%）。
+5. 场景间参数传递正确：加载前 setSceneParam("playerHp","100") → 关卡脚本 onStart 读 getSceneParam 拿到 100。
+6. 取消与异常：加载中触发新 LoadScene → 旧结果不挂载、无崩溃；加载线程内异常（坏 JSON/坏模型）不传播（error 日志 + 该场景加载失败标记）。
+7. 退出 Play 一切还原（PlayCycleTest 回归）。
+
+**风险：高（本波最高）。回滚**：unload 全部新方法 + 主循环重排还原（同步 loadScene 路径即旧行为）。**审重点**：代际取消、线程异常隔离、GPU 上传顺序、与热重载 DLL 共存（加载线程不触碰 ScriptRegistry/DLL）。
+
+## 27.2 物理增强（cR，V1.0-3）
+
+**选型裁定**：CharacterController 封装 **Jolt CharacterVirtual**（库内现成：楼梯步进/坡度限制/地面检测内置）——不自研运动学胶囊（库能力消费，非新依赖）。
+
+```cpp
+// engine/include/NovaEngine/Scene/CharacterController.h（新增组件）
+namespace NovaEngine {
+class CharacterController : public Component {
+public:
+    explicit CharacterController(GameObject* owner);
+    float radius = 0.4f, height = 1.8f;          // 胶囊
+    float stepHeight = 0.35f;                    // 楼梯步进高度
+    float slopeLimitDeg = 45.0f;                 // 坡度上限（超过 = 阻挡）
+    float mass = 70.0f, gravityScale = 1.0f;
+    bool isGrounded() const;                     // Play 中有效
+    void move(const glm::vec3& displacement);    // Play 中；Edit no-op（与物理组件同纪律）
+    glm::vec3 velocity() const;
+    void setVelocity(const glm::vec3& v);
+    void onAwake() override; void onUpdate(float dt) override;
+    void onSerialize(nlohmann::json& out) const override;
+    void onDeserialize(const nlohmann::json& in) override;
+    // 注：与 Rigidbody 互斥（同 GO 挂两者 = 启动 warn + CharacterController 优先）
+};
+}
+```
+
+```cpp
+// engine/include/NovaEngine/Physics/PhysicsWorld.h 追加
+struct RaycastFilter { uint32_t layerMask = 0xFFFFFFFF; GameObject* ignore = nullptr; };
+bool raycastAll(const glm::vec3& origin, const glm::vec3& dir, float maxDist,
+                const RaycastFilter& filter, std::vector<RaycastHit>& outHits);   // 全部命中按距离升序
+bool overlapSphere(const glm::vec3& center, float radius, const RaycastFilter& filter,
+                   std::vector<GameObject*>& outObjects);
+bool overlapBox(const glm::vec3& center, const glm::vec3& halfExtents, const RaycastFilter& filter,
+                std::vector<GameObject*>& outObjects);
+// 碰撞层（矩阵对称）
+static constexpr int kMaxLayers = 16;
+void setLayerName(int layer, const std::string& name);
+const std::string& layerName(int layer);
+void setCollisionEnabled(int a, int b, bool enabled);
+bool collisionEnabled(int a, int b) const;
+
+// PhysicsTypes.h：RaycastHit 追加
+GameObject* hitObject = nullptr;   // 命中对象（触发器/静态体所属 GO）
+```
+
+```cpp
+// engine/include/NovaEngine/Scene/Collider.h 追加字段
+int layer = 0;                       // 碰撞层（0 默认）
+float friction = 0.5f, restitution = 0.0f;   // 物理材质 v1 = Collider 内联（不发明 .novaphysmat 资产——务实裁定）
+```
+
+- 层矩阵语义：Collider.layer 决定归属；矩阵决定层间是否碰撞（Jolt ObjectLayer/CollisionGroup 映射，pimpl 内实现）；矩阵配置 = 场景级（environment.physics 段）。
+- 物理材质：Jolt Material 映射（摩擦组合规则 v1 取平均，注释文档化）。
+- 层矩阵编辑 UI：PhysicsLayersPanel（16 层命名 + 16×16 对称矩阵勾选 + 恢复默认；写 environment.physics）。
+
+**序列化键名（场景 JSON version 4 不变）**：
+- environment.physics：`"physics":{"layerNames":["Default","Enemy",...16],"collisionMatrix":[[true,false,...],...16×16]}`（缺省 = 全通矩阵 + 默认层名，旧文件零变化）。
+- Collider 组件段：`"layer":0,"friction":0.5,"restitution":0.0`（缺省兜底）。
+- 新组件：`{"type":"CharacterController","radius":0.4,"height":1.8,"stepHeight":0.35,"slopeLimitDeg":45.0,"mass":70.0,"gravityScale":1.0}`。
+
+**验收要点（cR，照抄细化 ROADMAP §7-3）**：
+1. 角色控制器上下楼梯/斜坡不卡住：台阶高 0.3m（<stepHeight）可上、0.5m 阻挡；20°/30° 斜坡可走、60° 阻挡；斜坡行走速度不衰减为 0。
+2. 射线查询返回完整命中信息：raycastAll 命中 3 个堆叠物 → 距离升序、每项 point/normal/distance/hitObject 正确；ignore 过滤生效。
+3. 层过滤生效：Enemy 层与 Default 层矩阵关断 → 两层刚体互相穿过；打开恢复碰撞。
+4. 摩擦/弹性参数效果可见：同斜坡同初速 friction 0.1 vs 1.0 滑行距离差异目测；restitution 0.8 弹跳 vs 0 落地不弹。
+5. 30/60/144 FPS 下固定步进行为一致（既有物理验收口径回归）。
+6. CharacterController 随场景序列化往返；退出 Play 快照还原（位置还原）。
+
+**风险：中。回滚**：全部追加式——删组件注册与新方法即回滚；矩阵缺省全通 = 旧行为。**审重点**：Jolt CharacterVirtual 与固定步进累加器集成（每物理步调用）、与既有 Rigidbody 注册互斥断言。
+
+## 27.3 色彩分级与后期完善（cG，V1.0-4）
+
+**文件落点**：engine/include|src/Render/ColorGrading.h/.cpp（新：.cube 解析 + LUT 纹理）、PostProcess.h/.cpp（追加）、assets/shaders/post_dof.frag（新）、EnvironmentPanel.cpp（Color Grading 折叠区）；post_combine.frag LUT 段骨架日布。
+
+```cpp
+// engine/include/NovaEngine/Render/ColorGrading.h
+namespace NovaEngine {
+// .cube LUT 解析（V1.0-4）：3D 优先（LUT_3D_SIZE N；DOMAIN_MIN/MAX）；1D 仅解析降级
+// 数据经 AssetStream（pak 兼容）；失败 → nullptr 语义（loadLut 返回 false）+ Logger::warn
+class ColorGrading {
+public:
+    static bool loadLut(const std::filesystem::path& relPath);   // 上传 GL_TEXTURE_3D（RGBA16F 优先，降级 RGBA8）
+    static void unloadLut();                                     // 清纹理（路径为空/加载失败时 PostProcess 调用）
+    static uint32_t lutTexture();                                // 0 = 无 LUT
+};
+}
+```
+
+```cpp
+// engine/include/NovaEngine/Render/PostProcess.h 追加
+struct PostProcessSettings {
+    // ...既有字段不变...
+    std::string lutPath;            // .cube 相对路径（空 = 关）
+    float lutIntensity = 1.0f;      // 0..1 混合
+    bool dofEnabled = false;        // 简版 DOF（可选）
+    float dofFocusDistance = 5.0f, dofAperture = 0.05f;
+    bool vignetteEnabled = false;   float vignetteIntensity = 0.4f;
+    bool grainEnabled = false;      float grainAmount = 0.05f;   // 时间抖动胶片颗粒
+};
+class PostProcess {
+    // ...既有不变...
+    static bool setLut(const std::filesystem::path& relPath);   // 设置变更时调用（内部缓存纹理 id；失败 warn + 关闭 LUT）
+};
+```
+
+- **链顺序裁定（冻结）**：brightpass → bloom → **DOF（scene 线性 HDR：CoC 计算 → 2-pass 可变半径盒式模糊（半分辨率）→ 合成）** → combine{ACES → **LUT（线性 LDR，intensity 混合）→ vignette → grain** → gamma}。LUT 在 ACES 后、gamma 前（Unity 同款位置）。
+- DOF 简版：CoC = f(深度, focusDistance, aperture)；2-pass 半分辨率盒式（半径量化 8 档）；开销目标 <1ms @1080p。
+- post_dof.frag：单 shader 双 pass（uHorizontal 开关）。
+- post_combine.frag 增段：uLut（sampler3D unit 8）+ uLutIntensity/uVignette/uGrain（uniform 追加式；无 LUT 时走直通分支——永不黑屏契约保持）。
+- EnvironmentPanel：Color Grading 折叠区（LUT 路径拖放 + intensity 滑条；DOF 开关+焦点/光圈；vignette/grain 开关+强度）——全部随场景序列化（environment.postProcess 段）。
+- .cube 为数据文件（无 .novameta）；**Packager 收集 .cube 归 cT（§27.5）**（扩展名识别即可）。
+
+**序列化键名（environment.postProcess 段追加，version 4 不变）**：`"lutPath":"","lutIntensity":1.0,"dofEnabled":false,"dofFocusDistance":5.0,"dofAperture":0.05,"vignetteEnabled":false,"vignetteIntensity":0.4,"grainEnabled":false,"grainAmount":0.05`（旧文件缺省全关零变化）。
+
+**验收要点（cG，照抄细化 ROADMAP §7-4）**：
+1. LUT 切换氛围对比明显：内置 2 个示例 .cube（暖色/冷色，assets/luts/ 验收物料）+ 用户 .cube 加载生效；intensity 0→1 平滑过渡。
+2. 后期设置序列化往返：改 LUT/DOF/渐晕 → Ctrl+S → 重开 → 参数不变（环境面板与 JSON 一致）。
+3. 链上各环节开销可在 Profiler 查看：post 段 GPU 耗时随 LUT/DOF 开关变化（§26.2 骨架日钩子联动）。
+4. 降级路径：无 LUT/加载失败/8bit FBO → 直通分支画面正常不崩溃（永不黑屏契约）。
+5. DOF：焦点远近景模糊对比目测明显；开关 A/B 无残留。
+
+**风险：中。回滚**：字段缺省全关 = 旧行为；删 shader 段与面板即回滚。**审重点**：LUT 采样在 16F 线性域（HDR）与 RGBA8 直通路径的一致性（直通路径 LUT 同样生效）。
+
+## 27.4 可视化着色器编辑器（cG，V1.0-5）
+
+**文件落点**：engine/include|src/ShaderGraph/（新目录：ShaderGraphAsset.h/.cpp、ShaderGraphCodeGen.h/.cpp）、editor/src/panels/ShaderGraphPanel.h/.cpp（新）；Material.h 字段骨架日布。
+
+**资产格式（.novashadergraph，version 1，存 assets/shadergraphs/）**：
+
+```json
+{ "version": 1,
+  "nodes": [ { "id": "n1", "type": "TextureSample", "pos": [80, 120],
+               "params": { "path": "assets/textures/checker.png" } },
+             { "id": "master", "type": "Master", "pos": [640, 200], "params": {} } ],
+  "edges": [ { "from": ["n1", "rgba"], "to": ["master", "albedo"] } ] }
+```
+
+**节点集 v1（约 16 个，超出即明确提示不支持）**：输入类 UV/Time/Color/Scalar/Vector2/Vector3/TextureSample（+path 参数）；运算类 Add/Sub/Mul/Div/Lerp/Clamp/OneMinus/Normalize/Dot；主输出 Master 槽 albedo/roughness/metallic/normal/emission。端口带类型（float/vec2/vec3/vec4/sampler2D），连线类型不匹配 = 拒绝 + 面板提示（不静默）。
+
+```cpp
+// engine/include/NovaEngine/ShaderGraph/ShaderGraphAsset.h
+namespace NovaEngine {
+// 图资产（V1.0-5）：JSON 资产 + 节点/边模型 + 端口类型校验
+class ShaderGraphAsset {
+public:
+    static std::shared_ptr<ShaderGraphAsset> load(const std::filesystem::path& relPath);  // AssetStream；失败 nullptr
+    static bool save(const std::filesystem::path& relPath, const ShaderGraphAsset& graph);
+    // 校验：环/类型不匹配/缺失输入 → 错误列表（明确错误文本，面板直接展示）
+    std::vector<std::string> validateGraph() const;
+};
+}
+
+// engine/include/NovaEngine/ShaderGraph/ShaderGraphCodeGen.h
+namespace NovaEngine {
+// 代码生成（V1.0-5）：生成 GLSL 片元源码（含 #line + 节点注释映射——编译错误可定位到节点）
+// 顶点部分复用 blinn_phong.vert（不生成 vs）；uniform 契约与 blinn_phong.frag 完全一致
+//（CameraBlock/uLightDir/uLightColor/uAmbient/uView/材质槽 uniform/sampler2D unit 0-5——
+//  PBR 光照函数模板内嵌生成器，与 blinn_phong.frag 同步维护、源码注释互指）
+class ShaderGraphCodeGen {
+public:
+    // 生成成功返回 true；失败时 outErrors 为节点级错误文本（行号经 #line 映射回节点 id）
+    static bool generate(const ShaderGraphAsset& graph, std::string& outFragmentSource,
+                         std::vector<std::string>& outErrors);
+};
+}
+```
+
+```cpp
+// engine/include/NovaEngine/Render/Material.h 追加（骨架日布）
+std::shared_ptr<Shader> shaderOverride = nullptr;   // 运行时生成 shader（前向声明；非空 = 提交走该 shader）
+std::string shaderGraphPath;                        // .novashadergraph 相对路径（序列化用）
+// operator== 扩展含 shaderGraphPath（实例化分组键——生成 shader 材质不参与实例化分组，见下）
+```
+
+- **提交路径裁定（冻结）**：SceneRenderer 收集阶段——material.shaderOverride 非空 → 该 RenderItem 标记「自定义 shader」独立队列（不实例化分组、不混入共享材质队列；排序仍按 opaque/transparent）；uniform 设置复用 setBlinnPhongUniforms 同契约（生成器保证同名同型）。shaderGraphPath 非空但资产缺失 → warn + 回退 blinn_phong（不崩溃）。
+- **编译错误定位**：Shader::createFromSource 失败 → 解析 GL 编译 log 行号 → #line 映射表反查节点 id → 面板高亮 + 显示完整 log（映射失败兜底）。
+- **ShaderGraphPanel**：画布（ImGui 自绘：节点框 + bezier 连线 + 拖拽）+ 节点面板（分类列表拖入画布）+ 选中节点参数区 + 编译按钮/状态区（错误节点高亮）；保存/加载 .novashadergraph；AssetBrowser 右键 New→Shader Graph（合波日）。
+- **Inspector 接线（合波日）**：材质区 shaderGraphPath 拖放（AssetBrowser 源）+ Detach；编译失败状态展示。
+
+**序列化键名**：场景 JSON material 段追加 `"shaderGraphPath":""`（缺省空 = 旧行为）。新资产类型：assets/shadergraphs/*.novashadergraph（version 1）。
+
+**验收要点（cG，照抄细化 ROADMAP §7-5）**：
+1. 用节点连出「颜色×纹理+发光」shader 并赋给材质生效：Mul(Color, TextureSample)→albedo + Color→emission，Play/Edit 画面符合预期。
+2. 生成 shader 编译错误可定位到节点：故意制造非法表达式 → 面板高亮对应节点 + 明确错误文本。
+3. 保存/加载图资产：.novashadergraph 往返无损（节点/边/参数逐项一致）；删除图资产 → 场景加载 warn + 回退默认 shader 不崩溃。
+4. 不支持的特性明确提示而非静默错误：未实现节点/循环依赖/端口类型不匹配全部面板级提示。
+5. 打包：引用 .novashadergraph 的场景打包后 Player 渲染一致（Packager 收集 .novashadergraph 归 cT，§27.5）。
+
+**风险：中-高。回滚**：shaderOverride 空 = 旧路径全回滚；删面板与资产类即可。**审重点**：生成 GLSL 的 uniform 布局与 setBlinnPhongUniforms 严格一致（错位 = 花屏，评审对照）；#line 映射表在 shader 编译失败（无 program）时仍可用（映射表编译前构建）。
+
+## 27.5 发布流水线（cT，V1.0-11）
+
+**文件落点**：cmake/version.rc.in（新）、editor/res/app.ico（新）、顶层 CMakeLists.txt（VERSION 1.0.0，骨架日）、editor/CMakeLists.txt + player/CMakeLists.txt（RC 接入）、player/src/main.cpp（默认启动场景）、editor/src/Packager.cpp（buildRelease + 新资产收集）、.github/workflows/ci.yml（release 打包 job）。
+
+**版本信息注入（Windows RC）**：cmake/version.rc.in 模板——FileVersion/ProductVersion（CMake project VERSION 注入 1.0.0）、FileDescription/ProductName/CompanyName/LegalCopyright（NOVA_PRODUCT/NOVA_COMPANY 编译定义，默认 "NovaEngine"/"Nova"）、Icon（editor/res/app.ico）。两个 exe 各生成 RC 对象。exe 属性验收 = 资源管理器右键 → 详细信息。
+
+```cpp
+// editor/src/Packager.h 追加（buildPlayer 保留，语义不变）
+namespace NovaEditor {
+// 发布构建（V1.0-11）：buildPlayer 的发行级扩展
+// 收集 = build.novabuild 全部场景 + 全场景引用资产（AssetReferenceScanner 预检照常）+
+// 新资产形态（.novashadergraph/.cube/16bit 高度图）+ shaders + 字体 + 脚本 DLL
+// → 单 pak（v1 单 pak 多场景）→ 输出目录结构：
+//   <out>/NovaEngine_<版本>/NovaPlayer.exe + NovaEngine.pak + README.txt（生成：运行说明/最低配置）
+//   + docs/（拷贝）+ steam/（depotbuild 目录占位 + steam_appid.txt 占位 + STEAM-说明.txt）
+// 版本元数据写入 README（NOVA_PRODUCT/NOVA_VERSION）。
+// 可复现：RC 元数据固定（无时间戳注入）+ pak 内 std::map 确定性（既有）→ 两次 buildRelease 产物字节一致。
+static bool buildRelease(const std::filesystem::path& outputDir);
+}
+```
+
+- **默认启动场景**：player main 解析顺序——--scene 显式 > pak 内 build.novabuild 第一个场景 > error + 退出码非 0（SceneManager::init 已读 build.novabuild，Player 端消费既有能力）。
+- **多场景 pak 收集**：§27.1 的异步加载与本节无耦合（收集 = 静态扫描 build.novabuild，与运行加载机制无关）——#11 不阻塞于 #2 实现，只依赖 build.novabuild（已有）。
+- CI 扩展：ci.yml 增加 release 打包 job（Release 构建后调 buildRelease 至 artifact，可选上传）。
+
+**验收要点（cT，照抄细化 ROADMAP §7-11）**：
+1. exe 属性含正确版本/图标：两 exe 详细信息 = 1.0.0.0 / NovaEngine / 公司名 / 图标可见。
+2. 发行目录双击即玩：干净目录跑 NovaPlayer.exe → 默认场景加载成功（pak 旁挂）。
+3. 打包产物可复现：连续两次 buildRelease 产物字节一致（含 RC 元数据）。
+4. 目录结构符合 Steam 上传要求：steam/ 子目录含 depot 结构说明（人工对照 Steamworks 文档清单）。
+5. 多场景收集：含大厅+关卡的 build 列表打包后 Player 可经 --scene 切换任意场景。
+
+**风险：中。回滚**：buildRelease 是新入口，buildPlayer 旧路径保留即全回滚。**审重点**：RC 注入不破坏 /WHOLEARCHIVE/DEF 导出链（RC 对象与链接选项互不干扰——DevOps 双配置验证）；可复现性（排除构建路径/时间戳污染）。
+
+## 27.6 波 2 整体验收（合波后）
+
+- 合波构建：Debug 全量零错误零第一方警告；Release 构建通过；双 exe 冒烟（编辑器守卫 26 条 + Player 场景加载）。
+- 波 1 零回归（重点）：NovaTests 全绿；Profiler 面板正常；纹理压缩缓存命中；引用预检；混音器。
+- 多场景端到端：大厅+关卡 additive 共存（异步进度条）、卸载内存回落、参数传递。
+- 物理增强目测：楼梯步进/斜坡/层过滤/摩擦弹性。
+- 色彩分级 A/B：LUT 氛围对比、DOF/渐晕/颗粒开关无残留。
+- Shader Graph 端到端：连图 → 编译 → 赋材质 → 渲染；错误定位高亮。
+- buildRelease 产物：双 exe 属性（版本/图标）+ 发行目录双击即玩 + 可复现。
+- 统计层数字随波记录；schema v4 回归（旧文件打开参数不变）。
+
+## 27.7 波 2 风险（给 DevOps/Reviewer）
+
+1. **多场景渲染合并**（本波最高风险）：跨场景剔除/实例化分组/阴影收集的合并遍历——评审对照 renderScenesToOutput 与 renderSceneToOutput 的单场景等价性（scenes=[单场景] 时行为逐像素一致）。
+2. 加载线程与 GL 上传顺序：flushPendingResults 必须在 flushPendingLoad 之前（帧序修订）；乱序 = 场景挂载引用未上传资产（评审核对 §15 修订版）。
+3. 生成 shader uniform 契约：与 setBlinnPhongUniforms 逐名核对（错位 = 花屏）。
+4. LUT 直通路径：RGBA8 降级路径下 LUT 段同样生效且不崩（永不黑屏契约扩展）。
+5. RC 与导出链：RC 对象接入后 /DEF 导出/WHOLEARCHIVE 双 exe 链接验证。
+6. CharacterVirtual 与固定步进：步进频率/地面探测在 30/60/144 FPS 三档一致性。
+7. 主循环重排回归：帧内顺序修订后协程/事件/物理的既有帧序断言（§15）与 Profiler 钩子（波 1）全部重验。
+8. schema 增量回归：environment.physics/environment.postProcess/Collider 新字段/CharacterController 全部往返 + 旧文件零警告。
+
+---
+
+# V1.0 波 3 契约（2026-11-20 冻结）
+
+> 范围：V1.0-13（内存与泄漏审计）/ #12（编辑器细节完善）/ #10（示例游戏项目）/ #14（文档化与迁移指南）。
+> 分工：cR（#13）/ cT（#12）/ cC（V1.0_Coder_Content，#10+#14）；波 3 无新引擎冻结头（全部追加式已在前两波布完），无骨架日（轻量：仅合波日回归 + V1.0 收官验收）。
+> 本节号承接 §27，新增 §28 一章。
+
+## 28.0 总则：所有权分区与收官纪律
+
+**文件所有权严格分区**：
+
+| 线 | 目录/文件 |
+|---|---|
+| cR | engine/src/Assets/AssetDatabase.cpp（releaseUnused 收口/memorySnapshot 校准）、engine/src/Scene/SceneManager.cpp（卸载钩子增强——波 2 已建 unload 路径，cR 延续）、tests/（内存审计用例） |
+| cT | editor/src/{EditorApplication,EditorContext,EditorSettings,SettingsPanel,SceneViewPanel,main}.h/.cpp（EditorSettings/SettingsPanel 新增） |
+| cC | samples/、assets/scenes/、assets/audio/、assets/models/、assets/luts/、docs/（FEATURES/KNOWN-ISSUES + 新文档三件——契约明确授权新增 md） |
+| 主会话 | docs/ROADMAP.md（波次状态行全程维护）+ 合波日 |
+
+- 波 3 内 editor/src/EditorApplication.cpp 与 SceneViewPanel.cpp 为 cT 独占（cC 不碰编辑器代码）；docs/ROADMAP.md 归主会话（cC 只更新 FEATURES/KNOWN-ISSUES/新文档）。
+- 内置组件数 26 不变；schema 无变更；无新第三方库。
+
+## 28.1 内存与泄漏审计（cR，V1.0-13）
+
+**文件落点**：engine/src/Assets/AssetDatabase.cpp、engine/src/Scene/SceneManager.cpp、tests/（新用例）、KNOWN-ISSUES.md（审计步骤文档，随 cC 协作）。
+
+- **releaseUnused 自动化收口**：调用点——unloadScene 后（波 2 已接）、退出 Play 后、LoadScene 同步路径后；增强 releaseUnused 清理 m_materialCache 旁表（KNOWN-ISSUES 遗留 P3-7：m_materialCache 无 releaseUnused——本波修复）。
+- **泄漏检测自动化（NovaTests 新用例，全部无 GL）**：①100 次 LoadScene 同步切换 + unload 循环 → memorySnapshot 回到基线（±5%，三次平均防分配器抖动）；②Play 100 次循环（Scene::start/update×N/退出——harness 直驱，无编辑器 GUI）→ 基线对比；③热重载：ScriptRuntime reload×10 → ScriptRegistry 名称集不变 + memorySnapshot 稳定。
+- **脚本卸载路径验证（配合 V0.5-7）**：reload 后旧 DLL 引用计数为零（FreeLibrary 语义）——测试 + 日志。
+- **VS 诊断**：手动步骤文档化（写入 KNOWN-ISSUES「V1.0-13 人工审计步骤」：CRT 泄漏报告/快照对比命令）——「VS 诊断无未释放资产」验收 = 该步骤人工执行 + 自动基线测试双重证据。
+
+**验收要点（cR，照抄细化 ROADMAP §7-13）**：
+1. 100 次场景切换内存回到基线（±5%，Profiler memorySnapshot 证据）。
+2. Play 100 次无增长（headless 循环，基线对比）。
+3. VS 诊断无未释放资产（人工步骤 + 自动基线双证据）。
+4. 热重载路径无泄漏（reload×10 注册表/内存稳定）。
+
+**风险：中。回滚**：审计代码全部测试侧/日志侧，releaseUnused 增强是行为改进（可独立回退）。**审重点**：内存基线断言抖动——本地与 CI 差异 → 容差 5%（CI 放宽 10%）+ 三次平均 + 失败重跑一次。
+
+## 28.2 编辑器细节完善（cT，V1.0-12）
+
+**文件落点**：editor/src/EditorSettings.h/.cpp（新）、editor/src/panels/SettingsPanel.h/.cpp（新）、EditorApplication.h/.cpp（最近文件/设置加载）、SceneViewPanel.cpp（三角形拾取）、main.cpp（ViewportsEnable 按设置）。
+
+- **多视口（ImGui ViewportsEnable）评估**：开启前必须回归——gizmo 拖拽（drawlist owner 语义变化，KNOWN-ISSUES #11 同族）、拖放（SceneView/AssetBrowser payload）、HiDPI 150%、面板拖出/拖回。**评估失败 → 保持关闭 + KNOWN-ISSUES 备案理由（允许的交付形态，不硬开）**。
+- **最近文件**：EditorContext +recentFiles（≤10，文件存在性过滤）→ File→Open Recent 菜单。
+- **编辑器设置持久化**：%APPDATA%/NovaEngine/editor-settings.json（version 1）——`{"version":1,"snap":{"move":0.5,"rotate":15.0,"scale":0.5},"theme":"dark","keybindings":{...},"recentFiles":[...],"multiViewport":false}`。吸附值并入既有 Snap Settings 面板（读写换存储）；主题 v1 = 2–3 套预置 + ImGuiStyle 自定义；快捷键 v1 = 静态映射表（核心快捷键 Ctrl+Z/Ctrl+S/Ctrl+P 等保留不可移除，自定义项冲突检测）。
+- **三角形级拾取（替代 AABB 粗测，KNOWN-ISSUES #11 闭环）**：SceneViewPanel 拾取路径替换——保留 AABB 粗筛（先剔除）→ 逐三角形 Möller–Trumbore（CPU，世界空间变换缓存）→ 最近交点；护栏：单网格 >200k 三角形跳过精确测试（AABB 结果降级 + warn 一次，防大模型卡顿）；gizmo/选择行为不变（hit 语义变化仅「大平面不再遮挡后方」）。
+
+**验收要点（cT，照抄细化 ROADMAP §7-12）**：
+1. 面板可拖出主窗口（或评估失败 → 备案回退，二选一，理由写入 KNOWN-ISSUES）。
+2. 重启编辑器设置保留：改吸附值/主题/快捷键 → 重启 → 全部保持。
+3. 最近文件列表可用：打开过 3 个场景 → File→Open Recent 列出且可点击加载；被删除文件过滤不崩溃。
+4. 大平面不再遮挡后方物体拾取：demo 地面 + 地面后小物体 → 点击小物体直接选中（#11 闭环）；gizmo 真拖真看（2026-11-17 教训：交互验收必须真拖）。
+5. 多视口开启后（若开）：gizmo 拖拽/拖放/字体三处回归通过。
+
+**风险：中。回滚**：设置文件独立、拾取函数内部替换——回退 AABB 路径即旧行为。**审重点**：拾取性能（2000 物体场景拾取帧耗时统计层回归）、多视口 GL 上下文切换（imgui_impl_opengl3 原生支持，但 gizmo/拖放/字体三处必测）。
+
+## 28.3 示例游戏项目（cC，V1.0-10）
+
+**文件落点**：assets/scenes/、assets/audio/、assets/models/、assets/luts/、samples/NovaSampleGame/（脚本组，进 NovaGame.dll，遵循热重载约定）。
+
+**流程**：1 页设计稿（玩法/关卡/用到的引擎功能清单）→ Architect 确认 → 搭场景。**Architect 裁定方向建议（cC 设计稿需覆盖）**：第一人称探索 1–2 关——功能清单：多场景（菜单→关卡→结算，§27.1）+ CharacterController 控制器（§27.2）+ 地形 + IBL/色彩分级风格化 + 粒子 + 音频总线（BGM 流式 + SFX，§26.5）+ 运行时 UI（血条/交互提示）+ 存档（关卡进度）+ 手柄（可选）。2D vs 3D 由设计稿结论定（V1.0_Coder_Content 工作流程）。
+
+**硬性约束（Architect 重申）**：
+- 只用引擎自带功能；发现缺口报 Architect 决策，**不得写引擎侧特例代码**。
+- 资产体积控制：模型 <20MB/个、音频用压缩格式（ogg/mp3）、仓库总增量 <200MB（无 git LFS 基础设施；超限 → Architect 裁减）。
+- 打包用 §27.5 buildRelease；通关冒烟与 DevOps 协作（半自动：Player --scene 启动 + 脚本自检目标可达性——v1 以人工通关为主）。
+
+**验收要点（cC，照抄细化 ROADMAP §7-10）**：
+1. 游戏可打包独立运行：buildRelease 产物在干净目录双击通关（含存档/读档）。
+2. 通关流程完整：菜单→关卡→目标→结算→回菜单（1–2 关闭环）。
+3. 每次发版前通关冒烟（与 DevOps 协作，流程写入文档）。
+4. 代码作为最佳实践范本（脚本注释/结构，Reviewer 按 CLAUDE.md 风格审）。
+
+**风险：中。回滚**：纯内容资产 + samples 脚本，删目录即回滚。**审重点**：脚本不得绕过引擎公开 API（grep 引擎私有头引用）；场景 schema 用 v4 标准形态（不得手写未来字段）。
+
+## 28.4 文档化与迁移指南（cC，V1.0-14）
+
+**新文档三件（本契约明确授权新增 md——Architect 角色约束「不新增 md」的例外条款）**：
+1. docs/API-REFERENCE.md：脚本 API 手册（对照 engine/include 逐条核实，含签名/示例/序列化字段）。
+2. docs/TUTORIAL.md：新手教程（从零到打包一个游戏，每步可执行，目标「新用户 1 天完成小游戏打包」）。
+3. docs/UNITY-MIGRATION.md：Unity→Nova 迁移对照表（GameObject/Transform/Input/Time/Physics/UI/SceneManager/Coroutine 高频 API 对照）。
+
+**既有文档更新**：FEATURES.md（V1.0 功能章节，按既有「V0.x 波 N 新增」结构追加）、KNOWN-ISSUES.md（P2 backlog 状态更新 + 三角形拾取 #11 闭环标注 + V1.0-13 审计步骤）。
+
+**验收要点（cC，照抄细化 ROADMAP §7-14）**：
+1. 新用户按教程 1 天完成一个小游戏打包（人工验证路径，教程每步可执行）。
+2. Unity 用户按对照表完成 API 迁移（对照表覆盖高频 API 族）。
+3. 文档与代码行为一致（以实际代码为准，抽查 10 处 API 签名比对）。
+
+**风险：低。回滚**：删文档。**注意**：文档以波 3 合波后的最终代码为准再校对一轮（防漂移）。
+
+## 28.5 波 3 整体验收 + V1.0 收官（合波后）
+
+- 合波构建：Debug/Release 全绿零第一方警告；双 exe 冒烟（守卫 26 条）；NovaTests 全绿（含波 3 内存用例）；CI 全绿。
+- 内存审计三组数字随波记录：100 次场景切换基线、Play 100 次、热重载 10 次。
+- 编辑器细节：拾取 #11 闭环 + 设置持久化 + 最近文件 + 多视口结论。
+- 示例游戏：buildRelease 打包 + 通关冒烟。
+- **V1.0 收官 = ROADMAP §7.1 五项**：①发行验收（干净 Win11 机器双击 exe 通关示例游戏，含存档/读档）；②性能验收（示例游戏 1080p 60FPS，中端集显可玩）；③稳定性（8 小时编辑器马拉松：连续编辑/Play/热重载/打包无崩溃、内存无泄漏）；④CI 全绿 + 文档与代码同步；⑤全量回归 V0.2/V0.3/V0.5 验收清单。
+- git commit/push（DevOps，提交信息 Co-Authored-By 结尾）。
+
+## 28.6 波 3 风险（给 DevOps/Reviewer）
+
+1. 三角形拾取性能：2000 物体场景拾取帧耗时回归（统计层）；>200k 三角形降级护栏生效。
+2. 多视口：若开启——ImGui 后端多视口 GL 上下文切换下 gizmo/拖放/字体三处回归必测；若关闭——备案理由。
+3. 内存基线断言抖动：容差 5%（CI 10%）+ 三次平均 + 失败重跑一次——不稳定的断言比没有断言更坏，保持必跑。
+4. 示例游戏资产体积：无 git LFS——模型 <20MB/个、音频压缩、总增量 <200MB（超限 → Architect 裁减）。
+5. 文档与代码漂移：cC 波 3 期间其他线若出修复补丁——文档以合波后最终代码为准再校对一轮。
+6. 8 小时马拉松的自动化辅助：建议与 DevOps 编排 headless 压力脚本（Play 进出/热重载循环）辅助人工马拉松。
