@@ -232,9 +232,10 @@ void EditorApplication::init() {
     auto terrainPanel = std::make_unique<TerrainPanel>();
     terrainPanel->open = false;
     m_panels.push_back(std::move(terrainPanel));
-    // Animator（V0.5-9 波 2 2b 合波接线，第 11 面板）：默认关，View 菜单打开；dock 底部 Tab
+    // Animator（V0.5-9 波 2 2b 合波接线，第 11 面板）：默认开（验收反馈：默认关导致
+    // 用户选中带 Animator 的对象后"看不到面板"——改为启动即显示，View 菜单仍可关）
     auto animatorPanel = std::make_unique<AnimatorPanel>();
-    animatorPanel->open = false;
+    animatorPanel->open = true;
     m_panels.push_back(std::move(animatorPanel));
 
     // 脚本 DLL 初始加载（V0.5-7 波 2 2b 合波修复：此前漏接，编辑器启动即加载——
