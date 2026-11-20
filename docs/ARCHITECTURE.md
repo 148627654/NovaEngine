@@ -2939,7 +2939,7 @@ public:
 
 **通用纪律**：新组件接入序列化零改动 SceneSerializer（ComponentRegistry 按名分发 + NE_REGISTER_COMPONENT 自注册，组件 .cpp 末尾放宏）；engine/CMakeLists.txt 为 GLOB_RECURSE（新 .cpp 自动收录）；editor/CMakeLists.txt GLOB 化后新面板自动收录（改 CMake 后需重 configure）；无新组件波次不更新守卫数；渲染改动必须附统计层数字（ROADMAP §12-7 纪律）。
 
-**第三方库裁定（V1.0 共 2 个新依赖，均已批准）**：
+**第三方库裁定（V1.0 共 2 个新依赖；Architect 裁定 + 用户 2026-11-20 确认批准）**：
 1. **Catch2 v3.16.0（V1.0-9，批准）**：BSL-1.0；FetchContent 一条命令，Catch2WithMain target + catch_discover_tests 接 ctest。自研手写断言宏成本 1–2 天，但参数化/分区/报告器/IDE 集成/CI 集成全部缺失且需长期维护——集成成本远低于自研。接入：Dependencies.cmake `FetchContent_Declare(catch2 GIT_REPOSITORY https://github.com/catchorg/Catch2.git GIT_TAG v3.16.0 GIT_SHALLOW TRUE)` 并入 MakeAvailable 列表（tag 2026-09 发布，DevOps 配置期核实）。
 2. **bc7enc_rdo（V1.0-6，批准）**：MIT/Unlicense 双许可，单源文件家族覆盖 BC1–BC7 编码（含 RDO）；仓库无 tag → pin master commit（stb 同款纪律，DevOps 核实写入）。否决项：自研 BC7（64 模式搜索空间，正确实现 >2 人周且质量难达标）、DirectXTex（DX/DDK 依赖重）、stb_dxt（无 BC7）、NVTT（体积大）。接入：Populate 成静态库，**仅编 bc7enc.cpp + rgbcx.cpp**（ISPC 加速器与 lodepng 不编）。
 3. 其余 12 项全部自研或消费既有库能力：miniaudio 内置 fade（ma_sound_set_fade_in_milliseconds）与文件流式播放（ma_sound_init_from_file）、Jolt CharacterVirtual（§27.2）均属既有依赖的能力消费，非新库。
