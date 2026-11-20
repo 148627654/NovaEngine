@@ -294,3 +294,17 @@ Wave 2 审查无 P0；两条 P1 已修复（见下段「已修复项」）。以
 - **波 2 已知限制备案（v1）**：蒙皮阴影 = 绑定姿势（shadow.vert 无蒙皮，动画姿势不投影——shadow_skinned 为后续候选）；地形高度采样 GL_NEAREST（512² 轻微阶梯感）；HeightField 不支持地形 GO 旋转/非均匀缩放（Jolt 轴对齐限制）；SMR 仅渲染首个含骨子网格；骨骼 >64 截断 warn；粒子/地形不写 SSAO GBuffer（无 AO 贡献）；粒子绘制点在阴影 pass 前（「粒子最后」与冻结钩子点的张力）；c4 输出超限事故（教训：Coder 单次回复限 token + 验证最多两轮 + 测试 harness 必须 try/catch 防弹窗）。
 - **合波日待办（c0 骨架日报告 + c9/c2/c3 报告移交）**：Physics2D::step 在 Scene::update 固定点接线（2b 合波）；ParticleRenderer 统计上报通道（Renderer 补 setter）；SceneViewPanel/Player 的 hdrFbo.create 传 normalDepth=true（SSAO 附件接通，2a 合波）；Camera 投影字段序列化键（2b，归 c8）；NovaEngine.h 伞头 include；editor 面板接线（EnvironmentPanel SSAO/IBL 区、InspectorPanel 新组件、EditorApplication Auto Reload 菜单）；**skyRotation→IBL 采样对齐**（c2 接缝：setEnvironment 冻结签名无旋转参数，天空盒转而反射图不转——最小修复在共享文件，归 c0）；**IBL::shutdown 接入 EditorApplication::shutdown**（c2 接缝，一行）；粒子钩子调用点移到透明段之后（若合波人工目测排序不对，一行移动归 c0）。
 - **2a 各 Coder 接缝备案（已实现可接受/候选）**：compute 卷积 = 波 3 候选（fragment 全链烘焙 <200ms，收益不足）；SSAO 无 init/resize/shutdown 调用方（render 懒初始化 + 纹理懒建自愈，备案）；IBL 缓存读写器本地镜像 BinaryCache 格式（文件静态 API 装不下 cubemap mip 链，键空间隔离，合并评估为可选）；SSAO 天空判定依赖清屏色法线模长≠1（病态天空色 ≈ 单位向量时误判暗化，shader 注释备案）。
+
+## 2026-11-19/20 波 2 人工验收记录（全部修复并推送）
+
+验收方式：用户编辑器目测 + 主会话 harness 复刻验证（编辑器渲染路径逐变体对比、GL 探针、深度缓冲地图、物理模拟）。
+
+- **演示场景全白（meshPath 字段名）**：V05Wave2Demo/V05TerrainDemo 的 MeshRenderer 网格字段写成 `meshPath`，反序列化读 `mesh` → 网格全空、静默跳过渲染（空路径无警告）——只剩天空+粒子可见。修复：JSON 字段名统一为 `mesh`（4d42f00）。
+- **演示场景全白（MRT 无 MSAA FBO 创建必败）**：Framebuffer 非 MSAA + normalDepth 路径首次完整性检查在附件 0 挂载之前 → create 恒失败 → 渲染整体跳过（编辑器 MSAA 路径不受影响；samples=1 调用方全灭，harness 深度探针复现）。修复：附件 0 挂载移至检查前（4d42f00）。
+- **演示场景全白（HDR 环境过亮）**：test_ibl.hdr 原为高亮程序化测试图（均值 1.78、太阳斑占宽 50%、峰值 28），IBL 1.0 + 曝光 1.0 把画面洗白。重生成 128×64 标准天空（小太阳+蓝色渐变，RLE 格式）并调优场景（iblIntensity 0.85 / skyExposure 1.1 / bloom 0.2）——首版新图误用非标准 xyze 平铺格式导致 stb 解码失败刷屏，已改标准 32-bit_rle_rgbe（9731c15）。
+- **地形碰撞穿透（HeightFieldShape 双重偏移）**：Jolt 高度场表面 = 体位置 + shapeOffset + scale×样本；世界 min 角同时填入两处 → 碰撞面平移出世界范围（x -100..0 vs 地形 -50..50），落点在范围外的物体直接穿透（掉落方块 y 10 直坠 -34 复现）。修复：shape offset 归零，体位置承载 min 角（8ca4981）；修复后落点 0.81 = 地形高 0.33 + 半高 0.5 精确吻合。
+- **演示场景相机朝向惯例**：引擎相机 forward=+Z；三个演示场景相机用默认朝向导致 Play 空白——Wave2Demo（水平前望压在地平线太阳上）、SkinnedQuadDemo（背对四边形）、2DTemplate（站在精灵背面被背面剔除）。修复：相机 180° 偏航对准场景，2D 相机移至 z=+10 从精灵正面取景（0b28f2d、3528dc2）。**惯例备案：场景作者给相机摆位须转 180°（四元数 [0,1,0,0]）或面向 -Z。**
+- **cubemap 缓存弱引用**：天空盒每帧重建 equirect 转换（转换帧 GL 状态扰动导致全黑）——改强引用缓存（7ea4cc2）。
+- **编辑器退出崩溃隐患**：TerrainRenderer::shutdown 未接入 EditorApplication::shutdown——静态地形缓存内 shared_ptr<Mesh> 在 GL 上下文销毁后的静态析构期执行 glDelete → 潜在退出崩溃（harness 复现 exit 139）。已补接（77ca9c2）。
+- **AnimatorPanel 默认关闭**：用户选中带 Animator 对象后"看不到面板"——改为启动默认开启（3528dc2）。
+- **已知限制确认（非 bug，预期管理）**：骨骼本身不渲染（无骨骼可视化，V1.0 可选）；Edit 态粒子为稳态快照（时间冻结）；编辑器保存场景会用完整浮点精度重排数值格式（无损）。
