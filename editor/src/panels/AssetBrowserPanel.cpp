@@ -215,14 +215,20 @@ void AssetBrowserPanel::onGui(EditorContext& ctx, EditorCamera&) {
                 }
                 ImGui::EndMenu();
             }
+            ImGui::Separator();
+            // V1.0-7 波 1 合波接线：Reference Checker 入口（面板由 EditorApplication 注入回调打开）
+            if (ImGui::MenuItem("Reference Checker..."))
+                if (openReferenceChecker) openReferenceChecker();
             ImGui::EndPopup();
         }
     }
     ImGui::EndChild();
 
-    // ---- 贴图导入设置模态（V0.3-5：colorSpace/wrap/filter/mipmaps + Save/Reset/Close）----
+    // ---- 贴图导入设置模态（V0.3-5：colorSpace/wrap/filter/mipmaps + Save/Reset/Close；
+    //      V1.0-6 追加：Compression 下拉 + Normal Map 用途勾选）----
     if (m_metaEditOpen) {
         using CS = NovaEngine::TextureImportSettings::ColorSpace;
+        using TC = NovaEngine::TextureCompression;
         ImGui::OpenPopup("Texture Import Settings");
         ImGui::SetNextWindowSize(ImVec2(420.0f, 0.0f), ImGuiCond_Appearing);
         bool stayOpen = true;
@@ -238,6 +244,11 @@ void AssetBrowserPanel::onGui(EditorContext& ctx, EditorCamera&) {
 
             const char* csName =
                 m_metaEditSettings.colorSpace == CS::Srgb ? "sRGB" : "Linear";
+            // V1.0-6 合波日修复（评审 P2-5）：NormalMap 勾选期间锁定 Color Space——
+            // 此前勾选后再改回 sRGB 会被下次 loadOrCreate 静默覆盖（isNormalMap 仍 true，
+            // 读出重写强制 Linear）；锁定后不再出现被静默覆盖的交互路径
+            const bool csLocked = m_metaEditSettings.isNormalMap;
+            if (csLocked) ImGui::BeginDisabled();
             if (ImGui::BeginCombo("Color Space", csName)) {
                 if (ImGui::Selectable("sRGB", m_metaEditSettings.colorSpace == CS::Srgb))
                     m_metaEditSettings.colorSpace = CS::Srgb;
@@ -245,6 +256,41 @@ void AssetBrowserPanel::onGui(EditorContext& ctx, EditorCamera&) {
                     m_metaEditSettings.colorSpace = CS::Linear;
                 ImGui::EndCombo();
             }
+            if (csLocked) ImGui::EndDisabled();
+
+            // V1.0-6：法线用途勾选（.novameta type "NormalMap" 往返保真——修复旧版
+            //「NormalMap 读出后 Save 重写为 Linear」的往返有损，KNOWN-ISSUES #5；
+            // Auto 压缩策略据此选 BC5）。勾选即按线性采样（NormalMap 语义）
+            {
+                bool normalMap = m_metaEditSettings.isNormalMap;
+                if (ImGui::Checkbox("Normal Map", &normalMap)) {
+                    m_metaEditSettings.isNormalMap = normalMap;
+                    if (normalMap) m_metaEditSettings.colorSpace = CS::Linear;
+                }
+            }
+
+            // V1.0-6：压缩格式下拉（Auto/None/BC1/BC7/BC5 + 策略说明）
+            const char* compName =
+                m_metaEditSettings.compression == TC::Auto   ? "Auto"
+                : m_metaEditSettings.compression == TC::None ? "None"
+                : m_metaEditSettings.compression == TC::BC1  ? "BC1 (DXT1)"
+                : m_metaEditSettings.compression == TC::BC7  ? "BC7 (BPTC)"
+                                                             : "BC5 (RGTC2)";
+            if (ImGui::BeginCombo("Compression", compName)) {
+                if (ImGui::Selectable("Auto", m_metaEditSettings.compression == TC::Auto))
+                    m_metaEditSettings.compression = TC::Auto;
+                if (ImGui::Selectable("None", m_metaEditSettings.compression == TC::None))
+                    m_metaEditSettings.compression = TC::None;
+                if (ImGui::Selectable("BC1 (DXT1)", m_metaEditSettings.compression == TC::BC1))
+                    m_metaEditSettings.compression = TC::BC1;
+                if (ImGui::Selectable("BC7 (BPTC)", m_metaEditSettings.compression == TC::BC7))
+                    m_metaEditSettings.compression = TC::BC7;
+                if (ImGui::Selectable("BC5 (RGTC2)", m_metaEditSettings.compression == TC::BC5))
+                    m_metaEditSettings.compression = TC::BC5;
+                ImGui::EndCombo();
+            }
+            ImGui::TextDisabled(
+                "Auto: 法线贴图 BC5 / 含 alpha BC7 / 其余 BC1；GPU 不支持自动回退");
 
             const char* wrapName = m_metaEditSettings.wrapMode == NovaEngine::TextureWrap::Repeat
                                        ? "Repeat"

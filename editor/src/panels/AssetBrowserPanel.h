@@ -21,6 +21,8 @@ public:
 
     // 由 EditorApplication 注入（双击场景文件时回调）
     std::function<void(const std::filesystem::path&)> openSceneCallback;
+    // V1.0-7 波 1 合波接线：右键菜单 Reference Checker… 入口（由 EditorApplication 注入）
+    std::function<void()> openReferenceChecker;
 
 private:
     std::filesystem::path m_currentDir = "assets";  // 相对项目根

@@ -1,0 +1,42 @@
+# NovaEngine CI（V1.0-9）—— push / PR 触发：Windows + VS2022
+#
+# 流程：Configure → Debug 全量构建 → ctest（NovaTests，--output-on-failure）→ Release 全量构建
+# 失败时归档 Logs/（引擎文件日志；无则忽略）。
+#
+# 注意：CI 机器无 GPU —— 只跑 NovaTests（无 GL 上下文纪律：测试进程不 init GL，
+# Mesh 上传路径靠 §26.0 骨架日 GL 守卫降级）；编辑器/Player 完整冒烟由 DevOps 本机执行。
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    name: Windows 构建（Debug/Release）+ NovaTests
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: Configure（VS2022 生成器；FetchContent 首次配置需联网，Python 已预装）
+        run: cmake -S . -B build
+
+      - name: Debug 全量构建
+        run: cmake --build build --config Debug
+
+      - name: Debug 测试（ctest + Catch2 逐用例失败可见）
+        run: ctest --test-dir build -C Debug --output-on-failure
+
+      - name: Release 全量构建
+        run: cmake --build build --config Release
+
+      - name: 失败归档日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs
+          path: Logs/
+          if-no-files-found: ignore

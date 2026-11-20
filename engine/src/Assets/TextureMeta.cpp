@@ -1,12 +1,15 @@
-// TextureMeta.cpp —— .novameta 贴图导入设置读写（V0.3-5）
+// TextureMeta.cpp —— .novameta 贴图导入设置读写（V0.3-5；V1.0-6 追加 compression）
 //
 // JSON 伴随文件（nlohmann），与贴图同目录："<贴图名>.<扩展名>.novameta"：
 //   {"version":1,"type":"sRGB"|"Linear"|"NormalMap","wrap":"Repeat"|"Clamp",
-//    "filter":"Bilinear"|"Trilinear","generateMipmaps":bool}
+//    "filter":"Bilinear"|"Trilinear","generateMipmaps":bool,
+//    "compression":"auto"|"none"|"bc1"|"bc7"|"bc5"}
 // 行为约定（冻结头 TextureMeta.h）：
 //   缺失 → 写默认 meta 落盘 + metaExisted=false（「无 meta 自动生成」）
 //   损坏（解析失败/字段非法）→ 默认值 + warn + metaExisted=false
-//   type "NormalMap" → ColorSpace::Linear（法线贴图按线性采样）
+//   type "NormalMap" → ColorSpace::Linear + isNormalMap=true（法线贴图按线性采样；
+//     V1.0-6 起 NormalMap 往返保真，修复旧版「读出后重写为 Linear」）
+//   compression 缺省 auto（旧文件零警告）；非法取值按损坏字段纪律处理（warn + 全默认）
 // serialize() 返回稳定 JSON 文本（nlohmann 默认对象为 std::map，键按字典序，
 // 输出逐字节确定——供二进制缓存 hash 拼接，改 meta 即改 hash，裁定 13）。
 
@@ -21,19 +24,44 @@
 
 namespace NovaEngine {
 
+namespace {
+
+// 压缩设置 → .novameta 文本（V1.0-6；与 serialize/save 共用，保证键名一致）
+const char* compressionName(TextureCompression c) {
+    switch (c) {
+        case TextureCompression::None: return "none";
+        case TextureCompression::BC1:  return "bc1";
+        case TextureCompression::BC7:  return "bc7";
+        case TextureCompression::BC5:  return "bc5";
+        default:                       return "auto";
+    }
+}
+
+// 设置 → JSON（serialize 紧凑版与 save 缩进版共用字段构造）
+nlohmann::json settingsToJson(const TextureImportSettings& s) {
+    nlohmann::json j;
+    j["version"] = 1;
+    // V1.0-6：isNormalMap 保真写回 "NormalMap"（旧版读出重写为 "Linear" 的往返有损就此修复）
+    j["type"] = s.isNormalMap
+                    ? "NormalMap"
+                    : (s.colorSpace == TextureImportSettings::ColorSpace::Linear) ? "Linear"
+                                                                                  : "sRGB";
+    j["wrap"] = (s.wrapMode == TextureWrap::Repeat) ? "Repeat" : "Clamp";
+    j["filter"] = (s.filterMode == TextureFilter::Trilinear) ? "Trilinear" : "Bilinear";
+    j["generateMipmaps"] = s.generateMipmaps;
+    j["compression"] = compressionName(s.compression);
+    return j;
+}
+
+}  // namespace
+
 std::filesystem::path TextureMeta::metaPathFor(const std::filesystem::path& texAbsPath) {
     return std::filesystem::path(texAbsPath.string() + ".novameta");
 }
 
 std::string TextureMeta::serialize(const TextureImportSettings& s) {
-    nlohmann::json j;
-    j["version"] = 1;
-    j["type"] = (s.colorSpace == TextureImportSettings::ColorSpace::Linear) ? "Linear" : "sRGB";
-    j["wrap"] = (s.wrapMode == TextureWrap::Repeat) ? "Repeat" : "Clamp";
-    j["filter"] = (s.filterMode == TextureFilter::Trilinear) ? "Trilinear" : "Bilinear";
-    j["generateMipmaps"] = s.generateMipmaps;
     // 紧凑文本（无缩进）；std::map 键序 → 稳定输出
-    return j.dump();
+    return settingsToJson(s).dump();
 }
 
 bool TextureMeta::save(const std::filesystem::path& texAbsPath, const TextureImportSettings& s) {
@@ -47,13 +75,7 @@ bool TextureMeta::save(const std::filesystem::path& texAbsPath, const TextureImp
         Logger::warn("[TextureMeta] 写入失败: {}", metaPath.string());
         return false;
     }
-    nlohmann::json j;
-    j["version"] = 1;
-    j["type"] = (s.colorSpace == TextureImportSettings::ColorSpace::Linear) ? "Linear" : "sRGB";
-    j["wrap"] = (s.wrapMode == TextureWrap::Repeat) ? "Repeat" : "Clamp";
-    j["filter"] = (s.filterMode == TextureFilter::Trilinear) ? "Trilinear" : "Bilinear";
-    j["generateMipmaps"] = s.generateMipmaps;
-    out << j.dump(4) << '\n';
+    out << settingsToJson(s).dump(4) << '\n';
     return out.good();
 }
 
@@ -96,8 +118,10 @@ TextureImportSettings TextureMeta::loadOrCreate(const std::filesystem::path& tex
             const std::string t = j["type"].get<std::string>();
             if (t == "sRGB") settings.colorSpace = TextureImportSettings::ColorSpace::Srgb;
             else if (t == "Linear") settings.colorSpace = TextureImportSettings::ColorSpace::Linear;
-            else if (t == "NormalMap") settings.colorSpace = TextureImportSettings::ColorSpace::Linear;
-            else valid = false;
+            else if (t == "NormalMap") {
+                settings.colorSpace = TextureImportSettings::ColorSpace::Linear;
+                settings.isNormalMap = true;   // V1.0-6：法线用途保真（Auto 压缩策略据此选 BC5）
+            } else valid = false;
         }
         if (j.contains("wrap")) {
             const std::string t = j["wrap"].get<std::string>();
@@ -114,6 +138,16 @@ TextureImportSettings TextureMeta::loadOrCreate(const std::filesystem::path& tex
         if (j.contains("generateMipmaps")) {
             if (j["generateMipmaps"].is_boolean())
                 settings.generateMipmaps = j["generateMipmaps"].get<bool>();
+            else valid = false;
+        }
+        // V1.0-6：compression 字段（旧文件缺省 auto，零警告；非法取值按损坏字段纪律 warn）
+        if (j.contains("compression")) {
+            const std::string c = j["compression"].get<std::string>();
+            if (c == "auto") settings.compression = TextureCompression::Auto;
+            else if (c == "none") settings.compression = TextureCompression::None;
+            else if (c == "bc1") settings.compression = TextureCompression::BC1;
+            else if (c == "bc7") settings.compression = TextureCompression::BC7;
+            else if (c == "bc5") settings.compression = TextureCompression::BC5;
             else valid = false;
         }
     } catch (const std::exception&) {

@@ -5,13 +5,21 @@
 
 namespace NovaEngine {
 
-// 贴图导入设置（V0.3-5 .novameta 伴随文件）
+// 贴图压缩格式（V1.0-6）：Auto = 自动策略（法线 BC5 / 含有效 alpha BC7 / 其余 BC1）
+enum class TextureCompression { Auto, None, BC1, BC7, BC5 };
+
+// 贴图导入设置（V0.3-5 .novameta 伴随文件；V1.0-6 追加 compression/isNormalMap，既有字段不变）
 struct TextureImportSettings {
     enum class ColorSpace { Srgb, Linear };
     ColorSpace colorSpace = ColorSpace::Srgb;
     TextureWrap wrapMode = TextureWrap::Repeat;
     TextureFilter filterMode = TextureFilter::Trilinear;
     bool generateMipmaps = true;
+    // ===== V1.0-6 追加（旧 meta 无该字段读取缺省 Auto/零警告）=====
+    TextureCompression compression = TextureCompression::Auto;
+    // 用途为法线（.novameta type "NormalMap"；Auto 策略据此选 BC5）。
+    // 旧编辑器「NormalMap 读出后重写为 Linear」往返有损（KNOWN-ISSUES #5），V1.0-6 起保真。
+    bool isNormalMap = false;
 };
 
 class TextureMeta {

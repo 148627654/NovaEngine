@@ -89,10 +89,12 @@ FetchContent_Declare(nlohmann_json
 set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
 
 # ---------- stb（纯头文件，pin commit 9600522；无 CMakeLists，手动 Populate 成 INTERFACE 库）----------
+# 注意：pin 为裸 SHA 且非 master tip——浅克隆（--depth 1）只含分支 tip，checkout 祖先
+# SHA 会报 "unable to read tree" 导致 configure 失败（2026-11-20 cT 实测复现）；
+# stb 仓库极小，此处不做浅克隆（GIT_SHALLOW 移除），保证 CI 全新克隆确定性成功。
 FetchContent_Declare(stb
     GIT_REPOSITORY https://github.com/nothings/stb.git
-    GIT_TAG 9600522de53973336fa033a289858a4354cbb04c
-    GIT_SHALLOW TRUE)
+    GIT_TAG 9600522de53973336fa033a289858a4354cbb04c)
 FetchContent_GetProperties(stb)
 if(NOT stb_POPULATED)
     FetchContent_Populate(stb)
@@ -137,8 +139,37 @@ endif()
 add_library(miniaudio INTERFACE)
 target_include_directories(miniaudio INTERFACE ${miniaudio_SOURCE_DIR})
 
-# ---------- 拉取并配置其余依赖（imgui/imguizmo/stb/jolt/miniaudio 已单独 Populate）----------
-FetchContent_MakeAvailable(glfw glm assimp nlohmann_json glad)
+# ---------- Catch2 v3.16.0（V1.0-9 测试框架；BSL-1.0，Architect 裁定 + 用户批准 2026-11-20）----------
+# FetchContent 一条命令接入；tests/CMakeLists.txt 使用 Catch2::Catch2WithMain + catch_discover_tests 接 ctest
+FetchContent_Declare(catch2
+    GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+    GIT_TAG v3.16.0
+    GIT_SHALLOW TRUE)
+set(CATCH_INSTALL_DOC_DIR "" CACHE STRING "" FORCE)
+set(CATCH_INSTALL_HELPERS OFF CACHE BOOL "" FORCE)
+
+# ---------- bc7enc_rdo（V1.0-6 纹理压缩编码核心；MIT/Unlicense 双许可，Architect 裁定 + 用户批准 2026-11-20）----------
+# 仓库无 tag → pin master 最新 commit（stb 同款纪律；2026-11-20 经 GitHub API 核实）：
+#   b9438627eef73a1157e84201b6fa6eb2ffd6d9f0（2026-07-31，"Update README.md"）
+# 裸 SHA pin 不做浅克隆（stb 同款教训：上游 master 前移后，浅克隆 checkout 祖先 SHA 必败）；
+# 仓库极小（仅源文件家族），全量克隆零负担。
+# 静态库 target 名 bc7enc；只编 bc7enc.cpp + rgbcx.cpp（BC1–BC7 编码核心，均仅依赖自身头）；
+# ISPC 加速器（bc7e.ispc / ispc.exe）与 lodepng（示例工具用）不编（禁编）。
+# 不用 MakeAvailable（仓库根 CMakeLists.txt 面向自带示例/ISPC 构建），Populate 后手工建库。
+FetchContent_Declare(bc7enc
+    GIT_REPOSITORY https://github.com/richgel999/bc7enc_rdo.git
+    GIT_TAG b9438627eef73a1157e84201b6fa6eb2ffd6d9f0)
+FetchContent_GetProperties(bc7enc)
+if(NOT bc7enc_POPULATED)
+    FetchContent_Populate(bc7enc)
+endif()
+add_library(bc7enc STATIC
+    ${bc7enc_SOURCE_DIR}/bc7enc.cpp
+    ${bc7enc_SOURCE_DIR}/rgbcx.cpp)
+target_include_directories(bc7enc PUBLIC ${bc7enc_SOURCE_DIR})
+
+# ---------- 拉取并配置其余依赖（imgui/imguizmo/stb/jolt/miniaudio/bc7enc 已单独 Populate）----------
+FetchContent_MakeAvailable(glfw glm assimp nlohmann_json glad catch2)
 
 # glad v2.0.8 仓库根没有 CMakeLists.txt（MakeAvailable 只拉取、不 add_subdirectory），
 # 其 CMake 集成入口在 glad/cmake 子目录，载入后才提供 glad_add_library()

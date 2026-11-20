@@ -21,6 +21,15 @@ public:
     // 贴图 RGBA8（只存 mip0，GPU 侧 glGenerateMipmap 重建）
     static bool loadTextureRgba8(const std::string& key, int& outW, int& outH, std::vector<uint8_t>& outPixels);
     static bool saveTextureRgba8(const std::string& key, int w, int h, const std::vector<uint8_t>& pixels);
+    // ===== V1.0-6 追加：贴图压缩载荷（payloadType 4；既有 payloadType 1/2/3 不动、版本不 bump）=====
+    // 载荷布局：[format:u8][w:u32][h:u32][mipCount:u8][blockBytes:u64][块数据]
+    //   format 0=BC7 1=BC1 2=BC5；块数据 = mip0..mipN 连续 4x4 块（编码器离线生成完整链，
+    //   压缩纹理不可 glGenerateMipmap）；blockBytes 必须精确等于该 mipCount 的链总字节
+    // 缓存键（调用方拼接）：makeKey(源字节, meta 文本 + ";comp=<format>;caps=<能力标志>")
+    static bool loadTextureCompressed(const std::string& key, int& outFormat, int& outW, int& outH,
+                                      std::vector<uint8_t>& outBlocks);
+    static bool saveTextureCompressed(const std::string& key, int format, int w, int h,
+                                      const std::vector<uint8_t>& blocks);
     // HDR equirect RGB float
     static bool loadTextureRgbFloat(const std::string& key, int& outW, int& outH, std::vector<float>& outPixels);
     static bool saveTextureRgbFloat(const std::string& key, int w, int h, const std::vector<float>& pixels);

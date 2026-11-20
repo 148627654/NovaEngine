@@ -96,6 +96,74 @@ std::filesystem::path resolveAssetAbs(const std::filesystem::path& relativePath)
     return projAbs;
 }
 
+// ===== V1.0-6 压缩格式决策（§26.3）=====
+
+constexpr int kCompAutoNeedPixels = -2;   // Auto：需解码像素做内容判定（alpha 检测）
+constexpr int kCompNone = -1;             // 不压缩（未压缩 RGBA8 路径）
+
+const char* compressionFormatName(int format) {
+    switch (format) {
+        case 0: return "BC7";
+        case 1: return "BC1";
+        case 2: return "BC5";
+        default: return "未压缩";
+    }
+}
+
+// warn 一次纪律（§26.3「warn 一次」；进程内每种原因只打一次）
+bool s_warnedCapsUnavailable = false;    // GPU 完全无压缩支持（含模拟不支持注入场景）
+bool s_warnedFormatFallback = false;     // 所选格式不支持 → 逐级回退
+bool s_warnedEncoderUnavailable = false; // bc7enc 未接入 / 编码失败
+
+// 返回最终压缩格式（0=BC7 1=BC1 2=BC5）；kCompNone = 不压缩；kCompAutoNeedPixels = Auto 需先解码
+int chooseCompressionFormat(const TextureImportSettings& s, bool srgbInternal,
+                            const uint8_t* rgba8 = nullptr, size_t pixelCount = 0) {
+    if (s.compression == TextureCompression::None) return kCompNone;   // 用户显式关闭：零警告
+
+    const GpuCompressionCaps caps = TextureLoader::queryCompressionCaps();
+    const bool anyCaps = caps.bc7 || caps.bc1 || caps.bc5;
+    if (!anyCaps) {
+        if (!s_warnedCapsUnavailable) {
+            s_warnedCapsUnavailable = true;
+            Logger::warn("AssetDatabase: GPU 不支持贴图压缩（BC7/BC1/BC5 均不可用），回退未压缩 RGBA8");
+        }
+        return kCompNone;
+    }
+
+    int requested;
+    switch (s.compression) {
+        case TextureCompression::BC1: requested = 1; break;
+        case TextureCompression::BC7: requested = 0; break;
+        case TextureCompression::BC5: requested = 2; break;
+        case TextureCompression::Auto:
+            if (!rgba8) return kCompAutoNeedPixels;   // 调用方先解码再复判
+            // 自动策略：法线贴图 → BC5；含有效 alpha → BC7；其余 → BC1（§26.3）
+            if (s.isNormalMap) requested = 2;
+            else if (TextureLoader::hasAlpha(rgba8, pixelCount)) requested = 0;
+            else requested = 1;
+            break;
+        default: return kCompNone;   // None（上方已拦截，防御）
+    }
+
+    // 逐级回退：所选 → BC7 → BC1（去重）→ 未压缩 RGBA8
+    const int chain[3] = {requested, 0, 1};
+    for (int c : chain) {
+        if (!caps.supports(c, srgbInternal)) continue;
+        if (c != requested && !s_warnedFormatFallback) {
+            s_warnedFormatFallback = true;
+            Logger::warn("AssetDatabase: 贴图压缩格式 {} 不支持，回退 {}",
+                         compressionFormatName(requested), compressionFormatName(c));
+        }
+        return c;
+    }
+    if (!s_warnedFormatFallback) {
+        s_warnedFormatFallback = true;
+        Logger::warn("AssetDatabase: 贴图压缩格式 {} 不支持，回退未压缩 RGBA8",
+                     compressionFormatName(requested));
+    }
+    return kCompNone;
+}
+
 }  // namespace
 
 AssetDatabase& AssetDatabase::instance() {
@@ -281,14 +349,101 @@ std::shared_ptr<Texture> AssetDatabase::getTexture(const std::filesystem::path& 
     const TextureImportSettings settings = TextureMeta::loadOrCreate(abs, metaExisted);
 
     // 二进制缓存键 = 源字节 + meta 文本（改 meta → 缓存 hash 失效，裁定 13）
-    const std::string binKey = BinaryCache::makeKey(srcBytes, TextureMeta::serialize(settings));
+    const std::string metaText = TextureMeta::serialize(settings);
+    const std::string binKey = BinaryCache::makeKey(srcBytes, metaText);
 
     // sRGB 内部格式仅当 meta 声明 sRGB 且调用方请求 srgb（NormalMap/Linear 一律线性）
     const bool srgbInternal =
         (settings.colorSpace == TextureImportSettings::ColorSpace::Srgb) && srgb;
 
+    // 解码 RGBA8（RGBA8 缓存优先——解码缓存与压缩缓存并存；未命中完整解码 + 写缓存）
     int w = 0, h = 0;
     std::vector<uint8_t> pixels;
+    auto decodePixels = [&]() -> bool {
+        if (BinaryCache::loadTextureRgba8(binKey, w, h, pixels)) return true;
+        if (!TextureLoader::loadRgba8(abs, w, h, pixels)) {
+            Logger::error("AssetDatabase: 加载贴图失败（解码）{}", relativePath.string());
+            return false;
+        }
+        BinaryCache::saveTextureRgba8(binKey, w, h, pixels);
+        return true;
+    };
+
+    // ---- V1.0-6 压缩路径（§26.3）：meta compression != None 且 GPU 支持所选格式 ----
+    int compFormat = chooseCompressionFormat(settings, srgbInternal);
+    if (compFormat == kCompAutoNeedPixels) {
+        // Auto：先解码做内容判定（alpha 检测），再复判
+        if (!decodePixels()) return nullptr;
+        compFormat = chooseCompressionFormat(settings, srgbInternal, pixels.data(),
+                                             static_cast<size_t>(w) * static_cast<size_t>(h));
+    }
+    if (compFormat >= 0) {
+        // 压缩缓存键 = 源字节 + meta 文本 + 最终格式 + GPU 能力标志
+        //（改 meta compression / GPU 能力变化 → 键变自动重导）
+        const GpuCompressionCaps caps = TextureLoader::queryCompressionCaps();
+        const std::string compKey = BinaryCache::makeKey(
+            srcBytes, metaText + ";comp=" + std::to_string(compFormat) + ";caps=" + caps.keyText());
+
+        int cw = 0, ch = 0, cfmt = -1;
+        std::vector<uint8_t> blocks;
+        // 显式格式路径可先查压缩缓存（命中免解码）；Auto 路径 w/h 已解码，顺带交叉校验
+        bool cacheHit =
+            BinaryCache::loadTextureCompressed(compKey, cfmt, cw, ch, blocks) &&
+            cfmt == compFormat;
+        if (cacheHit && w > 0 && (cw != w || ch != h))
+            cacheHit = false;   // 防御：与解码尺寸不符（键含格式，理论不可能）→ 重编码
+        if (!cacheHit) {
+            // 未命中：先解码（Auto 路径上一步已解码则复用），再离线编码（bc7enc 未接入 → 失败回退）
+            if (w == 0 || h == 0) {
+                if (!decodePixels()) return nullptr;
+            }
+            const int mips = TextureLoader::encodeCompressed(pixels.data(), w, h, compFormat,
+                                                             settings.generateMipmaps, blocks);
+            if (mips <= 0) {
+                if (!s_warnedEncoderUnavailable) {
+                    s_warnedEncoderUnavailable = true;
+#ifdef NOVA_HAS_BC7ENC
+                    Logger::warn("AssetDatabase: 贴图压缩编码失败（{}），回退未压缩 RGBA8: {}",
+                                 compressionFormatName(compFormat), relativePath.string());
+#else
+                    Logger::warn("AssetDatabase: 压缩库未接入（NOVA_HAS_BC7ENC 未定义），回退未压缩 RGBA8: {}",
+                                 relativePath.string());
+#endif
+                }
+                // 回退既有未压缩路径（pixels 已解码、RGBA8 缓存已由 decodePixels 落盘）
+                auto tex = Texture::createFromPixels(pixels.data(), w, h, srgbInternal,
+                                                     settings.wrapMode, settings.filterMode,
+                                                     settings.generateMipmaps);
+                if (!tex) {
+                    Logger::error("AssetDatabase: 上传贴图失败 {}", relativePath.string());
+                    return nullptr;
+                }
+                m_textureCache[texKey] = tex;
+                return tex;
+            }
+            cw = w;
+            ch = h;
+            cfmt = compFormat;
+            BinaryCache::saveTextureCompressed(compKey, cfmt, cw, ch, blocks);
+        }
+
+        auto tex = Texture::createFromCompressed(blocks.data(), blocks.size(), cw, ch, cfmt,
+                                                 srgbInternal, settings.wrapMode,
+                                                 settings.filterMode, settings.generateMipmaps);
+        if (!tex) {
+            Logger::error("AssetDatabase: 上传压缩贴图失败 {}", relativePath.string());
+            return nullptr;
+        }
+        // 导入日志 before/after 字节（§26.3「导入日志逐贴图 before/after 字节」）
+        Logger::info("AssetDatabase: 贴图压缩 {}（{}x{}，{}）：RGBA8 {} B -> {} B（{} 级 mip）",
+                     relativePath.string(), cw, ch, compressionFormatName(cfmt),
+                     static_cast<size_t>(cw) * static_cast<size_t>(ch) * 4u, blocks.size(),
+                     settings.generateMipmaps ? TextureLoader::mipLevels(cw, ch) : 1);
+        m_textureCache[texKey] = tex;
+        return tex;
+    }
+
+    // ---- 既有未压缩 RGBA8 路径（meta compression=None / GPU 不支持 / 无可用格式时零变化）----
     if (!BinaryCache::loadTextureRgba8(binKey, w, h, pixels)) {
         // 未命中：完整解码 + 写缓存（损坏缓存已被 BinaryCache 删除）
         if (!TextureLoader::loadRgba8(abs, w, h, pixels)) {
@@ -448,6 +603,27 @@ void AssetDatabase::releaseUnused() {
     // cubemap 为强引用缓存（2026-11-19）：releaseUnused 不清——由 clearCache 显式清空
     std::erase_if(m_materialAssetCache, [](const auto& kv) { return kv.second.expired(); });
     std::erase_if(m_audioClipCache, [](const auto& kv) { return kv.second.expired(); });
+}
+
+// ===== V1.0 波 1 骨架日冻结（§26.0 冻结项 4）：实现归 cG =====
+MemorySnapshot AssetDatabase::memorySnapshot() {
+    MemorySnapshot snap;
+    AssetDatabase& db = instance();
+    // 贴图：sizeBytes 汇总（压缩 = 块字节；未压缩 = w*h*4，§26.3）
+    for (const auto& [key, weak] : db.m_textureCache)
+        if (auto tex = weak.lock())
+            snap.textureBytes += tex->sizeBytes();
+    // 立方体贴图：估算 6 面 × faceSize² × 8B/px（GL_RGB16F 6B/px + 完整 mip 链 ≈ ×1.33）
+    for (const auto& [key, cube] : db.m_cubemapCache) {
+        const size_t facePx =
+            static_cast<size_t>(cube->faceSize()) * static_cast<size_t>(cube->faceSize());
+        snap.cubemapBytes += facePx * 6u * 8u;
+    }
+    // 材质资产：存活计数
+    for (const auto& [key, weak] : db.m_materialAssetCache)
+        if (weak.lock()) ++snap.materialAssetCount;
+    // meshVertexBytes/audioBytes/objectCount/componentCount/loadedSceneCount 归波 3 cR 收口（§26.3）
+    return snap;
 }
 
 }  // namespace NovaEngine

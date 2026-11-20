@@ -18,7 +18,13 @@ target_link_libraries(NovaEngine PUBLIC
     assimp
     nlohmann_json::nlohmann_json
     stb
+    bc7enc
     Jolt
     miniaudio)
+
+# NOVA_HAS_BC7ENC（V1.0-6，Reviewer P1）：启用 bc7enc 压缩编码（Dependencies.cmake 已接
+# bc7enc_rdo 静态库）。PUBLIC 传播 NovaEditor/NovaPlayer/NovaTests——定义后 cG 的
+# TextureCompressImpl.h / AssetDatabase.cpp 走真实压缩分支，占位回退分支失效。
+target_compile_definitions(NovaEngine PUBLIC NOVA_HAS_BC7ENC)
 
 nova_configure_target(NovaEngine)

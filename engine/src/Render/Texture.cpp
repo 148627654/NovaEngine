@@ -13,7 +13,7 @@ namespace {
 
 // 上传 RGBA8 像素为 2D 纹理（采样参数化，V0.3-5 .novameta 消费；默认参数等价旧行为）。
 // 参数用引用回写纹理 id 与尺寸——冻结头不允许添加成员函数，工厂先 new 出 Texture 再经本函数填充
-void uploadRgba8(uint32_t& outId, int& outWidth, int& outHeight,
+void uploadRgba8(uint32_t& outId, int& outWidth, int& outHeight, size_t& outBytes,
                  const uint8_t* pixels, int width, int height, bool srgb,
                  TextureWrap wrap, TextureFilter filter, bool generateMipmaps) {
     glGenTextures(1, &outId);
@@ -37,6 +37,52 @@ void uploadRgba8(uint32_t& outId, int& outWidth, int& outHeight,
     glBindTexture(GL_TEXTURE_2D, 0);
     outWidth = width;
     outHeight = height;
+    outBytes = static_cast<size_t>(width) * static_cast<size_t>(height) * 4u;
+}
+
+// 上传压缩块数据（V1.0-6）：逐级 glCompressedTexImage2D（压缩纹理不可 glGenerateMipmap，
+// mip 链由编码器离线生成）。mipCount 由调用方按 generateMipmaps 决定（1 或完整链）。
+void uploadCompressed(uint32_t& outId, int& outWidth, int& outHeight, size_t& outBytes,
+                      const uint8_t* blocks, int width, int height, int format, bool srgb,
+                      TextureWrap wrap, TextureFilter filter, int mipCount) {
+    glGenTextures(1, &outId);
+    glBindTexture(GL_TEXTURE_2D, outId);
+
+    const GLint wrapMode = (wrap == TextureWrap::Repeat) ? GL_REPEAT : GL_CLAMP_TO_EDGE;
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrapMode);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrapMode);
+    const GLint minFilter =
+        (filter == TextureFilter::Trilinear && mipCount > 1) ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR;
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, minFilter);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    GLenum internal;
+    switch (format) {
+        case 0:   // BC7（BPTC）
+            internal = srgb ? GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM : GL_COMPRESSED_RGBA_BPTC_UNORM;
+            break;
+        case 1:   // BC1（S3TC DXT1）
+            internal = srgb ? GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT
+                            : GL_COMPRESSED_RGBA_S3TC_DXT1_EXT;
+            break;
+        default:  // BC5（RGTC2；法线贴图 RG 两通道，无 sRGB 变体）
+            internal = GL_COMPRESSED_RG_RGTC2;
+            break;
+    }
+    const size_t blockSize = (format == 1) ? 8u : 16u;
+    size_t used = 0;
+    for (int i = 0; i < mipCount; ++i) {
+        const int lw = std::max(1, width >> i), lh = std::max(1, height >> i);
+        const size_t sz = static_cast<size_t>((lw + 3) / 4) * ((lh + 3) / 4) * blockSize;
+        glCompressedTexImage2D(GL_TEXTURE_2D, i, internal, lw, lh, 0,
+                               static_cast<GLsizei>(sz), blocks + used);
+        used += sz;
+    }
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+    outWidth = width;
+    outHeight = height;
+    outBytes = used;
 }
 
 }  // namespace
@@ -44,7 +90,7 @@ void uploadRgba8(uint32_t& outId, int& outWidth, int& outHeight,
 std::shared_ptr<Texture> Texture::createWhite() {
     const uint8_t white[4] = {255, 255, 255, 255};
     auto tex = std::shared_ptr<Texture>(new Texture());
-    uploadRgba8(tex->m_id, tex->m_width, tex->m_height, white, 1, 1, false,
+    uploadRgba8(tex->m_id, tex->m_width, tex->m_height, tex->m_sizeBytes, white, 1, 1, false,
                 TextureWrap::Repeat, TextureFilter::Trilinear, true);
     return tex;
 }
@@ -68,8 +114,8 @@ std::shared_ptr<Texture> Texture::createCheckerboard(int cells, glm::vec4 colorA
     }
 
     auto tex = std::shared_ptr<Texture>(new Texture());
-    uploadRgba8(tex->m_id, tex->m_width, tex->m_height, pixels.data(), size, size, false,
-                TextureWrap::Repeat, TextureFilter::Trilinear, true);
+    uploadRgba8(tex->m_id, tex->m_width, tex->m_height, tex->m_sizeBytes, pixels.data(), size,
+                size, false, TextureWrap::Repeat, TextureFilter::Trilinear, true);
     return tex;
 }
 
@@ -90,8 +136,8 @@ std::shared_ptr<Texture> Texture::createFromFile(const std::filesystem::path& pa
     }
 
     auto tex = std::shared_ptr<Texture>(new Texture());
-    uploadRgba8(tex->m_id, tex->m_width, tex->m_height, pixels.data(), w, h, srgb,
-                wrap, filter, generateMipmaps);
+    uploadRgba8(tex->m_id, tex->m_width, tex->m_height, tex->m_sizeBytes, pixels.data(), w, h,
+                srgb, wrap, filter, generateMipmaps);
     return tex;
 }
 
@@ -101,8 +147,35 @@ std::shared_ptr<Texture> Texture::createFromPixels(const uint8_t* rgba8, int wid
     // 二进制缓存命中路径（V0.3-7）：像素已在内存，跳过文件读取与 stb 解码
     if (!rgba8 || width <= 0 || height <= 0) return nullptr;
     auto tex = std::shared_ptr<Texture>(new Texture());
-    uploadRgba8(tex->m_id, tex->m_width, tex->m_height, rgba8, width, height, srgb,
-                wrap, filter, generateMipmaps);
+    uploadRgba8(tex->m_id, tex->m_width, tex->m_height, tex->m_sizeBytes, rgba8, width, height,
+                srgb, wrap, filter, generateMipmaps);
+    return tex;
+}
+
+std::shared_ptr<Texture> Texture::createFromCompressed(const uint8_t* blocks, size_t blockBytes,
+                                                       int width, int height, int format,
+                                                       bool srgb, TextureWrap wrap,
+                                                       TextureFilter filter,
+                                                       bool generateMipmaps) {
+    // 压缩块数据上传（V1.0-6）：块字节必须覆盖所上传的 mip 链
+    if (!blocks || blockBytes == 0 || width <= 0 || height <= 0 || format < 0 || format > 2)
+        return nullptr;
+    const size_t blockSize = (format == 1) ? 8u : 16u;
+    const int maxMips = TextureLoader::mipLevels(width, height);
+    const int mipCount = generateMipmaps ? maxMips : 1;
+    size_t needed = 0;
+    for (int i = 0; i < mipCount; ++i) {
+        const int lw = std::max(1, width >> i), lh = std::max(1, height >> i);
+        needed += static_cast<size_t>((lw + 3) / 4) * ((lh + 3) / 4) * blockSize;
+    }
+    if (blockBytes < needed) {
+        Logger::error("[Texture] 压缩块数据不足（{}x{} fmt {}：需 {} B，得 {} B）", width,
+                      height, format, needed, blockBytes);
+        return nullptr;
+    }
+    auto tex = std::shared_ptr<Texture>(new Texture());
+    uploadCompressed(tex->m_id, tex->m_width, tex->m_height, tex->m_sizeBytes, blocks, width,
+                     height, format, srgb, wrap, filter, mipCount);
     return tex;
 }
 
@@ -118,5 +191,7 @@ void Texture::bind(uint32_t slot) const {
 int Texture::width() const { return m_width; }
 int Texture::height() const { return m_height; }
 uint32_t Texture::handle() const { return m_id; }
+
+size_t Texture::sizeBytes() const { return m_sizeBytes; }
 
 }  // namespace NovaEngine

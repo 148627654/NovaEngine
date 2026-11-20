@@ -13,4 +13,5 @@ add_subdirectory(engine)
 add_subdirectory(samples)
 add_subdirectory(editor)
 add_subdirectory(player)
-add_subdirectory(tests)  # 临时：PlayCycleTest（Play 进出往返层级回归，用后即删）
+enable_testing()   # ctest 入口（顶层使能，NovaTests 用例由 catch_discover_tests 注册在 tests/）
+add_subdirectory(tests)  # NovaTests：Catch2 单元测试 + ctest（V1.0-9，PlayCycleTest 已 catch 化并入）

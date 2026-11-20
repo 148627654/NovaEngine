@@ -7,7 +7,7 @@
 // u32/u64/f32 直接 memcpy 原生值即可，无需字节序转换）：
 //   Header: magic "NVBI"(4B) | version u32=1 | payloadType u32 | flags u32
 //         | sourceSize u64 | payloadSize u64 | reserved u64 | reserved2 u64
-//   payloadType: 1=MeshData, 2=TextureRGBA8, 3=TextureRGBFloat
+//   payloadType: 1=MeshData, 2=TextureRGBA8, 3=TextureRGBFloat, 4=TextureCompressed（V1.0-6）
 //   MeshData 载荷:
 //     u32 vertexCount | u32 indexCount
 //     | 顶点 48B×N（position f32x3 + normal f32x3 + uv f32x2 + tangent f32x3 + pad f32，
@@ -15,12 +15,18 @@
 //     | 索引 u32×N | AABB 6×f32（min+max） | u32 nameLen | UTF-8 name
 //   TextureRGBA8 载荷: u32 w | u32 h | u8 × w*h*4（只存 mip0，GPU 侧 glGenerateMipmap 重建）
 //   TextureRGBFloat 载荷: u32 w | u32 h | f32 × w*h*3（HDR equirect）
+//   TextureCompressed 载荷（V1.0-6）: u8 format | u32 w | u32 h | u8 mipCount
+//     | u64 blockBytes | 块数据 × blockBytes（format 0=BC7 1=BC1 2=BC5；
+//     块数据 = mip0..mipN 连续 4x4 块，编码器离线生成，压缩纹理不可 glGenerateMipmap）
 //
 // 读取校验（裁定 12）：magic / version / payloadType / payloadSize==剩余长度 /
 // 载荷内部尺寸；任一不符 → 删除该文件 + warn + false（损坏即删即重导）。
+// P2-1：删除必须在读取流关闭之后执行（先读后删），且删除失败打日志可见——
+// 流存活期间 remove() 在部分共享模式下静默失败会让坏文件永驻。
 
 #include <NovaEngine/Assets/BinaryCache.h>
 #include <NovaEngine/Assets/AssetDatabase.h>   // projectRoot：缓存目录锚点（同模块内依赖）
+#include <NovaEngine/Assets/TextureLoader.h>   // V1.0-6：mip 链级数/块字节公式（压缩载荷校验）
 #include <NovaEngine/Core/Logger.h>
 
 #include <cstring>
@@ -37,6 +43,7 @@ constexpr uint32_t kVersion = 1;
 constexpr uint32_t kTypeMesh = 1;
 constexpr uint32_t kTypeTexRgba8 = 2;
 constexpr uint32_t kTypeTexRgbFloat = 3;
+constexpr uint32_t kTypeTexCompressed = 4;   // V1.0-6（注意：压缩载荷不用 3——3 已被 RGBFloat 占用）
 constexpr size_t kHeaderSize = 48;
 constexpr size_t kVertexStride = 48;   // 12×f32，pad 1×f32
 
@@ -99,6 +106,7 @@ void putBytes(std::vector<uint8_t>& b, const void* p, size_t n) {
 class Reader {
 public:
     explicit Reader(const std::vector<uint8_t>& d) : m_d(d) {}
+    bool u8(uint8_t& out) { return take(1, &out); }
     bool u32(uint32_t& out) { return take(4, &out); }
     bool u64(uint64_t& out) { return take(8, &out); }
     bool bytes(void* dst, size_t n) {
@@ -120,11 +128,21 @@ private:
     size_t m_pos = 0;
 };
 
-// 损坏处理：删除该缓存文件 + warn + false（裁定 12「损坏即删即重导」）
+// 损坏处理：删除该缓存文件 + warn + false（裁定 12「损坏即删即重导」）。
+// P2-1：删除失败（文件占用/权限等）必须打日志可见，不得静默吞 error_code——
+// 坏文件永驻会让每次导入都走损坏重导路径；调用方保证读取流已关闭（readCacheFile 先读后删）。
 bool corrupt(const std::string& key) {
     std::error_code ec;
-    std::filesystem::remove(cacheDir() / (key + ".novabin"), ec);
-    Logger::warn("[BinaryCache] 缓存损坏，已删除并重导: {}", key);
+    const std::filesystem::path file = cacheDir() / (key + ".novabin");
+    if (std::filesystem::remove(file, ec)) {
+        Logger::warn("[BinaryCache] 缓存损坏，已删除并重导: {}", key);
+    } else if (ec) {
+        Logger::warn("[BinaryCache] 缓存损坏，删除失败（{}），请手动清理: {}", ec.message(),
+                     file.string());
+    } else {
+        // 文件已不存在（并发删除等）：等价于已删除
+        Logger::warn("[BinaryCache] 缓存损坏（文件已不存在），重导: {}", key);
+    }
     return false;
 }
 
@@ -154,18 +172,26 @@ bool writeCacheFile(const std::string& key, uint32_t payloadType,
 }
 
 // 读 + Header 校验（magic/version/payloadType/payloadSize==剩余长度）；未命中静默 false
+// P2-1：先读后删——文件流必须在 corrupt() 删除之前关闭。MSVC 流默认共享模式不含
+// FILE_SHARE_DELETE 时，流存活期间 remove() 会失败且 error_code 被静默吞掉，
+// 损坏文件将永驻（压缩缓存 loadTextureCompressed 同走本函数）。
 bool readCacheFile(const std::string& key, uint32_t expectType,
                    std::vector<uint8_t>& outPayload) {
     std::vector<uint8_t> file;
-    std::ifstream in(cacheDir() / (key + ".novabin"), std::ios::binary);
-    if (!in) return false;   // 缓存未命中（正常路径，不打日志）
-
-    in.seekg(0, std::ios::end);
-    const std::streamoff size = in.tellg();
-    if (size < 0) return false;
-    in.seekg(0, std::ios::beg);
-    file.resize(static_cast<size_t>(size));
-    if (size > 0 && !in.read(reinterpret_cast<char*>(file.data()), size)) return corrupt(key);
+    bool readFailed = false;
+    {
+        std::ifstream in(cacheDir() / (key + ".novabin"), std::ios::binary);
+        if (!in) return false;   // 缓存未命中（正常路径，不打日志）
+        in.seekg(0, std::ios::end);
+        const std::streamoff size = in.tellg();
+        if (size < 0) return false;
+        in.seekg(0, std::ios::beg);
+        file.resize(static_cast<size_t>(size));
+        if (size > 0 &&
+            !in.read(reinterpret_cast<char*>(file.data()), size))
+            readFailed = true;   // 读取失败 → 损坏（删除延后到流关闭之后）
+    }
+    if (readFailed) return corrupt(key);   // 流已析构关闭，删除可生效
 
     if (file.size() < kHeaderSize) return corrupt(key);
     if (std::memcmp(file.data(), kMagic, 4) != 0) return corrupt(key);
@@ -354,6 +380,71 @@ bool BinaryCache::loadTextureRgbFloat(const std::string& key, int& outW, int& ou
 
     outPixels.resize(expect);
     if (!r.bytes(outPixels.data(), expect * sizeof(float))) return corrupt(key);
+    outW = static_cast<int>(w);
+    outH = static_cast<int>(h);
+    return true;
+}
+
+// ---- TextureCompressed（V1.0-6；payloadType 4，完整 mip 链块数据）----
+
+bool BinaryCache::saveTextureCompressed(const std::string& key, int format, int w, int h,
+                                        const std::vector<uint8_t>& blocks) {
+    if (key.empty() || format < 0 || format > 2 || w <= 0 || h <= 0 ||
+        w > static_cast<int>(kMaxTexDim) || h > static_cast<int>(kMaxTexDim) || blocks.empty()) {
+        Logger::warn("[BinaryCache] saveTextureCompressed 参数非法: {} ({}x{}, fmt {})", key, w,
+                     h, format);
+        return false;
+    }
+    // mipCount 由块字节反推：必须精确等于某级数的完整链总字节（1..maxMips），否则拒写
+    const int maxMips = TextureLoader::mipLevels(w, h);
+    int mipCount = -1;
+    for (int m = 1; m <= maxMips; ++m) {
+        if (TextureLoader::compressedSizeBytes(format, w, h, m) == blocks.size()) {
+            mipCount = m;
+            break;
+        }
+    }
+    if (mipCount <= 0) {
+        Logger::warn("[BinaryCache] saveTextureCompressed 块字节与尺寸不匹配: {} ({}x{}, {} B)",
+                     key, w, h, blocks.size());
+        return false;
+    }
+    std::vector<uint8_t> payload;
+    payload.reserve(1 + 4 + 4 + 1 + 8 + blocks.size());
+    payload.push_back(static_cast<uint8_t>(format));
+    putU32(payload, static_cast<uint32_t>(w));
+    putU32(payload, static_cast<uint32_t>(h));
+    payload.push_back(static_cast<uint8_t>(mipCount));
+    putU64(payload, blocks.size());
+    putBytes(payload, blocks.data(), blocks.size());
+    return writeCacheFile(key, kTypeTexCompressed, payload);
+}
+
+bool BinaryCache::loadTextureCompressed(const std::string& key, int& outFormat, int& outW,
+                                        int& outH, std::vector<uint8_t>& outBlocks) {
+    std::vector<uint8_t> payload;
+    if (!readCacheFile(key, kTypeTexCompressed, payload)) return false;
+
+    Reader r(payload);
+    uint8_t format = 0;
+    uint32_t w = 0, h = 0;
+    uint8_t mipCount = 0;
+    uint64_t blockBytes = 0;
+    if (!r.u8(format) || !r.u32(w) || !r.u32(h) || !r.u8(mipCount) || !r.u64(blockBytes))
+        return corrupt(key);
+    if (format > 2 || w == 0 || h == 0 || w > kMaxTexDim || h > kMaxTexDim || mipCount == 0)
+        return corrupt(key);
+    // mipCount 合法范围 + blockBytes 必须同时等于「剩余长度」与「该级数链总字节」（双校验）
+    if (mipCount > TextureLoader::mipLevels(static_cast<int>(w), static_cast<int>(h)))
+        return corrupt(key);
+    if (blockBytes != r.remaining()) return corrupt(key);
+    if (blockBytes != TextureLoader::compressedSizeBytes(format, static_cast<int>(w),
+                                                         static_cast<int>(h), mipCount))
+        return corrupt(key);
+
+    outBlocks.resize(static_cast<size_t>(blockBytes));
+    if (!r.bytes(outBlocks.data(), static_cast<size_t>(blockBytes))) return corrupt(key);
+    outFormat = static_cast<int>(format);
     outW = static_cast<int>(w);
     outH = static_cast<int>(h);
     return true;

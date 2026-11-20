@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <NovaEngine/Assets/AssetDatabase.h>
+#include <NovaEngine/Assets/AssetReferenceScanner.h>   // V1.0-7：打包前引用预检（§26.4）
 #include <NovaEngine/Assets/AssetStream.h>
 #include <NovaEngine/Assets/PakArchive.h>
 #include <NovaEngine/Assets/TextureMeta.h>
@@ -265,6 +266,54 @@ bool Packager::buildPlayer(const fs::path& sceneJsonPath, const fs::path& output
             Logger::error("打包失败：场景 JSON 根节点不是对象: {}", sceneAbs.string());
             return false;
         }
+    }
+
+    // 2.5 引用预检（V1.0-7，§26.4）：入口场景 + build.novabuild 清单内全部场景逐一
+    //     scanScene，逐引用存在性检查（经 AssetStream：pak 命中优先、磁盘回退）。
+    //     任一缺失：逐条 Logger::error（含引用方文件）→ 返回 false 不产出 pak
+    //     （「打包遇缺失引用直接失败并列出清单」，不静默）。
+    //     路径口径与扫描器/Packager 收集清单一致：相对项目根、正斜杠、无 ".."（§26.7-6）。
+    {
+        std::vector<std::string> precheckScenes;
+        precheckScenes.push_back(sceneRel);
+        // build.novabuild 清单场景并入预检（与 3.4 段同口径；解析失败仅 warn——3.4 段旧行为）
+        std::string buildText;
+        if (AssetStream::readAllText("assets/build.novabuild", buildText)) {
+            try {
+                const nlohmann::json build = nlohmann::json::parse(buildText);
+                if (build.is_object() && build.contains("scenes") && build["scenes"].is_array())
+                    for (const auto& s : build["scenes"]) {
+                        if (!s.is_object()) continue;
+                        const std::string pathStr = s.value("path", std::string());
+                        if (!pathStr.empty() &&
+                            std::find(precheckScenes.begin(), precheckScenes.end(), pathStr) ==
+                                precheckScenes.end())
+                            precheckScenes.push_back(pathStr);
+                    }
+            } catch (const std::exception& e) {
+                Logger::warn("打包预检：build.novabuild 解析失败，仅预检入口场景: {}", e.what());
+            }
+        }
+
+        int missingRefs = 0;
+        for (const std::string& sceneRelPath : precheckScenes) {
+            const std::vector<NovaEngine::AssetReference> refs =
+                NovaEngine::AssetReferenceScanner::scanScene(fs::path(sceneRelPath));
+            for (const auto& ref : refs) {
+                const fs::path abs = projectRoot / fs::path(ref.assetPath);
+                if (NovaEngine::AssetStream::exists(abs))
+                    continue;
+                Logger::error("打包预检：缺失引用 [{}] {}（引用方 {}）", ref.kind, ref.assetPath,
+                              ref.fromFile);
+                ++missingRefs;
+            }
+        }
+        if (missingRefs > 0) {
+            Logger::error("打包失败：引用预检发现 {} 个缺失引用（清单见上），不产出 pak",
+                          missingRefs);
+            return false;
+        }
+        Logger::info("打包预检通过：{} 个场景引用完整", precheckScenes.size());
     }
 
     // 3. 资源收集。map 按 pak 相对路径排序 → 确定性布局（同输入两次打包产物可复现）

@@ -26,6 +26,15 @@ public:
     static std::shared_ptr<Texture> createFromPixels(const uint8_t* rgba8, int width, int height,
                                                      bool srgb, TextureWrap wrap,
                                                      TextureFilter filter, bool generateMipmaps);
+    // ===== V1.0-6 追加（cG；新入口，既有签名零变更）：压缩块数据上传 =====
+    // blocks = mip0..mipN 连续 4x4 块数据（编码器离线生成完整链，压缩纹理不可
+    // glGenerateMipmap）；format 0=BC7 1=BC1 2=BC5（与 BinaryCache 压缩载荷一致）；
+    // srgb 仅对 BC7/BC1 生效（sRGB 内部格式变体）；blockBytes 不足所需链字节 → nullptr
+    static std::shared_ptr<Texture> createFromCompressed(const uint8_t* blocks, size_t blockBytes,
+                                                         int width, int height, int format,
+                                                         bool srgb, TextureWrap wrap,
+                                                         TextureFilter filter,
+                                                         bool generateMipmaps);
     ~Texture();
     Texture(const Texture&) = delete;
     Texture& operator=(const Texture&) = delete;
@@ -42,6 +51,7 @@ private:
     Texture() = default;
     uint32_t m_id = 0;
     int m_width = 0, m_height = 0;
+    size_t m_sizeBytes = 0;   // V1.0-6：GPU 占用字节（压缩 = 上传块字节；未压缩 = w*h*4）
 };
 
 }  // namespace NovaEngine

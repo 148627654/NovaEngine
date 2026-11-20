@@ -6,8 +6,13 @@
 #include <NovaEngine/Physics/PhysicsWorld.h>
 #include <NovaEngine/Physics/Physics2D.h>
 #include <NovaEngine/Scripting/Behaviour.h>
+#include <NovaEngine/Profiling/Profiler.h>
+#include "../Serialization/SerializationInternals.h"   // scriptTypeName：脚本类名裁剪单一来源
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
 #include <functional>
+#include <unordered_map>
 
 namespace NovaEngine {
 
@@ -18,6 +23,11 @@ void collectSubtree(GameObject* root, std::vector<GameObject*>& out) {
     for (auto& child : root->children())
         collectSubtree(child.get(), out);
 }
+
+// V1.0-1 Profiler 脚本档（§26.2，cR 波 1）：Scene::update 帧内按脚本类名累计
+// onUpdate 耗时，帧末上报 pushSection("script:"+类名)。复用此表避免每帧分配
+//（主线程专用，无并发；Scene::update 仅在 Play 态调用）。
+thread_local std::unordered_map<std::string, float> s_scriptOnUpdateMs;
 }  // namespace
 
 Scene::Scene(const std::string& name)
@@ -160,12 +170,32 @@ void Scene::update(float dt) {
     flushDestroyQueue();
     if (m_physics) m_physics->step(dt);   // 固定步进累加器（kFixedStep=1/60，每帧最多 3 步）
 
+    // V1.0-1 Profiler 脚本档（§26.2，cR 波 1）：广播循环内按脚本类型名累计 onUpdate 耗时。
+    // 判别：类名（SerializationInternals::scriptTypeName，与序列化/热重载同口径）在
+    // ScriptRegistry 注册 = 脚本组件——同时覆盖 Inspector 挂载（共用 Behaviour typeId，
+    // 裁定 #4）与 C++ 侧 addComponent<MyScript>() 两条路径；内置 Behaviour 派生组件
+    // （Button/Slider 等）不在 ScriptRegistry，天然排除。
+    s_scriptOnUpdateMs.clear();
     std::function<void(GameObject*)> broadcast = [&](GameObject* go) {
         if (go->activeSelf()) {
             for (auto& comp : go->m_components) {
+                Behaviour* b = dynamic_cast<Behaviour*>(comp.get());
                 // 裁定：Behaviour 的 enabled=false 时跳过 onUpdate
-                if (auto* b = dynamic_cast<Behaviour*>(comp.get()); b != nullptr && !b->enabled)
+                if (b != nullptr && !b->enabled)
                     continue;
+                if (b != nullptr) {
+                    const std::string typeName =
+                        SerializationInternals::scriptTypeName(comp.get());
+                    if (ScriptRegistry::exists(typeName)) {
+                        // 脚本组件：计时并累计到类名桶
+                        const auto t0 = std::chrono::steady_clock::now();
+                        comp->onUpdate(dt);
+                        s_scriptOnUpdateMs[typeName] +=
+                            std::chrono::duration<float, std::milli>(
+                                std::chrono::steady_clock::now() - t0).count();
+                        continue;
+                    }
+                }
                 comp->onUpdate(dt);
             }
             for (auto& child : go->m_children)
@@ -175,6 +205,13 @@ void Scene::update(float dt) {
     };
     for (const auto& root : m_rootObjects)
         broadcast(root.get());
+
+    // 上报脚本档分段（同名脚本多实例合并为一帧总耗时；64 段上限合并语义在 Profiler 内）
+    for (const auto& [className, ms] : s_scriptOnUpdateMs) {
+        char sectionName[128];
+        std::snprintf(sectionName, sizeof(sectionName), "script:%s", className.c_str());
+        Profiler::pushSection(sectionName, ms);
+    }
 
     // 2D 碰撞求解（V0.5-10 波 2 2b 合波接线，§25.8 固定点）：onUpdate 广播之后、协程推进之前——
     // 事件同步 publish，脚本本帧即可收到；2D 与 3D（Jolt，广播前步进）顺序互不依赖
