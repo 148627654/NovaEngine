@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -79,6 +80,8 @@ public:
                 out.push_back(p);
         return out;
     }
+    // V1.0 波 1 合波日（P2-3）：组件计数（Profiler 统计免容器拷贝）
+    size_t componentCount() const { return m_components.size(); }
     Transform* transform() const;
 
     Scene* scene() const;

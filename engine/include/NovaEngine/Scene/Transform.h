@@ -19,7 +19,7 @@ public:
     void setLocalScale(const glm::vec3& v);
     glm::vec3 localEulerAngles() const;         // 度
     void setLocalEulerAngles(const glm::vec3& eulerDeg);
-    const glm::mat4& localMatrix() const;
+    glm::mat4 localMatrix() const;   // 按值返回（P1 修复 2026-11-20：thread_local 静态引用被父级递归覆写，见 Transform.cpp）
 
     // 世界（惰性计算 + 脏标记）
     const glm::mat4& worldMatrix() const;

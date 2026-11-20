@@ -2919,8 +2919,8 @@ public:
 2. Scene/SceneRenderer.h：NE_GPU_SCOPE 宏包裹（波 1 骨架日，空实现默认）；+renderScenesToOutput 新入口（波 2 骨架日；renderSceneToOutput/renderScene 保留转发）
 3. Render/Texture.h：+sizeBytes()（波 1，cG 追加式）
 4. Assets/AssetDatabase.h：+memorySnapshot()（波 1 骨架日声明、cG 实现、波 3 cR 收口校准）
-5. Assets/BinaryCache.h：+loadTextureCompressed/saveTextureCompressed（波 1，追加式 payloadType 3）
-6. Assets/TextureMeta.h：TextureImportSettings +compression 字段（波 1，追加式缺省 Auto）
+5. Assets/BinaryCache.h：+loadTextureCompressed/saveTextureCompressed（波 1，追加式 **payloadType 4**——契约初稿写 3，合波日更正：3 已被 TextureRGBFloat 占用，用 3 会误删既有 HDR 缓存；评审实据通过）
+6. Assets/TextureMeta.h：TextureImportSettings +compression 字段（波 1，追加式缺省 Auto）+isNormalMap（合波日追认：BC5 自动策略使能 + 修复 KNOWN-ISSUES #5 NormalMap 往返有损）
 7. Audio/AudioEngine.h：+AudioBus/+setBusVolume/busVolume/playStreaming/setBus/fadeIn/fadeOut/loadSettings/saveSettings（波 1，追加式）
 8. Scene/AudioSource.h：+bus/stream/fadeInSeconds/fadeOutSeconds（波 1，追加式缺省零值）
 9. Scene/SceneManager.h：+loadSceneAsync/unloadScene/loadedScenes/updateAll/setSceneParam/getSceneParam/clearSceneParams + SceneUnloaded 事件（波 2，追加式）
@@ -2931,10 +2931,10 @@ public:
 14. Scene/Scene.h：+physicsCollisionMatrix/physicsLayerNames（波 2，environment.physics 段）
 15. Render/PostProcess.h：PostProcessSettings +lutPath/lutIntensity/dofEnabled/dofFocusDistance/dofAperture/vignetteEnabled/vignetteIntensity/grainEnabled/grainAmount（波 2，追加式缺省全关）；PostProcess +setLut（追加式）
 16. Render/Material.h：+shaderOverride/shaderGraphPath（波 2 骨架日；operator== 扩展含 shaderGraphPath）
-17. 新增头：Profiling/Profiler.h、Assets/AssetReferenceScanner.h（波 1）；Render/ColorGrading.h、ShaderGraph/{ShaderGraphAsset,ShaderGraphCodeGen}.h（波 2）
+17. 新增头：Profiling/Profiler.h、Profiling/ProfilerSections.h（合波日追认：面板段名读取辅助）、Assets/AssetReferenceScanner.h（波 1）；Render/ColorGrading.h、ShaderGraph/{ShaderGraphAsset,ShaderGraphCodeGen}.h（波 2）
 18. GLSL：改 post_combine.frag（LUT/vignette/grain 段，波 2 骨架日）；新 post_dof.frag；Shader Graph 生成 shader 复用 blinn_phong.vert + 引擎 uniform 契约
 19. CMake：editor/CMakeLists.txt src/ 改 GLOB_RECURSE（波 1 骨架日）；Dependencies.cmake +catch2 v3.16.0 +bc7enc_rdo（波 1，cT）；tests/CMakeLists.txt 重写（NovaTests + ctest）；project VERSION 0.1.0 → 1.0.0 + cmake/version.rc.in + editor/player RC 接入（波 2 骨架日/合波，cT）
-20. 序列化 schema：场景 JSON version 保持 4（三波全部纯增量——新字段缺省兜底、旧文件往返无损、未知组件 warn 跳过）；新资产类型 assets/shadergraphs/*.novashadergraph（v1）、assets/audio/audio-settings.novaaudio（v1）；.novameta +compression 字段（增量）；build.novabuild 保持 v1；BinaryCache 新增压缩 payloadType（版本不 bump，缓存键扩展）；.cube 为数据文件非资产类型
+20. 序列化 schema：场景 JSON version 保持 4（三波全部纯增量——新字段缺省兜底、旧文件往返无损、未知组件 warn 跳过）；新资产类型 assets/shadergraphs/*.novashadergraph（v1）、assets/audio/audio-settings.novaaudio（v1）；.novameta +compression 字段（增量）；build.novabuild 保持 v1；BinaryCache 新增压缩 payloadType 4（版本不 bump，缓存键扩展；3 已被 RGBFloat 占用，见冻结项 5）；.cube 为数据文件非资产类型
 21. Packager：buildPlayer 开头加引用预检（波 1，cA）；+buildRelease 新入口（波 2，cT；buildPlayer 保留语义不变）
 
 **通用纪律**：新组件接入序列化零改动 SceneSerializer（ComponentRegistry 按名分发 + NE_REGISTER_COMPONENT 自注册，组件 .cpp 末尾放宏）；engine/CMakeLists.txt 为 GLOB_RECURSE（新 .cpp 自动收录）；editor/CMakeLists.txt GLOB 化后新面板自动收录（改 CMake 后需重 configure）；无新组件波次不更新守卫数；渲染改动必须附统计层数字（ROADMAP §12-7 纪律）。
@@ -3047,7 +3047,7 @@ public:
 
 **文件落点**：engine/include|src/Assets/{TextureLoader,TextureMeta,BinaryCache,AssetDatabase}.h/.cpp、engine/include|src/Render/Texture.h/.cpp（sizeBytes）、editor/src/panels/AssetBrowserPanel.cpp（导入设置模态压缩下拉）；cmake/Dependencies.cmake 由 cT 加 bc7enc 段（§26.0）。
 
-**压缩格式裁定**：BC7（RGBA）/ BC1（RGB）/ BC5（RG 法线）。自动策略：meta compression=Auto 时——法线贴图（.novameta colorSpace=Linear 且用途为法线）→ BC5；贴图含有效 alpha 通道 → BC7；其余 → BC1。GPU 能力查询（GL_TEXTURE_COMPRESSED 下查 GL_COMPRESSED_RGBA_BPTC_UNORM / GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM / GL_COMPRESSED_RGBA_S3TC_DXT1_EXT）：不支持所选 → 逐级回退（BC7→BC1→未压缩 RGBA8），warn 一次。能力标志进缓存键（GPU 能力变化 → 键变自动重导）。
+**压缩格式裁定**：BC7（RGBA）/ BC1（RGB）/ BC5（RG 法线）。自动策略：meta compression=Auto 时——法线贴图（isNormalMap=true）→ BC5；贴图含有效 alpha 通道 → BC7；其余 → BC1。GPU 能力查询：**glGetInternalformativ(GL_INTERNALFORMAT_SUPPORTED)** 逐格式查询 GL_COMPRESSED_RGBA_BPTC_UNORM / GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM / GL_COMPRESSED_RGBA_S3TC_DXT1_EXT（合波日更正：契约初稿的 GL_TEXTURE_COMPRESSED 是纹理对象状态非能力查询，首张导入恒 false 会全量误判；glGetInternalformativ 需 GL 4.2+，项目 4.5 无兼容问题）：不支持所选 → 逐级回退（BC7→BC1→未压缩 RGBA8），warn 一次。能力标志进缓存键（GPU 能力变化 → 键变自动重导）。
 
 **接口（追加式）**：
 
@@ -3057,9 +3057,10 @@ enum class TextureCompression { Auto, None, BC1, BC7, BC5 };
 struct TextureImportSettings {
     // ...既有字段不变...
     TextureCompression compression = TextureCompression::Auto;   // 追加（.novameta 文本增量，旧 meta 读缺省 Auto）
+    bool isNormalMap = false;                                     // 合波日追认（BC5 自动策略使能 + KNOWN-ISSUES #5 修复）
 };
 
-// Assets/BinaryCache.h 追加（压缩载荷 payloadType 3）
+// Assets/BinaryCache.h 追加（压缩载荷 payloadType 4；3 已被 RGBFloat 占用，见 §26.0 冻结项 5）
 // [format:u8][w:u32][h:u32][mipCount:u8][blockBytes:u64][块数据]
 // format: 0=BC7 1=BC1 2=BC5；mip 链由编码器逐级生成（压缩纹理不可 glGenerateMipmap）
 static bool loadTextureCompressed(const std::string& key, int& outFormat, int& outW, int& outH,

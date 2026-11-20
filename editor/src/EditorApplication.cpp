@@ -11,6 +11,9 @@
 #include "panels/HierarchyPanel.h"
 #include "panels/InputBindingsPanel.h"
 #include "panels/InspectorPanel.h"
+#include "panels/MixerPanel.h"             // V1.0-8 波 1 合波接线
+#include "panels/ProfilerPanel.h"          // V1.0-1 波 1 合波接线
+#include "panels/ReferenceCheckerPanel.h"  // V1.0-7 波 1 合波接线
 #include "panels/SceneViewPanel.h"
 #include "panels/StatsPanel.h"
 #include "panels/TerrainPanel.h"
@@ -213,6 +216,11 @@ void EditorApplication::init() {
     m_panels.push_back(std::make_unique<ConsolePanel>());
     auto browser = std::make_unique<AssetBrowserPanel>();
     browser->openSceneCallback = [this](const std::filesystem::path& p) { openScene(p); };
+    // V1.0-7 波 1 合波接线：AssetBrowser 右键 Reference Checker 入口（运行时查找面板名）
+    browser->openReferenceChecker = [this]() {
+        for (auto& p : m_panels)
+            if (p->name() == "Reference Checker") { p->open = true; return; }
+    };
     m_panels.push_back(std::move(browser));
     auto statsPanel = std::make_unique<StatsPanel>();
     statsPanel->open = false;   // 默认关，F8 开关（V0.2-11）
@@ -237,6 +245,18 @@ void EditorApplication::init() {
     auto animatorPanel = std::make_unique<AnimatorPanel>();
     animatorPanel->open = true;
     m_panels.push_back(std::move(animatorPanel));
+    // Profiler（V1.0-1 波 1 合波接线，第 12 面板）：默认关，Window → Profiler 打开；dock 底部 Tab
+    auto profilerPanel = std::make_unique<ProfilerPanel>();
+    profilerPanel->open = false;
+    m_panels.push_back(std::move(profilerPanel));
+    // Reference Checker（V1.0-7 波 1 合波接线，第 13 面板）：默认关，Assets 菜单/AssetBrowser 右键打开
+    auto referenceCheckerPanel = std::make_unique<ReferenceCheckerPanel>();
+    referenceCheckerPanel->open = false;
+    m_panels.push_back(std::move(referenceCheckerPanel));
+    // Mixer（V1.0-8 波 1 合波接线，第 14 面板）：默认关，Audio → Mixer… 打开
+    auto mixerPanel = std::make_unique<MixerPanel>();
+    mixerPanel->open = false;
+    m_panels.push_back(std::move(mixerPanel));
 
     // 脚本 DLL 初始加载（V0.5-7 波 2 2b 合波修复：此前漏接，编辑器启动即加载——
     // 必须在场景加载之前，脚本组件反序列化才能命中注册表；失败仅 warn，场景其余正常）
@@ -301,11 +321,13 @@ int EditorApplication::run() {
         m_window->pollEvents();  // GLFW 事件 → Input 原始状态 + 拖放回调队列
         Time::beginFrame();
         Stats::beginFrame();     // 帧首（V0.2-11：独立于 Time 的 steady_clock 计时）
+        Profiler::beginFrame();  // V1.0-1 波 1 合波接线（§26.2：帧首，Stats::beginFrame 之后）
         Input::beginFrame();
         InputMap::beginFrame();  // V0.5-11：每帧一次，紧跟 Input::beginFrame 之后（契约 §24.5）
         update(Time::deltaTime());
         render();
         Stats::endFrame();       // 帧末（swapBuffers 前结算入 120 帧环形历史）
+        Profiler::endFrame();    // V1.0-1 波 1 合波接线（§26.2：帧末，swapBuffers 前）
         m_window->swapBuffers();
 
         // 窗口关闭拦截（V0.2-2）：Play 态先退出还原（修复 7.2-4）；判脏且无挂起动作则拦下弹模态
@@ -380,6 +402,8 @@ void EditorApplication::update(float dt) {
     const auto updateT1 = std::chrono::steady_clock::now();
     Stats::setSectionMs("update",
                         std::chrono::duration<float, std::milli>(updateT1 - updateT0).count());
+    Profiler::pushSection("update",
+                          std::chrono::duration<float, std::milli>(updateT1 - updateT0).count());  // V1.0-1 波 1 合波接线（§26.2 模块档）
 
     // 音频监听器（V0.3-2，§15 帧内顺序）：scene->update 之后、面板渲染（SceneView 整帧 3D
     // 渲染在 onGui 内完成）之前。Edit 态仅 flushDestroyQueue，不进音频路径（退出 Play 已 stopAll）
@@ -396,9 +420,14 @@ void EditorApplication::update(float dt) {
     // 面板区域上报每帧先清零（未渲染的面板不残留旧区域）
     m_context.viewportScreenMin = m_context.viewportScreenMax = ImVec2(0.0f, 0.0f);
     m_context.assetBrowserScreenMin = m_context.assetBrowserScreenMax = ImVec2(0.0f, 0.0f);
+    const auto renderT0 = std::chrono::steady_clock::now();
     for (auto& panel : m_panels)
         if (panel->open)
             panel->onGui(m_context, m_camera);  // SceneView 在其 onGui 内完成整帧 3D 渲染
+    // V1.0-1 波 1 合波接线（§26.2 模块档）：SceneView 的 3D 渲染在面板循环内完成，
+    // 其余面板 onGui 仅构建 ImGui drawlist（开销可忽略），该段即渲染段
+    Profiler::pushSection(
+        "render", std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - renderT0).count());
 
     handleExternalDrop(m_pendingDrops);
     m_pendingDrops.clear();
@@ -432,6 +461,8 @@ void EditorApplication::render() {
     const auto uiT1 = std::chrono::steady_clock::now();
     NovaEngine::Stats::setSectionMs(
         "ui", std::chrono::duration<float, std::milli>(uiT1 - uiT0).count());
+    NovaEngine::Profiler::pushSection(
+        "ui", std::chrono::duration<float, std::milli>(uiT1 - uiT0).count());  // V1.0-1 波 1 合波接线（§26.2 模块档）
 }
 
 void EditorApplication::buildDockLayout(ImGuiID dockspaceId) {
@@ -455,6 +486,9 @@ void EditorApplication::buildDockLayout(ImGuiID dockspaceId) {
     ImGui::DockBuilderDockWindow("Input Bindings", dockBottom);  // V0.5-11：底部 Tab
     ImGui::DockBuilderDockWindow("Terrain", dockBottom);         // V0.5-8：底部 Tab
     ImGui::DockBuilderDockWindow("Animator", dockBottom);        // V0.5-9：底部 Tab
+    ImGui::DockBuilderDockWindow("Profiler", dockBottom);          // V1.0-1 波 1 合波接线
+    ImGui::DockBuilderDockWindow("Reference Checker", dockBottom); // V1.0-7 波 1 合波接线
+    ImGui::DockBuilderDockWindow("Mixer", dockBottom);             // V1.0-8 波 1 合波接线
     ImGui::DockBuilderDockWindow("Scene", dockMain);
     ImGui::DockBuilderFinish(dockspaceId);
 }
@@ -462,6 +496,11 @@ void EditorApplication::buildDockLayout(ImGuiID dockspaceId) {
 void EditorApplication::showMainMenu() {
     using namespace NovaEngine;
     const bool editMode = m_context.state == EditorContext::EditorState::Edit;
+    // 按面板名查找并打开（V1.0 波 1 合波接线：Window/Assets/Audio 菜单入口）
+    auto openPanelByName = [this](const char* name) {
+        for (auto& panel : m_panels)
+            if (panel->name() == name) { panel->open = true; return; }
+    };
 
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
@@ -531,6 +570,20 @@ void EditorApplication::showMainMenu() {
             ImGui::Separator();
             for (auto& panel : m_panels)
                 ImGui::MenuItem(panel->name().c_str(), nullptr, &panel->open);
+            ImGui::EndMenu();
+        }
+        // ===== V1.0 波 1 合波接线：Window/Assets/Audio 菜单 =====
+        //（三个面板同时出现在 View 自动列表与底部 dock Tab，菜单为显式打开入口）
+        if (ImGui::BeginMenu("Window")) {
+            if (ImGui::MenuItem("Profiler")) openPanelByName("Profiler");
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Assets")) {
+            if (ImGui::MenuItem("Reference Checker...")) openPanelByName("Reference Checker");
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Audio")) {
+            if (ImGui::MenuItem("Mixer...")) openPanelByName("Mixer");
             ImGui::EndMenu();
         }
         // 脚本热重载（V0.5-7 波 2 2b 合波接线）：Edit 态可用；Play 态灰显（快照含旧类型）

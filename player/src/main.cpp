@@ -22,6 +22,7 @@
 #include <GLFW/glfw3.h>                  // glfwGetWindowSize（窗口逻辑尺寸；GLFW_INCLUDE_NONE 已定义）
 #include <glm/gtc/matrix_transform.hpp> // lookAt / perspective / radians
 
+#include <chrono>      // V1.0-1 波 1 合波接线：Profiler 模块档计时
 #include <cstring>
 #include <filesystem>
 #include <string>
@@ -147,6 +148,8 @@ int main(int argc, char** argv) {
     //   UI 失败内部 no-op；后处理失败内部降级为直通
     if (!AudioEngine::init())
         Logger::warn("[NovaPlayer] 音频设备初始化失败，继续无音频运行");
+    // V1.0-8 波 1 合波接线（§26.5）：读总线设置（pak 内缺失自动生成默认；音频未初始化时 no-op）
+    AudioEngine::loadSettings("assets/audio/audio-settings.novaaudio");
     UIRenderer::init();
     PostProcess::init();
 
@@ -194,6 +197,7 @@ int main(int argc, char** argv) {
         Time::beginFrame();
         Input::beginFrame();
         InputMap::beginFrame();   // 每帧一次，紧跟 Input::beginFrame 之后（契约 §24.5）
+        Profiler::beginFrame();   // V1.0-1 波 1 合波接线（§26.2：帧首）
 
         if (Input::isKeyPressed(Key::Escape)) break;
 
@@ -224,8 +228,12 @@ int main(int argc, char** argv) {
 
         // 帧序（§15）：scene.update（物理→脚本→协程→事件）→ SceneManager 延迟切场景
         // → 音频监听 → 3D+后处理+UI → 显示
+        const auto updateT0 = std::chrono::steady_clock::now();
         scene.update(Time::deltaTime());
         SceneManager::flushPendingLoad();   // §15：Scene::update 之后调用（延迟执行防广播中迭代器失效）
+        Profiler::pushSection(   // V1.0-1 波 1 合波接线（§26.2 模块档）
+            "update", std::chrono::duration<float, std::milli>(
+                          std::chrono::steady_clock::now() - updateT0).count());
 
         // 音频监听跟随场景主相机（V0.3-2；直接用主相机 Transform，§14.2）
         if (const Camera* cam = findMainCamera(scene); cam && cam->transform()) {
@@ -254,6 +262,7 @@ int main(int argc, char** argv) {
             hdrFbo.resize(fbW, fbH);
             outLdrFbo.resize(fbW, fbH);
         }
+        const auto renderT0 = std::chrono::steady_clock::now();
         if (fbosCreated && hdrFbo.width() > 0 && outLdrFbo.width() > 0) {
             SceneRenderer::renderSceneToOutput(scene, fallback, hdrFbo, outLdrFbo,
                                                scene.postProcess);
@@ -267,6 +276,10 @@ int main(int argc, char** argv) {
             SceneRenderer::renderScene(scene, fallback);
             UIRenderer::render(scene, fbW, fbH);
         }
+        Profiler::pushSection(   // V1.0-1 波 1 合波接线（§26.2 模块档）
+            "render", std::chrono::duration<float, std::milli>(
+                          std::chrono::steady_clock::now() - renderT0).count());
+        Profiler::endFrame();    // V1.0-1 波 1 合波接线（§26.2：帧末，swapBuffers 前）
         window->swapBuffers();
     }
 

@@ -110,14 +110,22 @@ void GameObject::setParent(GameObject* newParent, bool keepWorldTransform) {
     m_parent = newParent;
 
     // keepWorldTransform=true：世界矩阵反解回局部 TRS
+    // ===== P1 修复（2026-11-20 波 1 合波日，cT 实测报出）=====
+    // 原实现直接 decompose 旧世界矩阵——仅新父级为恒等时世界位置保持成立；
+    // 偏移父级下拖拽重父子会跳变（实测 keep 后 world (11,2,3) 跳变）。
+    // 修法：先换算到新父级局部空间 local = inv(newParentWorld) * world 再 decompose
+    //（新父级为场景根时局部 = 世界，decompose 路径不变）。
     if (hasWorld) {
         if (Transform* t = transform()) {
+            glm::mat4 local = world;
+            if (newParent != nullptr && newParent->transform() != nullptr)
+                local = glm::inverse(newParent->transform()->worldMatrix()) * world;
             glm::vec3 scale{1.0f};
             glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
             glm::vec3 position{0.0f};
             glm::vec3 skew{0.0f};
             glm::vec4 perspective{0.0f};
-            glm::decompose(world, scale, rotation, position, skew, perspective);
+            glm::decompose(local, scale, rotation, position, skew, perspective);
             t->setLocalPosition(position);
             t->setLocalRotation(rotation);
             t->setLocalScale(scale);

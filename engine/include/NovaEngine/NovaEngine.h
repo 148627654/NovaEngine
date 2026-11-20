@@ -92,4 +92,5 @@
 
 // ===== V1.0 波 1 骨架日（§26.0 冻结项 5，2026-11-20）=====
 #include <NovaEngine/Profiling/Profiler.h>
+#include <NovaEngine/Profiling/ProfilerSections.h>   // 合波日收编（评审 P2-8：面板段名读取辅助）
 #include <NovaEngine/Assets/AssetReferenceScanner.h>

@@ -45,14 +45,17 @@ void Transform::setLocalEulerAngles(const glm::vec3& eulerDeg) {
     markDirty();
 }
 
-const glm::mat4& Transform::localMatrix() const {
+glm::mat4 Transform::localMatrix() const {
     // TRS 合成：T * R * S
-    static thread_local glm::mat4 s_local{1.0f};
+    // ===== P1 修复（2026-11-20 波 1 合波日，cT 实测报出）=====
+    // 原实现返回 thread_local 静态的引用：worldMatrix() 中「父级递归 worldMatrix()（内部
+    // 也会调 localMatrix 覆写同一静态）× 自身 localMatrix()」两操作数求值顺序不定——
+    // 父/子同时脏时子级世界矩阵错算（实测 父(10,0,0)+子局部(1,2,3) → (20,0,0)）。
+    // 修法：按值返回（无共享状态，任意求值顺序均正确）；本函数无外部调用者，签名变更安全。
     const glm::mat4 t = glm::translate(glm::mat4(1.0f), m_position);
     const glm::mat4 r = glm::mat4_cast(m_rotation);
     const glm::mat4 s = glm::scale(glm::mat4(1.0f), m_scale);
-    s_local = t * r * s;
-    return s_local;
+    return t * r * s;
 }
 
 const glm::mat4& Transform::worldMatrix() const {

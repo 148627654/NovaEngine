@@ -262,6 +262,9 @@ int main(int argc, char** argv) {
     // 不中断编辑器；失败原因已由 AudioEngine::init 内部 Logger::warn 记录。
     if (!AudioEngine::init())
         Logger::warn("音频引擎初始化失败：音频功能已禁用（不影响其余功能）");
+    // V1.0-8 波 1 合波接线（§26.5）：启动读总线设置（assets/audio/audio-settings.novaaudio；
+    // 缺失自动生成默认文件；音频未初始化时内部 no-op）
+    AudioEngine::loadSettings("assets/audio/audio-settings.novaaudio");
 
     // 6. ImGui 上下文 + docking + 样式 + 中文字体
     IMGUI_CHECKVERSION();
