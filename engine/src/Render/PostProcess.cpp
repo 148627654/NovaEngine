@@ -204,7 +204,12 @@ void applyDirectCombine(uint32_t srcTex, const PostProcessSettings& s) {
     s_combineShader->setInt("uLut", 8);
     s_combineShader->setFloat("uBloomIntensity", 0.0f);
     s_combineShader->setFloat("uExposure", 1.0f);
-    s_combineShader->setFloat("uLutIntensity", std::clamp(s.lutIntensity, 0.0f, 1.0f));
+    // 白屏根因修复（2026-11-23 波 2 验收）：无 LUT 加载时白 3D 兜底 + 强度>0 = mix 出纯白——
+    // 「白兜底 = 直通」不变量仅在强度 0 时成立；无 LUT → 强度恒 0（永不黑屏契约补强）
+    s_combineShader->setFloat("uLutIntensity",
+                              ColorGrading::lutTexture() != 0
+                                  ? std::clamp(s.lutIntensity, 0.0f, 1.0f)
+                                  : 0.0f);
     s_combineShader->setFloat("uVignetteIntensity", s.vignetteEnabled ? s.vignetteIntensity : 0.0f);
     s_combineShader->setFloat("uGrainAmount", s.grainEnabled ? s.grainAmount : 0.0f);
     s_combineShader->setFloat("uGrainSeed", Time::totalTime());   // 每帧时间抖动
@@ -520,7 +525,12 @@ void PostProcess::apply(uint32_t hdrColorTexture, const PostProcessSettings& s) 
     s_combineShader->setInt("uLut", 8);
     s_combineShader->setFloat("uBloomIntensity", std::max(s.bloomIntensity, 0.0f));
     s_combineShader->setFloat("uExposure", std::max(s.exposure, 0.001f));
-    s_combineShader->setFloat("uLutIntensity", std::clamp(s.lutIntensity, 0.0f, 1.0f));
+    // 白屏根因修复（2026-11-23 波 2 验收）：无 LUT 加载时白 3D 兜底 + 强度>0 = mix 出纯白——
+    // 「白兜底 = 直通」不变量仅在强度 0 时成立；无 LUT → 强度恒 0（永不黑屏契约补强）
+    s_combineShader->setFloat("uLutIntensity",
+                              ColorGrading::lutTexture() != 0
+                                  ? std::clamp(s.lutIntensity, 0.0f, 1.0f)
+                                  : 0.0f);
     s_combineShader->setFloat("uVignetteIntensity", s.vignetteEnabled ? s.vignetteIntensity : 0.0f);
     s_combineShader->setFloat("uGrainAmount", s.grainEnabled ? s.grainAmount : 0.0f);
     s_combineShader->setFloat("uGrainSeed", Time::totalTime());   // 每帧时间抖动
