@@ -68,6 +68,11 @@ uniform float uGamma;
 
 out vec4 fragColor;
 
+// ===== V1.0-5 Shader Graph 同步维护标记（§27.7-3）：本文件的 uniform 布局与 PBR 光照函数
+//（shadowFactor/distributionGGX/geometrySmith/fresnelSchlick + main 光照段）被内嵌复制进
+// engine/src/ShaderGraph/ShaderGraphCodeGen.cpp 的生成模板——改动任一处必须同步另一处，
+// 否则生成 shader 与 setBlinnPhongUniforms 错位 = 花屏（评审逐名核对）。
+
 const float PI = 3.14159265359;
 
 // PCF 3x3 手动比较 + 斜率自适应偏置；光空间盒外（白色边框 → 深度 1.0）返回 1.0（不受影）

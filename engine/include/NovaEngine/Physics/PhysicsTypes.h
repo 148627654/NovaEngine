@@ -9,6 +9,9 @@ class GameObject;
 struct RaycastHit {
     bool hit = false;
     GameObject* gameObject = nullptr;
+    // ===== V1.0-3（§27.2 追加）：hitObject = 命中对象（触发器/静态体所属 GO）=====
+    // 与既有 gameObject 同值（旧名保留兼容，不删）；脚本新代码统一读 hitObject
+    GameObject* hitObject = nullptr;
     glm::vec3 point{0.0f};
     glm::vec3 normal{0.0f};
     float distance = 0.0f;

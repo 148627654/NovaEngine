@@ -1,16 +1,45 @@
 #include "EnvironmentPanel.h"
 
+#include "../DragDrop.h"
 #include "../EditorContext.h"
 
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>   // InputText(std::string*) 包装（ImGui 1.90+ 移除内建重载）
 
+#include <NovaEngine/Assets/AssetDatabase.h>
+#include <NovaEngine/Render/PostProcess.h>
 #include <NovaEngine/Render/SkyboxRenderer.h>
 #include <NovaEngine/Scene/Scene.h>
 
 #include <glm/gtc/type_ptr.hpp>
 
+#include <filesystem>
+
 namespace NovaEditor {
+
+namespace {
+
+// 外部 .cube 复制进 assets/luts/（重名自动加后缀），返回项目内相对路径；失败返回空
+std::filesystem::path copyLutIntoProject(const std::filesystem::path& abs) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path root = NovaEngine::AssetDatabase::projectRoot();
+    // 已在项目内 → 直接取相对路径
+    const fs::path rel = fs::relative(abs, root, ec);
+    if (!ec && !rel.empty() && rel.native()[0] != '.')
+        return rel;
+    // 项目外 → 复制进 assets/luts/（目录不存在则创建）
+    fs::path lutsDir = root / "assets" / "luts";
+    fs::create_directories(lutsDir, ec);
+    fs::path dest = lutsDir / abs.filename();
+    for (int i = 1; fs::exists(dest, ec); ++i)
+        dest = lutsDir / (abs.stem().string() + "_" + std::to_string(i) + abs.extension().string());
+    ec.clear();
+    if (!fs::copy_file(abs, dest, ec)) return {};
+    return fs::relative(dest, root);
+}
+
+}  // namespace
 
 EnvironmentPanel::EnvironmentPanel() : Panel("Environment") {}
 
@@ -77,6 +106,90 @@ void EnvironmentPanel::onGui(EditorContext& ctx, EditorCamera&) {
         // 8bit 降级提示（§14.10：老集显无 RGB16F → 后处理运行期失效，不崩溃）
         if (!NovaEngine::PostProcess::hdrSupported())
             ImGui::TextDisabled("(HDR not supported on this GPU: post-processing disabled at runtime)");
+        ImGui::PopID();
+    }
+
+    // ===== V1.0-4 色彩分级（§27.3）：LUT / DOF / 渐晕 / 颗粒 → environment.postProcess 段 =====
+    if (ImGui::CollapsingHeader("Color Grading", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::PushID("cg");
+        NovaEngine::PostProcessSettings& pp = scene->postProcess;
+
+        // ---- LUT（.cube）：路径拖放（AssetBrowser/外部文件）+ 手输 + intensity 滑条 ----
+        ImGui::TextUnformatted("LUT (.cube)");
+        std::string lutPath = pp.lutPath;
+        // 应用路径：写序列化字段 + 立即 setLut（面板反馈；apply() 每帧 diff 亦会兜底）
+        const auto applyLutPath = [&](const std::string& p) {
+            pp.lutPath = p;
+            m_lutStatusPath = p;   // 状态与路径绑定（P2-8）
+            m_lutStatus = PostProcess::setLut(pp.lutPath)
+                              ? std::string("LUT loaded: ") + pp.lutPath
+                              : std::string("LUT load FAILED (disabled): ") + pp.lutPath;
+            ctx.markSceneDirty();
+        };
+        // P2-8（Reviewer）：场景切换/外部改路径后状态文本不再陈旧——状态与路径 diff，
+        // 变化即对当前路径重算（setLut 幂等；apply() 每帧 diff 已同步缓存，不会重复加载）
+        if (m_lutStatusPath != pp.lutPath) {
+            m_lutStatusPath = pp.lutPath;
+            m_lutStatus = pp.lutPath.empty()
+                              ? std::string{}
+                              : (PostProcess::setLut(pp.lutPath)
+                                     ? std::string("LUT loaded: ") + pp.lutPath
+                                     : std::string("LUT load FAILED (disabled): ") + pp.lutPath);
+        }
+        const bool lutEntered = ImGui::InputTextWithHint(
+            "##lutPath", "assets/luts/xxx.cube (empty = off)", &lutPath,
+            ImGuiInputTextFlags_EnterReturnsTrue);
+        // 拖放目标：kAssetPayload（AssetBrowser 源，绝对路径）
+        bool lutDropped = false;
+        if (ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* payload =
+                    ImGui::AcceptDragDropPayload(DragDrop::kAssetPayload)) {
+                const std::string absStr(static_cast<const char*>(payload->Data));
+                const std::filesystem::path abs(absStr);
+                if (abs.extension() == ".cube") {
+                    const auto rel = copyLutIntoProject(abs);
+                    if (!rel.empty()) {
+                        lutPath = rel.generic_string();
+                        lutDropped = true;
+                    }
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
+        if (lutDropped || lutEntered ||
+            (ImGui::IsItemDeactivatedAfterEdit() && lutPath != pp.lutPath))
+            applyLutPath(lutPath);
+        if (!m_lutStatus.empty() && !pp.lutPath.empty())
+            ImGui::TextDisabled("%s", m_lutStatus.c_str());
+        if (ImGui::DragFloat("LUT Intensity", &pp.lutIntensity, 0.01f, 0.0f, 1.0f))
+            ctx.markDirtyOnly();
+        if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
+
+        ImGui::Separator();
+
+        // ---- DOF 简版（HDR 链内；无 HDR → 运行期跳过，见引擎 warn）----
+        if (ImGui::Checkbox("DOF", &pp.dofEnabled)) ctx.markSceneDirty();
+        if (ImGui::DragFloat("DOF Focus Distance", &pp.dofFocusDistance, 0.1f, 0.1f, 100.0f))
+            ctx.markDirtyOnly();
+        if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
+        if (ImGui::DragFloat("DOF Aperture", &pp.dofAperture, 0.001f, 0.0f, 0.5f))
+            ctx.markDirtyOnly();
+        if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
+
+        ImGui::Separator();
+
+        // ---- 渐晕 / 颗粒（直通与 HDR 两条路径均生效，§27.7-4）----
+        if (ImGui::Checkbox("Vignette", &pp.vignetteEnabled)) ctx.markSceneDirty();
+        if (ImGui::DragFloat("Vignette Intensity", &pp.vignetteIntensity, 0.01f, 0.0f, 1.0f))
+            ctx.markDirtyOnly();
+        if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
+        if (ImGui::Checkbox("Film Grain", &pp.grainEnabled)) ctx.markSceneDirty();
+        if (ImGui::DragFloat("Grain Amount", &pp.grainAmount, 0.001f, 0.0f, 0.5f))
+            ctx.markDirtyOnly();
+        if (ImGui::IsItemDeactivatedAfterEdit()) ctx.markSceneDirty();
+
+        if (!NovaEngine::PostProcess::hdrSupported())
+            ImGui::TextDisabled("(HDR 不可用：LUT/渐晕/颗粒仍经直通路径生效；DOF/Bloom 需 HDR)");
         ImGui::PopID();
     }
 

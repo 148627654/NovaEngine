@@ -38,8 +38,13 @@ public:
     // 追加（V0.5-5 SSAO）：combine 合成用 AO 纹理（0 = 无 AO，combine 跳过合成乘 1）
     static void setAmbientOcclusionTexture(uint32_t tex);
     // 追加（V1.0-4，§27.3 骨架日布）：LUT 设置变更时调用。实现归 cG——
-    // 内部缓存 LUT 纹理 id + 常驻绑定 unit 8 兜底白 3D 纹理；失败 warn + 关闭 LUT
+    // 内部缓存 LUT 纹理 id + 常驻绑定 unit 8 兜底白 3D 纹理；失败 warn + 关闭 LUT。
+    // apply() 内部每帧按 settings.lutPath 自动 diff 调用（场景加载/Player 路径生效）；
+    // 面板改动路径时也可直接调用获得即时反馈。
     static bool setLut(const std::filesystem::path& relPath);
+    // 追加（V1.0-4 DOF，cG）：DOF 线性深度源（hdrFbo MRT 附件 2 resolve 纹理 id）。
+    // 0 = 无深度 → DOF 跳过（warn 一次，链其余环节照常）；由 SceneRenderer 每帧注入。
+    static void setLinearDepthTexture(uint32_t tex);
 };
 
 }  // namespace NovaEngine

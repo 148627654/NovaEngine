@@ -15,6 +15,10 @@ public:
 
     bool isTrigger = false;                       // sensor：不碰撞求解，只发触发事件（事件系统 TriggerEvent）
     glm::vec3 center{0.0f};                       // 局部偏移
+    // ===== V1.0-3 物理增强（§27.2 追加；序列化 version 4 不变，缺省兜底）=====
+    int layer = 0;                                // 碰撞层（0..15；层间开关见 environment.physics 矩阵）
+    float friction = 0.5f;                        // 摩擦（物理材质 v1 = Collider 内联；body 摩擦 = 各 collider 平均）
+    float restitution = 0.0f;                     // 弹性（0 = 完全非弹性，1 = 完全弹性）
 
     void onAwake() override;   // 注册 shape（宿主刚体/static body 由 PhysicsWorld 裁决）
     // 公共字段由基类 onSerialize 写，形状参数由子类写

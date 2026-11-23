@@ -10,6 +10,7 @@
 #include <NovaEngine/Assets/AssetDatabase.h>
 #include <NovaEngine/Assets/MaterialAsset.h>
 #include <NovaEngine/Core/Logger.h>
+#include <fstream>   // Shader Graph 资产创建（V1.0-5 波 2 合波接线）
 #include <NovaEngine/Scene/GameObject.h>
 #include <NovaEngine/Scene/MeshRenderer.h>
 
@@ -212,6 +213,22 @@ void AssetBrowserPanel::onGui(EditorContext& ctx, EditorCamera&) {
                 if (ImGui::MenuItem("Material")) {
                     m_createMaterialOpen = true;
                     m_createMaterialName = "NewMaterial";
+                }
+                // V1.0-5 波 2 合波接线：新建空 Shader Graph 资产（version 1 空图，面板打开编辑）
+                if (ImGui::MenuItem("Shader Graph")) {
+                    std::error_code sgEc;
+                    const fs::path sgDir = root / m_currentDir;
+                    const fs::path sgTarget = sgDir / "NewShaderGraph.novashadergraph";
+                    if (std::filesystem::exists(sgTarget, sgEc)) {
+                        NovaEngine::Logger::warn("目标已存在: {}", sgTarget.generic_string());
+                    } else {
+                        std::ofstream out(sgTarget);
+                        out << "{\"version\":1,\"nodes\":[],\"edges\":[]}\n";
+                        if (out.good())
+                            NovaEngine::Logger::info("已创建 Shader Graph 资产: {}", sgTarget.generic_string());
+                        else
+                            NovaEngine::Logger::error("创建 Shader Graph 资产失败: {}", sgTarget.generic_string());
+                    }
                 }
                 ImGui::EndMenu();
             }

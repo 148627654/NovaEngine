@@ -86,6 +86,44 @@ set_target_properties(NovaEditor PROPERTIES
 nova_configure_target(NovaEditor)
 
 # ============================================================
+# V1.0-11 版本信息注入（Windows RC，§27.5 冻结项 12 编辑器侧；例外授权最小改动——
+# 不动 GLOB / 导出链，RC 对象与 /WHOLEARCHIVE、/DEF 链接选项互不干扰）
+# configure_file 生成 NovaEditor_version.rc（cmake/version.rc.in 模板 @ONLY 注入），
+# 版本号取 project VERSION（1.0.0 → FILEVERSION 1,0,0,0）；产品/公司名可经
+# NOVA_PRODUCT/NOVA_COMPANY 覆盖（默认 NovaEngine/Nova）；图标 editor/res/app.ico。
+# 同时向 NovaEditor 注入 NOVA_VERSION/NOVA_PRODUCT/NOVA_COMPANY 编译定义——
+# Packager::buildRelease 的 README 版本元数据与发行目录命名（NovaEngine_<版本>）用。
+# ============================================================
+if(WIN32)
+    if(NOT DEFINED NOVA_PRODUCT)
+        set(NOVA_PRODUCT "NovaEngine")
+    endif()
+    if(NOT DEFINED NOVA_COMPANY)
+        set(NOVA_COMPANY "Nova")
+    endif()
+    if(NOT DEFINED NOVA_COPYRIGHT)
+        set(NOVA_COPYRIGHT "Copyright (C) 2026 Nova")
+    endif()
+
+    enable_language(RC)
+    set(NOVA_RC_FILE_VERSION "${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSION_PATCH},0")
+    set(NOVA_RC_FILE_DESC "NovaEngine 编辑器")
+    set(NOVA_RC_INTERNAL_NAME "NovaEditor")
+    set(NOVA_RC_ORIGINAL_NAME "NovaEditor.exe")
+    # rc.exe 字符串转义：反斜杠路径的 "\r" 等序列会被当转义（RC2135 教训），用正斜杠
+    file(TO_CMAKE_PATH "${CMAKE_SOURCE_DIR}/editor/res/app.ico" NOVA_RC_ICON)
+    configure_file("${CMAKE_SOURCE_DIR}/cmake/version.rc.in"
+                   "${CMAKE_CURRENT_BINARY_DIR}/NovaEditor_version.rc" @ONLY)
+    target_sources(NovaEditor PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/NovaEditor_version.rc")
+    # FILEFLAGS 的 VS_FF_DEBUG 位：Debug 配置 RC 预处理器定义 _DEBUG（C++ 侧 /MDd 本就自带）
+    target_compile_definitions(NovaEditor PRIVATE $<$<CONFIG:Debug>:_DEBUG>)
+    target_compile_definitions(NovaEditor PRIVATE
+        NOVA_VERSION="${PROJECT_VERSION}"
+        NOVA_PRODUCT="${NOVA_PRODUCT}"
+        NOVA_COMPANY="${NOVA_COMPANY}")
+endif()
+
+# ============================================================
 # V0.5-7 引擎符号导出表（脚本 DLL 引用依赖）
 # WINDOWS_EXPORT_ALL_SYMBOLS 只扫 target 自身 .obj，不扫静态库成员（CMake 文档限制，
 # 已实测：objects.txt 仅含本 target .obj）→ 用 dumpbin 从 NovaEngine.lib 生成去重 .def。

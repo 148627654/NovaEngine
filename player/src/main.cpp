@@ -1,5 +1,8 @@
 // main.cpp —— NovaPlayer 入口（§10.5：打包运行时播放器，最小主循环，无 ImGui）
 //
+// V1.0-11 窗口元数据（ROADMAP §7-11）：标题取 NOVA_PRODUCT（player/CMakeLists.txt
+// 编译期注入，默认 "NovaEngine"）；未定义时回退 "NovaPlayer"。
+//
 // 初始化顺序：SetConsoleOutputCP(UTF8) → 解析参数 → Window::create → vsync
 //   → Renderer::init + SkyboxRenderer::init → AssetDatabase::setProjectRoot(exe 目录)
 //   → AssetStream::mountPak（默认 exe 同目录第一个 *.novapak，可 --pak 显式指定）
@@ -8,7 +11,8 @@
 //     → swapBuffers；Esc 退出）
 //   → shutdown 清理（SkyboxRenderer → Renderer → 窗口析构 glfwTerminate）
 //
-// 参数：--scene（默认 assets/scenes/demo.nova.json，项目内相对路径）
+// 参数：--scene（V1.0-11 §27.5：缺省不写死——解析顺序 = --scene 显式 >
+//         pak 内 build.novabuild 第一个场景 > error + 退出码非 0）
 //       --pak（默认自动扫描 exe 同目录 *.novapak）--width/--height（默认 1280x720）
 
 #include <windows.h>   // SetConsoleOutputCP + GetModuleFileNameW（须在 glad 之前）
@@ -29,9 +33,14 @@
 
 namespace {
 
+// 窗口标题（V1.0-11）：NOVA_PRODUCT 编译期注入（player/CMakeLists.txt）；回退 NovaPlayer
+#ifndef NOVA_PRODUCT
+#define NOVA_PRODUCT "NovaPlayer"
+#endif
+
 struct PlayerArgs {
-    std::filesystem::path scene = "assets/scenes/demo.nova.json";
-    std::filesystem::path pak;   // 空 = 自动扫描 exe 目录
+    std::filesystem::path scene;   // 空 = 自动取 build.novabuild 第一个场景（§27.5）
+    std::filesystem::path pak;     // 空 = 自动扫描 exe 目录
     int width = 1280;
     int height = 720;
 };
@@ -90,9 +99,14 @@ const NovaEngine::Camera* findMainCamera(const NovaEngine::Scene& scene) {
     return main ? main : first;
 }
 
-// 默认 pak：exe 同目录第一个 *.novapak（§10.5）
+// 默认 pak（V0.5-1 / V1.0-11 §27.5）：exe 同目录优先 NovaEngine.pak
+//（buildRelease 发布约定，单 pak 多场景）；其次第一个 *.novapak（buildPlayer
+// 单场景约定，§10.5）——发行目录内两约定并存时发布包优先，顺序确定
 std::filesystem::path findPakNextToExe(const std::filesystem::path& exeDir) {
     std::error_code ec;
+    const std::filesystem::path releasePak = exeDir / "NovaEngine.pak";
+    if (std::filesystem::is_regular_file(releasePak, ec)) return releasePak;
+    ec.clear();
     for (const auto& entry : std::filesystem::directory_iterator(exeDir, ec)) {
         if (!entry.is_regular_file(ec)) continue;
         if (entry.path().extension() == ".novapak") return entry.path();
@@ -113,7 +127,7 @@ int main(int argc, char** argv) {
     Logger::info("[NovaPlayer] 启动（exe 目录: {}）", exeDir.string());
 
     // 1. 窗口（先于 Renderer::init：GL 上下文）
-    auto window = Window::create("NovaPlayer", args.width, args.height);
+    auto window = Window::create(NOVA_PRODUCT, args.width, args.height);
     if (!window) {
         Logger::error("[NovaPlayer] 窗口创建失败（GLFW 初始化错误）");
         return 1;
@@ -143,6 +157,7 @@ int main(int argc, char** argv) {
     //    pak 挂载后走内存，无 pak 时相对工作目录——VS 调试运行目录已指向项目根）
     Renderer::init();
     SkyboxRenderer::init();
+    AsyncLoader::init();   // V1.0-2 波 2 合波接线（§27.1：Renderer::init 之后启动加载线程）
 
     // 5. 音频 + 运行时 UI + 后处理（V0.3-2/3/14）：音频失败只 warn 继续（优雅降级）；
     //   UI 失败内部 no-op；后处理失败内部降级为直通
@@ -164,10 +179,23 @@ int main(int argc, char** argv) {
         Logger::warn("[NovaPlayer] 脚本 DLL 加载失败，脚本组件将跳过（{}）", ScriptRuntime::lastError());
 #endif
 
-    // 7. 场景加载（AssetStream：先查 pak 再查磁盘）+ Play 启动
+    // 7. 场景解析（V1.0-11 §27.5 默认启动场景）：--scene 显式 > build.novabuild
+    //    第一个场景（SceneManager::init 已读盘，pak 内命中优先）> error + 退出码非 0
+    std::filesystem::path scenePath = args.scene;
+    if (scenePath.empty()) {
+        const auto& build = SceneManager::buildList();
+        if (!build.empty()) scenePath = build.front().path;
+    }
+    if (scenePath.empty()) {
+        Logger::error("[NovaPlayer] 未指定启动场景且 build.novabuild 场景列表为空"
+                      "（--scene <path> 可显式指定）");
+        return 1;
+    }
+
+    // 7.5 场景加载（AssetStream：先查 pak 再查磁盘）+ Play 启动
     Scene scene("Player");
-    if (!SceneSerializer::loadFromFile(scene, args.scene)) {
-        Logger::error("[NovaPlayer] 场景加载失败: {}", args.scene.string());
+    if (!SceneSerializer::loadFromFile(scene, scenePath)) {
+        Logger::error("[NovaPlayer] 场景加载失败: {}", scenePath.string());
         return 1;
     }
     // 输入绑定（V0.5-11）：场景加载后经 AssetStream 读 pak 内 assets/input/default.novainput；
@@ -175,10 +203,10 @@ int main(int argc, char** argv) {
     InputMap::load("assets/input/default.novainput");
     scene.start();
     // 注册为运行期场景并设为活动场景（§14.9；LoadScene 延迟切换经 flushPendingLoad 作用于本 scene）
-    SceneManager::registerScene(scene.name(), args.scene);
+    SceneManager::registerScene(scene.name(), scenePath);
     SceneManager::setActiveScene(&scene);
 
-    // 7. 主循环（无相机时 fallback 相机兜底；场景相机经 collectCamera 优先）
+    // 8. 主循环（无相机时 fallback 相机兜底；场景相机经 collectCamera 优先）
     RenderCamera fallback;
     fallback.position = glm::vec3(0.0f, 1.5f, 8.0f);
     fallback.view = glm::lookAt(fallback.position, glm::vec3(0.0f, 1.0f, 0.0f),
@@ -226,11 +254,13 @@ int main(int argc, char** argv) {
         UIRenderer::processInput(scene, uiMouse, Input::isMouseDown(MouseButton::Left),
                                  Input::isMousePressed(MouseButton::Left));
 
-        // 帧序（§15）：scene.update（物理→脚本→协程→事件）→ SceneManager 延迟切场景
-        // → 音频监听 → 3D+后处理+UI → 显示
+        // 帧序（§15 修订版，V1.0-2 波 2 合波接线 §27.1）：updateAll（全部已加载场景，
+        // 物理→脚本→协程→事件）→ AsyncLoader::flushPendingResults（GPU 上传+场景挂载）
+        // → SceneManager 延迟切场景 → 音频监听 → 3D+后处理+UI → 显示
         const auto updateT0 = std::chrono::steady_clock::now();
-        scene.update(Time::deltaTime());
-        SceneManager::flushPendingLoad();   // §15：Scene::update 之后调用（延迟执行防广播中迭代器失效）
+        SceneManager::updateAll(Time::deltaTime());
+        AsyncLoader::flushPendingResults();   // §27.1：必须先于 flushPendingLoad（挂载引用已上传资产）
+        SceneManager::flushPendingLoad();     // §15：update 之后调用（延迟执行防广播中迭代器失效）
         Profiler::pushSection(   // V1.0-1 波 1 合波接线（§26.2 模块档）
             "update", std::chrono::duration<float, std::milli>(
                           std::chrono::steady_clock::now() - updateT0).count());
@@ -249,7 +279,8 @@ int main(int argc, char** argv) {
         // V0.3-14：完整渲染链（场景→描边/线框注入→resolve→后处理→UI），输出到 outLdrFbo
         // 波 2 合波（§25.3 + 骨架日落地裁定 4）：SSAO 开且 hdr 时挂法线/线性深度附件（MRT）
         const bool hdr = scene.postProcess.enabled && PostProcess::hdrSupported();
-        const bool normalDepth = hdr && scene.postProcess.ssaoEnabled;
+        // V1.0-4 波 2 合波（cG 遗留 3）：DOF 需线性深度附件（与 SceneViewPanel 同款条件）
+        const bool normalDepth = hdr && (scene.postProcess.ssaoEnabled || scene.postProcess.dofEnabled);
         if (!fbosCreated || hdr != hdrFboIsHdr || normalDepth != hdrFboNormalDepth) {
             hdrFbo.destroy();
             outLdrFbo.destroy();
@@ -264,8 +295,12 @@ int main(int argc, char** argv) {
         }
         const auto renderT0 = std::chrono::steady_clock::now();
         if (fbosCreated && hdrFbo.width() > 0 && outLdrFbo.width() > 0) {
-            SceneRenderer::renderSceneToOutput(scene, fallback, hdrFbo, outLdrFbo,
-                                               scene.postProcess);
+            // V1.0-2 波 2 合波接线（§27.1）：多场景合并渲染——loadedScenes()（active 在前）；
+            // 单场景 = 与旧入口逐像素等价（§27.7-1）
+            const auto& loadedScenes = SceneManager::loadedScenes();
+            std::vector<const Scene*> scenes(loadedScenes.begin(), loadedScenes.end());
+            SceneRenderer::renderScenesToOutput(scenes, fallback, hdrFbo,
+                                                outLdrFbo, scene.postProcess);
             // renderSceneToOutput 已 unbind（回到默认帧缓冲）——UI 已在其内部绘制于 outLdrFbo，
             // 此处经 PostProcess::apply 的 disabled 直通 blit 把最终画面拷回默认帧缓冲（免 FBO 句柄泄漏）
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -294,6 +329,7 @@ int main(int argc, char** argv) {
     SSAO::shutdown();            // V0.5-5 波 2 合波：AO 纹理链释放
     ParticleRenderer::shutdown();  // V0.5-6 波 2 合波：粒子 VAO/VBO/贴图缓存释放
     SkyboxRenderer::shutdown();
+    AsyncLoader::shutdown();     // V1.0-2 波 2 合波接线（§27.1：须先于 Renderer::shutdown——join 加载线程）
     Renderer::shutdown();
     Logger::info("[NovaPlayer] 退出");
     Logger::shutdown();   // 关闭日志文件（逐行已落盘）

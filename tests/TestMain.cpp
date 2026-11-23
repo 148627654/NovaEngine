@@ -6,12 +6,27 @@
 #include "TestCommon.h"
 
 #include <atomic>
+#include <crtdbg.h>   // _CrtSetReportMode（断言防弹窗收口）
 #include <system_error>
 
 namespace NovaTest {
 
 namespace {
 std::atomic<int> s_tempCounter{0};
+}  // namespace
+
+// ===== 全局断言防弹窗（V1.0 波 2 合波收口，cR 波 2 报告移交）=====
+// MSVC 调试断言默认弹模态窗（2026-11-23 用户屏幕被 NovaTests 断言窗阻塞的教训）；
+// 静态初始化器把断言重定向到 stderr——测试失败即进程退出,不再弹窗。
+// try/catch 只能防异常,防不了 _DEBUG 迭代器断言,必须走 _CrtSetReportMode。
+namespace {
+struct AssertDialogSuppressor {
+    AssertDialogSuppressor() {
+        _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+        _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+    }
+};
+AssertDialogSuppressor s_assertDialogSuppressor;
 }  // namespace
 
 TempDir::TempDir(const std::string& prefix) {

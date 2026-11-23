@@ -28,6 +28,7 @@
 #include <NovaEngine/Assets/ModelLoader.h>
 #include <NovaEngine/Core/Events.h>
 #include <NovaEngine/Core/Logger.h>
+#include <NovaEngine/Scene/CharacterController.h>   // V1.0-3：角色宿主桥
 #include <NovaEngine/Scene/Collider.h>
 #include <NovaEngine/Scene/GameObject.h>
 #include <NovaEngine/Scene/Rigidbody.h>
@@ -40,6 +41,7 @@
 #include <Jolt/Core/JobSystemThreadPool.h>
 #include <Jolt/Core/Memory.h>
 #include <Jolt/Core/TempAllocator.h>
+#include <Jolt/Physics/Character/CharacterVirtual.h>   // V1.0-3：楼梯步进/坡度限制/地面检测
 #include <Jolt/Physics/Body/Body.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyFilter.h>
@@ -49,11 +51,11 @@
 #include <Jolt/Physics/Body/MotionProperties.h>
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h>
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayerInterfaceTable.h>
-#include <Jolt/Physics/Collision/BroadPhase/ObjectVsBroadPhaseLayerFilterTable.h>
 #include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/Physics/Collision/CollideShape.h>   // V1.0-3：CollideShapeSettings/CollideShapeResult
+#include <Jolt/Physics/Collision/CollisionCollectorImpl.h>   // V1.0-3：AllHitCollisionCollector
 #include <Jolt/Physics/Collision/ContactListener.h>
 #include <Jolt/Physics/Collision/NarrowPhaseQuery.h>
-#include <Jolt/Physics/Collision/ObjectLayerPairFilterTable.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
@@ -71,6 +73,7 @@
 #include <glm/gtx/matrix_decompose.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <filesystem>
 #include <functional>
@@ -84,15 +87,77 @@ namespace NovaEngine {
 
 namespace {
 
-// ===== 对象层设计（Jolt 最小两通道）=====
+// ===== 对象层设计（V1.0-3 §27.2：16 碰撞层 × 2 运动类 = 32 对象层）=====
+// objectLayer = (moving ? 16 : 0) + layer；broadphase 仍 2 层（静/动）。
+// 层矩阵（对称 16×16）→ MatrixPairFilter（窄相成对判定）+ MatrixVsBpFilter（宽相逐层掩码）。
+// 缺省全通矩阵 = 旧行为（任意层任意运动类互撞）；static-static 配对本不生成（静体不动）。
 namespace Layers {
-constexpr JPH::ObjectLayer kNonMoving = 0;   // static body
-constexpr JPH::ObjectLayer kMoving = 1;      // dynamic / kinematic（含 sensor）
-constexpr uint32_t kNumObjectLayers = 2;
+constexpr uint32_t kNumObjectLayers = 32;    // 16 碰撞层 × (static / moving)
+constexpr uint32_t kNumBroadPhaseLayers = 2;
 constexpr JPH::BroadPhaseLayer kBpNonMoving(0);
 constexpr JPH::BroadPhaseLayer kBpMoving(1);
-constexpr uint32_t kNumBroadPhaseLayers = 2;
+constexpr JPH::ObjectLayer objectLayerOf(int layer, bool moving) {
+    return JPH::ObjectLayer(uint32_t(layer) + (moving ? 16u : 0u));
+}
+constexpr int layerOf(JPH::ObjectLayer ol) {
+    const uint32_t v = uint32_t(ol);
+    return int(v < 16u ? v : v - 16u);
+}
 }  // namespace Layers
+
+// ===== V1.0-3 层矩阵过滤器 =====
+// 矩阵/掩码为「指针引用」（不复制）：绑定到 PhysicsWorld::Impl 的稳定 std::array 成员，
+// 构造体首行设置、矩阵变化时原位改写 + refreshBroadphasePairs 重建宽相配对——
+// PhysicsSystem 持有的过滤器引用地址不变（Jolt 缓存对象层表指针，重建对象 = 悬垂）。
+class MatrixPairFilter final : public JPH::ObjectLayerPairFilter {
+public:
+    bool ShouldCollide(JPH::ObjectLayer inLayer1, JPH::ObjectLayer inLayer2) const override {
+        return matrix[Layers::layerOf(inLayer1) * 16 + Layers::layerOf(inLayer2)];
+    }
+    const bool* matrix = nullptr;   // 16×16 行主序（对称）
+};
+
+class MatrixVsBpFilter final : public JPH::ObjectVsBroadPhaseLayerFilter {
+public:
+    bool ShouldCollide(JPH::ObjectLayer inLayer, JPH::BroadPhaseLayer) const override {
+        return layerMasks[Layers::layerOf(inLayer)] != 0;
+    }
+    const uint32_t* layerMasks = nullptr;   // 16 项：每层可碰撞层位掩码
+};
+
+// 查询用：layerMask 位掩码（Unity layermask 语义，与层矩阵无关）
+class MaskObjectLayerFilter final : public JPH::ObjectLayerFilter {
+public:
+    bool ShouldCollide(JPH::ObjectLayer inLayer) const override {
+        return ((mask >> Layers::layerOf(inLayer)) & 1u) != 0;
+    }
+    uint32_t mask = 0xFFFFFFFF;
+};
+
+// 查询用：ignore GO（body 级忽略——多 collider body 整体跳过）
+class IgnoreBodyFilter final : public JPH::BodyFilter {
+public:
+    bool ShouldCollide(const JPH::BodyID& inBodyID) const override {
+        if (ignore == nullptr)
+            return true;
+        const auto it = goByBodyId->find(inBodyID.GetIndexAndSequenceNumber());
+        return it == goByBodyId->end() || it->second != ignore;
+    }
+    bool ShouldCollideLocked(const JPH::Body& inBody) const override {
+        return ignore == nullptr || inBody.GetUserData() != reinterpret_cast<uint64_t>(ignore);
+    }
+    const std::unordered_map<uint32_t, GameObject*>* goByBodyId = nullptr;
+    GameObject* ignore = nullptr;
+};
+
+// CharacterVirtual 用：矩阵第 ccLayer 行（该层与各层的开关）
+class MatrixRowObjectFilter final : public JPH::ObjectLayerFilter {
+public:
+    bool ShouldCollide(JPH::ObjectLayer inLayer) const override {
+        return row[Layers::layerOf(inLayer)];
+    }
+    const bool* row = nullptr;
+};
 
 // ===== Jolt 进程级初始化（RegisterTypes 进程全局；多个 Scene/PhysicsWorld 引用计数）=====
 std::atomic<int> s_joltRefCount{0};
@@ -265,6 +330,20 @@ struct PhysicsWorld::Impl {
     void writeBackActive();   // dynamic：body → Transform（父级矩阵反解局部 TRS）
     void flushTriggerEvents();
 
+    // —— V1.0-3 碰撞层矩阵 ——
+    void recomputeLayerMasks();                        // collisionMatrix → layerMasks
+    void syncFromSceneMatrix();                        // scene.physicsCollisionMatrix → collisionMatrix
+    void refreshBroadphasePairs();                     // 矩阵变化后：全部 body 重入宽相（重建配对）
+
+    // —— V1.0-3 CharacterController 宿主（角色全部 Jolt 封装在本文件；Scene 组件侧零 Jolt）——
+    JPH::CharacterVirtual* createCharacterFor(CharacterController* cc);
+    void destroyCharacter(CharacterController* cc);
+    void stepCharacters(float dt);                     // 每固定步：消费 move/velocity 缓冲 + ExtendedUpdate
+    void writeBackCharacters();                        // CharacterVirtual → Transform
+    bool overlapWithShape(const JPH::Shape* shape, const glm::vec3& center,
+                          const PhysicsWorld::RaycastFilter& filter,
+                          std::vector<GameObject*>& outObjects);
+
     // ===== 数据 =====
     // DevOps 修复：守卫必须声明在最前——Jolt 分配器先于一切 Jolt 容器成员注册
     // （pairFilter 构造即分配内存）；析构顺序相反，保证 teardownAll 之后才注销。
@@ -275,30 +354,26 @@ struct PhysicsWorld::Impl {
     float accumulator = 0.0f;
     glm::vec3 gravity{0.0f, -9.81f, 0.0f};
 
+    // ===== V1.0-3 层矩阵存储（过滤器经指针引用；std::array 地址稳定）=====
+    std::array<bool, 256> collisionMatrix{};   // 16×16 行主序（对称；构造体首行全 true 缺省）
+    std::array<uint32_t, 16> layerMasks{};     // 每层可碰撞层位掩码（矩阵行压缩）
+
     // Jolt 核心（成员顺序 = 构造顺序，勿动）
-    // V0.3-1 修复：pairFilter/layerInterface 必须在 objectVsBpFilter 构造前配置完成——
-    // 该表构造时一次性按「pairFilter 允许的对象层对」建位图，构造体里事后 EnableCollision
-    // 无效（表已全 FALSE → 宽相位拒绝一切跨层配对，动态体直穿静态地面）。故用派生类把
-    // 配置移进自身构造，使声明顺序自然满足依赖。
+    // V1.0-3：pairFilter/objectVsBpFilter 改为「指针引用」式过滤器（见 MatrixPairFilter 注释）——
+    // 不再依赖构造顺序建位图；矩阵变化 = 原位改写 + refreshBroadphasePairs。
     struct ConfiguredLayerInterface : JPH::BroadPhaseLayerInterfaceTable {
         ConfiguredLayerInterface()
             : JPH::BroadPhaseLayerInterfaceTable(Layers::kNumObjectLayers,
                                                  Layers::kNumBroadPhaseLayers) {
-            MapObjectToBroadPhaseLayer(Layers::kNonMoving, Layers::kBpNonMoving);
-            MapObjectToBroadPhaseLayer(Layers::kMoving, Layers::kBpMoving);
-        }
-    };
-    struct ConfiguredPairFilter : JPH::ObjectLayerPairFilterTable {
-        ConfiguredPairFilter() : JPH::ObjectLayerPairFilterTable(Layers::kNumObjectLayers) {
-            EnableCollision(Layers::kNonMoving, Layers::kNonMoving);
-            EnableCollision(Layers::kNonMoving, Layers::kMoving);
-            EnableCollision(Layers::kMoving, Layers::kMoving);
+            for (int L = 0; L < 16; ++L) {
+                MapObjectToBroadPhaseLayer(Layers::objectLayerOf(L, false), Layers::kBpNonMoving);
+                MapObjectToBroadPhaseLayer(Layers::objectLayerOf(L, true), Layers::kBpMoving);
+            }
         }
     };
     ConfiguredLayerInterface layerInterface;
-    ConfiguredPairFilter pairFilter;
-    JPH::ObjectVsBroadPhaseLayerFilterTable objectVsBpFilter{
-        layerInterface, Layers::kNumBroadPhaseLayers, pairFilter, Layers::kNumObjectLayers};
+    MatrixPairFilter pairFilter;
+    MatrixVsBpFilter objectVsBpFilter;
     JPH::TempAllocatorImpl tempAllocator{10 * 1024 * 1024};
     JPH::JobSystemThreadPool jobSystem{1024, 8,
                                        std::max(1, int(std::thread::hardware_concurrency()) - 1)};
@@ -314,15 +389,82 @@ struct PhysicsWorld::Impl {
     std::unordered_map<uint32_t, GameObject*> goByBodyId;   // raycast / TriggerEvent 解析
     std::unordered_set<Collider*> registeredColliders;
     std::unordered_map<const Terrain*, JPH::BodyID> terrainBody;   // V0.5-8 地形高度场体
+
+    // ===== V1.0-3 CharacterController 角色表（主线程访问；固定步内消费）=====
+    struct CharacterEntry {
+        JPH::CharacterVirtual* character = nullptr;
+        glm::vec3 pendingDisplacement{0.0f};   // move() 帧间累积，固定步消费
+        bool pendingVelocityOverride = false;  // setVelocity 覆盖标志
+        glm::vec3 pendingVelocity{0.0f};
+        int layer = 0;   // 角色碰撞层：GO 首个 Collider 的 layer（无 Collider = 0）
+    };
+    std::unordered_map<CharacterController*, CharacterEntry> characters;
+    JPH::CharacterVsCharacterCollisionSimple characterCollision;   // 角色互撞（全部注册于此）
 };
 
 PhysicsWorld::Impl::Impl(Scene& s)
     : scene(s), bodyInterface(system.GetBodyInterface()) {
     // Jolt 全局初始化已由 joltInitGuard 在成员构造前完成（DevOps 修复）
-    // 层配置已移入 ConfiguredLayerInterface / ConfiguredPairFilter 构造（见成员声明注释）
+    // ===== V1.0-3 层矩阵初始化（必须早于 system.Init——过滤器经指针引用本 Impl 存储）=====
+    for (int a = 0; a < 16; ++a)
+        for (int b = 0; b < 16; ++b)
+            collisionMatrix[a * 16 + b] = true;   // 缺省全通 = 旧行为
+    recomputeLayerMasks();
+    syncFromSceneMatrix();   // 场景字段 = 权威存储（Edit 面板/序列化写入；构造时读入，Edit 查询即正确）
+    pairFilter.matrix = collisionMatrix.data();
+    objectVsBpFilter.layerMasks = layerMasks.data();
     system.Init(4096, 0, 4096, 4096, layerInterface, objectVsBpFilter, pairFilter);
     system.SetContactListener(&contactListener);
     system.SetGravity(toJolt(gravity));
+    // V1.0-3 物理材质：摩擦/弹性组合规则 v1 = 取平均（§27.2 注释文档化；Jolt 缺省为几何平均）
+    system.SetCombineFriction([](const JPH::Body& b1, const JPH::SubShapeID&,
+                                 const JPH::Body& b2, const JPH::SubShapeID&) {
+        return (b1.GetFriction() + b2.GetFriction()) * 0.5f;
+    });
+    system.SetCombineRestitution([](const JPH::Body& b1, const JPH::SubShapeID&,
+                                    const JPH::Body& b2, const JPH::SubShapeID&) {
+        return (b1.GetRestitution() + b2.GetRestitution()) * 0.5f;
+    });
+}
+
+// ==================== V1.0-3 碰撞层矩阵 ====================
+
+void PhysicsWorld::Impl::recomputeLayerMasks() {
+    for (int a = 0; a < 16; ++a) {
+        uint32_t m = 0;
+        for (int b = 0; b < 16; ++b)
+            if (collisionMatrix[a * 16 + b])
+                m |= (1u << b);
+        layerMasks[a] = m;
+    }
+}
+
+void PhysicsWorld::Impl::syncFromSceneMatrix() {
+    for (int a = 0; a < 16; ++a)
+        for (int b = 0; b < 16; ++b)
+            collisionMatrix[a * 16 + b] = scene.physicsCollisionMatrix[a][b];
+    recomputeLayerMasks();
+}
+
+void PhysicsWorld::Impl::refreshBroadphasePairs() {
+    // 矩阵变化后全部 body 摘除重入宽相：Jolt 宽相缓存的配对按新掩码重建
+    // （否则「关断」只对新配对生效，既有配对继续碰撞——验收 3 互穿必测）。
+    // RemoveBody 不销毁 body（位置/速度保留），AddBody 按原运动类型重新激活。
+    std::vector<JPH::BodyID> ids;
+    ids.reserve(bodyByRb.size() + staticBodyByGo.size() + terrainBody.size());
+    for (const auto& [rb, id] : bodyByRb)
+        ids.push_back(id);
+    for (const auto& [go, id] : staticBodyByGo)
+        ids.push_back(id);
+    for (const auto& [t, id] : terrainBody)
+        ids.push_back(id);
+    for (const JPH::BodyID id : ids) {
+        if (id.IsInvalid())
+            continue;
+        bodyInterface.RemoveBody(id);
+        // 静态体传 Activate 无效化（Jolt 内部仅对 dynamic 生效）；重入宽相即目的
+        bodyInterface.AddBody(id, JPH::EActivation::Activate);
+    }
 }
 
 PhysicsWorld::Impl::~Impl() {
@@ -518,6 +660,10 @@ JPH::BodyID PhysicsWorld::Impl::createBodyFor(Rigidbody* rb) {
     GameObject* go = rb->gameObject();
     if (go == nullptr || !go->activeSelf())
         return JPH::BodyID{};
+    // V1.0-3 互斥：同 GO 挂 CharacterController → CC 优先，Rigidbody 不建 body
+    //（warn 由 CharacterController::onAwake 负责，去重一次）
+    if (go->getComponent<CharacterController>() != nullptr)
+        return JPH::BodyID{};
 
     std::vector<Collider*> colliders;
     collectBodyColliders(go, colliders);
@@ -546,17 +692,41 @@ JPH::BodyID PhysicsWorld::Impl::createBodyFor(Rigidbody* rb) {
     const glm::vec3 pos = t ? t->worldPosition() : glm::vec3(0.0f);
     const glm::quat rot = t ? t->worldRotation() : glm::identity<glm::quat>();
 
+    // ===== V1.0-3 物理材质与碰撞层 =====
+    // body 层 = 同 GO collider 优先（多 collider 时取首个），否则子树首个收集 collider；
+    // 摩擦/弹性 = 各 collider 平均（组合规则 v1 取平均，注释文档化——§27.2）
+    int bodyLayer = 0;
+    {
+        const std::vector<Collider*> ownColliders = go->getComponents<Collider>();
+        if (!ownColliders.empty())
+            bodyLayer = ownColliders.front()->layer;
+        else if (!colliders.empty())
+            bodyLayer = colliders.front()->layer;
+    }
+    bodyLayer = std::clamp(bodyLayer, 0, PhysicsWorld::kMaxLayers - 1);   // 防御：脚本可写任意值
+    float friction = 0.5f, restitution = 0.0f;
+    if (!colliders.empty()) {
+        float fs = 0.0f, rs = 0.0f;
+        for (const Collider* c : colliders) {
+            fs += c->friction;
+            rs += c->restitution;
+        }
+        friction = fs / static_cast<float>(colliders.size());
+        restitution = rs / static_cast<float>(colliders.size());
+    }
+
     const bool isKin = kinematic || sensor;   // sensor 一律 Kinematic（Transform 驱动）
     const JPH::EMotionType motion = isKin ? JPH::EMotionType::Kinematic : JPH::EMotionType::Dynamic;
 
     JPH::BodyCreationSettings settings(shape.GetPtr(), toJoltR(pos), toJolt(rot), motion,
-                                       Layers::kMoving);
+                                       Layers::objectLayerOf(bodyLayer, /*moving=*/true));
     settings.mIsSensor = sensor;
     settings.mAllowSleeping = !isKin;
     settings.mLinearDamping = std::max(0.0f, rb->linearDamping);
     settings.mAngularDamping = std::max(0.0f, rb->angularDamping);
     settings.mGravityFactor = rb->useGravity ? 1.0f : 0.0f;
-    settings.mFriction = 0.5f;
+    settings.mFriction = friction;
+    settings.mRestitution = restitution;
     if (!isKin) {
         settings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
         settings.mMassPropertiesOverride.mMass = std::max(rb->mass, 1e-3f);
@@ -588,6 +758,10 @@ JPH::BodyID PhysicsWorld::Impl::createBodyFor(Rigidbody* rb) {
 JPH::BodyID PhysicsWorld::Impl::rebuildStaticBody(GameObject* go) {
     if (go == nullptr || !go->activeSelf())
         return JPH::BodyID{};
+    // V1.0-3 互斥：同 GO 挂 CharacterController → 其 collider 不建 static body
+    //（角色胶囊接管碰撞；否则角色出生即卡进同 GO 的 static 形状被推出）
+    if (go->getComponent<CharacterController>() != nullptr)
+        return JPH::BodyID{};
     // 销毁旧 static body（含其 collider 的 host 记录）
     if (auto it = staticBodyByGo.find(go); it != staticBodyByGo.end()) {
         const JPH::BodyID oldId = it->second;
@@ -608,13 +782,26 @@ JPH::BodyID PhysicsWorld::Impl::rebuildStaticBody(GameObject* go) {
     JPH::Ref<JPH::Shape> shape = buildShape(colliders, go, sensor);
     if (shape == nullptr)
         return JPH::BodyID{};
+    // V1.0-3：层取首个 collider；摩擦/弹性取平均（组合规则 v1 取平均）
+    const int bodyLayer = std::clamp(colliders.front()->layer, 0, PhysicsWorld::kMaxLayers - 1);
+    float friction = 0.5f, restitution = 0.0f;
+    {
+        float fs = 0.0f, rs = 0.0f;
+        for (const Collider* c : colliders) {
+            fs += c->friction;
+            rs += c->restitution;
+        }
+        friction = fs / static_cast<float>(colliders.size());
+        restitution = rs / static_cast<float>(colliders.size());
+    }
     const Transform* t = go->transform();
     JPH::BodyCreationSettings settings(
         shape.GetPtr(), toJoltR(t ? t->worldPosition() : glm::vec3(0.0f)),
         toJolt(t ? t->worldRotation() : glm::identity<glm::quat>()), JPH::EMotionType::Static,
-        Layers::kNonMoving);
+        Layers::objectLayerOf(bodyLayer, /*moving=*/false));
     settings.mIsSensor = sensor;
-    settings.mFriction = 0.5f;
+    settings.mFriction = friction;
+    settings.mRestitution = restitution;
     JPH::Body* body = bodyInterface.CreateBody(settings);
     if (body == nullptr)
         return JPH::BodyID{};
@@ -715,8 +902,8 @@ JPH::BodyID PhysicsWorld::Impl::buildTerrainBody(Terrain* t) {
     }
     JPH::BodyCreationSettings bodySettings(shapeRes.Get(), toJoltR(offset),
                                            JPH::Quat::sIdentity(), JPH::EMotionType::Static,
-                                           Layers::kNonMoving);
-    bodySettings.mFriction = 0.5f;
+                                           Layers::objectLayerOf(0, /*moving=*/false));   // 地形 = 层 0
+    bodySettings.mFriction = 0.5f;   // 地形无摩擦字段（v1；Terrain 无物理材质）
     JPH::Body* body = bodyInterface.CreateBody(bodySettings);
     if (body == nullptr)
         return JPH::BodyID{};
@@ -839,6 +1026,15 @@ void PhysicsWorld::Impl::teardownAll() {
     staticBodyByGo.clear();
     terrainBody.clear();
     registeredColliders.clear();
+    // V1.0-3：全部 CharacterVirtual 一并销毁（角色表清空；下次 Play 全量重建）
+    {
+        std::vector<CharacterController*> ccs;
+        ccs.reserve(characters.size());
+        for (const auto& [cc, entry] : characters)
+            ccs.push_back(cc);
+        for (CharacterController* cc : ccs)
+            destroyCharacter(cc);
+    }
     synced = false;
 }
 
@@ -948,7 +1144,11 @@ void PhysicsWorld::step(float dt) {
     while (impl.accumulator >= kFixedStep && steps < 3) {
         impl.writeKinematics();
         impl.system.Update(kFixedStep, 1, &impl.tempAllocator, &impl.jobSystem);
+        // V1.0-3：角色在刚体模拟后步进（对动态体本步最终姿态做碰撞检测）——
+        // 与刚体共用同一累加器 → 30/60/144 FPS 行为一致（固定步 1/60）
+        impl.stepCharacters(kFixedStep);
         impl.writeBackActive();
+        impl.writeBackCharacters();
         impl.accumulator -= kFixedStep;
         ++steps;
     }
@@ -981,7 +1181,10 @@ void PhysicsWorld::syncFromTransforms() {
     impl.teardownAll();
     impl.accumulator = 0.0f;
     impl.tearingDown = false;   // 批量销毁期结束：全量重建恢复注册
-    // 1) 全部 Rigidbody body（dynamic/kinematic；内部收集子树 collider）
+    // 0) V1.0-3 碰撞层矩阵：场景字段读入（Edit 面板/脚本写入的环境配置在此生效）
+    impl.syncFromSceneMatrix();
+    // 1) 全部 Rigidbody body（dynamic/kinematic；内部收集子树 collider；
+    //    CC 互斥：同 GO 挂 CharacterController 的 Rigidbody 不建 body——CC 优先）
     for (Rigidbody* rb : impl.scene.findComponents<Rigidbody>())
         impl.createBodyFor(rb);
     // 2) 未被刚体宿主的 collider → static body（同 GO 多 collider 合成一个 body）
@@ -993,11 +1196,132 @@ void PhysicsWorld::syncFromTransforms() {
     // 3) 地形高度场静态体（V0.5-8，c6；内部按 collisionEnabled 裁决）
     for (Terrain* t : impl.scene.findComponents<Terrain>())
         impl.registerTerrainHeightfield(t);
-    impl.synced = true;
+    // 4) V1.0-3 CharacterController：全量创建 CharacterVirtual（位置 = Transform 世界位置）
+    impl.synced = true;   // 先于角色创建置位：registerCharacter 的「Play 中挂载」分支即走此路径
+    for (CharacterController* cc : impl.scene.findComponents<CharacterController>())
+        impl.createCharacterFor(cc);
     // 诊断（验收期）：打印 body 统计，冒烟/验收可据此确认物理世界非空
     Logger::info("[Physics] syncFromTransforms 完成：动态/运动 body={}，static body={}，"
-                 "terrain heightfield={}，synced=true",
-                 impl.rbByBodyId.size(), impl.staticBodyByGo.size(), impl.terrainBody.size());
+                 "terrain heightfield={}，character={}，synced=true",
+                 impl.rbByBodyId.size(), impl.staticBodyByGo.size(), impl.terrainBody.size(),
+                 impl.characters.size());
+}
+
+// ==================== V1.0-3 CharacterController 宿主 ====================
+//
+// 位置约定：Transform 世界位置 = 胶囊中心（CharacterVirtual 位置同义，形状无偏移；
+// 站立地面时胶囊中心在地面上方 height/2 处）。旋转 v1 忽略（直立胶囊，Quat 恒等）。
+// 步进模型（每固定步，1/60s）：
+//   move() 帧间累积位移 → 本步速度 = 位移/kFixedStep（30/60/144 FPS 位移一致：多步帧
+//   首步消费全部缓冲，后续步速度 0）；setVelocity 覆盖优先级最高；
+//   重力不自积分（CharacterVirtual 语义）→ 非支撑态 v += gravity*gravityScale*dt，
+//   支撑态清下行速度（StickToFloor 贴地，斜坡速度不衰减为 0——验收 1）；
+//   ExtendedUpdate = Update + StickToFloor + WalkStairs（楼梯步进 = stepHeight）。
+// 层过滤：角色层 = GO 首个 Collider 的 layer（无 = 0），矩阵第 ccLayer 行决定与各层开关。
+
+JPH::CharacterVirtual* PhysicsWorld::Impl::createCharacterFor(CharacterController* cc) {
+    GameObject* go = cc->gameObject();
+    if (go == nullptr)
+        return nullptr;
+    // 胶囊形状：圆柱半高 = height/2 - radius（总高 = height，Unity 语义）
+    const float r = std::max(cc->radius, 1e-3f);
+    const float halfCyl = std::max(0.0f, cc->height * 0.5f - r);
+    JPH::CapsuleShapeSettings shapeSettings(halfCyl, r, nullptr);
+    JPH::ShapeSettings::ShapeResult shapeRes = shapeSettings.Create();
+    if (!shapeRes.IsValid())
+        return nullptr;
+
+    int layer = 0;
+    for (Collider* c : go->getComponents<Collider>()) {
+        layer = c->layer;
+        break;
+    }
+    layer = std::clamp(layer, 0, PhysicsWorld::kMaxLayers - 1);   // 防御：脚本可写任意值
+
+    JPH::CharacterVirtualSettings settings;
+    settings.mShape = shapeRes.Get();
+    settings.mMaxSlopeAngle = JPH::DegreesToRadians(std::clamp(cc->slopeLimitDeg, 0.0f, 89.9f));
+    settings.mMass = std::max(cc->mass, 1e-3f);
+    settings.mEnhancedInternalEdgeRemoval = true;   // 网格内边幽灵接触消除（楼梯/坡面平滑）
+
+    const Transform* t = go->transform();
+    const glm::vec3 pos = t ? t->worldPosition() : glm::vec3(0.0f);
+    auto* cv = new JPH::CharacterVirtual(&settings, toJoltR(pos), JPH::Quat::sIdentity(),
+                                         reinterpret_cast<uint64_t>(go), &system);
+    cv->SetCharacterVsCharacterCollision(&characterCollision);
+    CharacterEntry entry;
+    entry.character = cv;
+    entry.layer = layer;
+    characters[cc] = entry;
+    return cv;
+}
+
+void PhysicsWorld::Impl::destroyCharacter(CharacterController* cc) {
+    auto it = characters.find(cc);
+    if (it == characters.end())
+        return;
+    if (it->second.character != nullptr) {
+        characterCollision.Remove(it->second.character);
+        delete it->second.character;
+    }
+    characters.erase(it);
+}
+
+void PhysicsWorld::Impl::stepCharacters(float dt) {
+    for (auto& [cc, entry] : characters) {
+        JPH::CharacterVirtual* cv = entry.character;
+        if (cv == nullptr)
+            continue;
+        // 目标速度：setVelocity 覆盖 > move 缓冲 > 既有速度
+        glm::vec3 v;
+        if (entry.pendingVelocityOverride) {
+            v = entry.pendingVelocity;
+            entry.pendingVelocityOverride = false;
+        } else if (glm::dot(entry.pendingDisplacement, entry.pendingDisplacement) > 1e-12f) {
+            v = entry.pendingDisplacement / dt;
+            entry.pendingDisplacement = glm::vec3(0.0f);
+        } else {
+            v = toGlm(cv->GetLinearVelocity());
+        }
+        // 重力积分（CharacterVirtual 不自积分；gravityScale 缩放）
+        const glm::vec3 g = gravity * std::max(cc->gravityScale, 0.0f);
+        if (!cv->IsSupported()) {
+            v += g * dt;
+        } else if (v.y < 0.0f) {
+            v.y = 0.0f;   // 地面：清下行速度（StickToFloor 贴地；跳跃上行速度保留）
+        }
+        cv->SetLinearVelocity(toJolt(v));
+
+        // 楼梯步进/贴地参数（stepHeight ≤ 0 = 关闭楼梯步进，Jolt 语义）
+        JPH::CharacterVirtual::ExtendedUpdateSettings ups;
+        ups.mStickToFloorStepDown = JPH::Vec3(0.0f, -0.5f, 0.0f);
+        ups.mWalkStairsStepUp = JPH::Vec3(0.0f, std::max(cc->stepHeight, 0.0f), 0.0f);
+        MatrixRowObjectFilter layerFilter;
+        layerFilter.row = &collisionMatrix[entry.layer * 16];
+        cv->ExtendedUpdate(dt, toJolt(g), ups, JPH::BroadPhaseLayerFilter{}, layerFilter,
+                           JPH::BodyFilter{}, JPH::ShapeFilter{}, tempAllocator);
+    }
+}
+
+void PhysicsWorld::Impl::writeBackCharacters() {
+    for (auto& [cc, entry] : characters) {
+        if (entry.character == nullptr)
+            continue;
+        GameObject* go = cc->gameObject();
+        Transform* t = (go != nullptr) ? go->transform() : nullptr;
+        if (t == nullptr)
+            continue;
+        const glm::vec3 worldPos = toGlm(entry.character->GetPosition());
+        glm::vec3 localPos = worldPos;
+        if (go->parent() != nullptr && go->parent()->transform() != nullptr) {
+            // 父级矩阵反解局部位置（与 writeBackActive 同约定；旋转/缩放不参与）
+            const glm::mat4 local = glm::inverse(go->parent()->transform()->worldMatrix()) *
+                                    glm::translate(glm::mat4(1.0f), worldPos);
+            localPos = glm::vec3(local[3]);
+        }
+        if (glm::distance(t->localPosition(), localPos) > 1e-4f)
+            t->setLocalPosition(localPos);
+    }
 }
 
 bool PhysicsWorld::raycast(const glm::vec3& origin, const glm::vec3& direction,
@@ -1021,6 +1345,7 @@ bool PhysicsWorld::raycast(const glm::vec3& origin, const glm::vec3& direction,
         return false;
     outHit.hit = true;
     outHit.gameObject = it->second;
+    outHit.hitObject = it->second;   // V1.0-3：与 gameObject 同值（旧名保留兼容）
     outHit.distance = result.mFraction * maxDistance;
     outHit.point = origin + dir * outHit.distance;
     // 法线：Body::GetWorldSpaceSurfaceNormal（读锁内访问）
@@ -1029,6 +1354,209 @@ bool PhysicsWorld::raycast(const glm::vec3& origin, const glm::vec3& direction,
         outHit.normal = toGlm(lock.GetBody().GetWorldSpaceSurfaceNormal(result.mSubShapeID2,
                                                                         toJoltR(outHit.point)));
     return true;
+}
+
+// ==================== V1.0-3 查询 API（§27.2）====================
+
+bool PhysicsWorld::raycastAll(const glm::vec3& origin, const glm::vec3& direction,
+                              float maxDistance, const RaycastFilter& filter,
+                              std::vector<RaycastHit>& outHits) {
+    outHits.clear();
+    const float len = glm::length(direction);
+    if (len < 1e-6f || maxDistance <= 0.0f)
+        return false;
+    Impl& impl = *m_impl;
+    const glm::vec3 dir = direction / len;
+    const JPH::RRayCast ray(toJoltR(origin), toJolt(dir) * maxDistance);
+    const JPH::RayCastSettings settings;   // 与单命中 raycast 同缺省（背面忽略）
+    JPH::AllHitCollisionCollector<JPH::CastRayCollector> collector;
+    MaskObjectLayerFilter layerFilter;
+    layerFilter.mask = filter.layerMask;
+    IgnoreBodyFilter bodyFilter;
+    bodyFilter.goByBodyId = &impl.goByBodyId;
+    bodyFilter.ignore = filter.ignore;
+    impl.system.GetNarrowPhaseQuery().CastRay(ray, settings, collector, JPH::BroadPhaseLayerFilter{},
+                                              layerFilter, bodyFilter);
+    if (collector.mHits.empty())
+        return false;
+    collector.Sort();   // 距离升序（fraction 升序）——验收 2：3 命中堆叠物按距离排序
+    outHits.reserve(collector.mHits.size());
+    for (const JPH::RayCastResult& r : collector.mHits) {
+        const auto it = impl.goByBodyId.find(r.mBodyID.GetIndexAndSequenceNumber());
+        if (it == impl.goByBodyId.end())
+            continue;   // body 已销毁：丢弃
+        RaycastHit hit;
+        hit.hit = true;
+        hit.gameObject = it->second;
+        hit.hitObject = it->second;
+        hit.distance = r.mFraction * maxDistance;
+        hit.point = origin + dir * hit.distance;
+        const JPH::BodyLockRead lock(impl.system.GetBodyLockInterface(), r.mBodyID);
+        if (lock.Succeeded())
+            hit.normal = toGlm(lock.GetBody().GetWorldSpaceSurfaceNormal(
+                r.mSubShapeID2, toJoltR(hit.point)));
+        outHits.push_back(hit);
+    }
+    return !outHits.empty();
+}
+
+bool PhysicsWorld::Impl::overlapWithShape(const JPH::Shape* shape, const glm::vec3& center,
+                                          const PhysicsWorld::RaycastFilter& filter,
+                                          std::vector<GameObject*>& outObjects) {
+    JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> collector;
+    MaskObjectLayerFilter layerFilter;
+    layerFilter.mask = filter.layerMask;
+    IgnoreBodyFilter bodyFilter;
+    bodyFilter.goByBodyId = &goByBodyId;
+    bodyFilter.ignore = filter.ignore;
+    const JPH::CollideShapeSettings settings;   // 缺省（含背面）
+    const JPH::RMat44 com = JPH::RMat44::sTranslation(toJoltR(center));
+    system.GetNarrowPhaseQuery().CollideShape(shape, JPH::Vec3::sReplicate(1.0f), com, settings,
+                                              JPH::RVec3::sZero(), collector,
+                                              JPH::BroadPhaseLayerFilter{}, layerFilter,
+                                              bodyFilter);
+    if (collector.mHits.empty())
+        return false;
+    // 去重（多子 shape 命中同一 body → 只列一次 GO；含触发器）
+    std::unordered_set<GameObject*> seen;
+    for (const JPH::CollideShapeResult& r : collector.mHits) {
+        const auto it = goByBodyId.find(r.mBodyID2.GetIndexAndSequenceNumber());
+        if (it == goByBodyId.end())
+            continue;
+        if (seen.insert(it->second).second)
+            outObjects.push_back(it->second);
+    }
+    return !outObjects.empty();
+}
+
+bool PhysicsWorld::overlapSphere(const glm::vec3& center, float radius,
+                                 const RaycastFilter& filter,
+                                 std::vector<GameObject*>& outObjects) {
+    outObjects.clear();
+    if (radius <= 0.0f)
+        return false;
+    JPH::SphereShapeSettings shapeSettings(std::max(radius, 1e-3f), nullptr);
+    JPH::ShapeSettings::ShapeResult shapeRes = shapeSettings.Create();
+    if (!shapeRes.IsValid())
+        return false;
+    return m_impl->overlapWithShape(shapeRes.Get(), center, filter, outObjects);
+}
+
+bool PhysicsWorld::overlapBox(const glm::vec3& center, const glm::vec3& halfExtents,
+                              const RaycastFilter& filter,
+                              std::vector<GameObject*>& outObjects) {
+    outObjects.clear();
+    if (halfExtents.x <= 0.0f || halfExtents.y <= 0.0f || halfExtents.z <= 0.0f)
+        return false;
+    // convexRadius = 0：盒精确贴合（与 BoxCollider 同口径）
+    JPH::BoxShapeSettings shapeSettings(toJolt(halfExtents), 0.0f, nullptr);
+    JPH::ShapeSettings::ShapeResult shapeRes = shapeSettings.Create();
+    if (!shapeRes.IsValid())
+        return false;
+    return m_impl->overlapWithShape(shapeRes.Get(), center, filter, outObjects);
+}
+
+// ==================== V1.0-3 碰撞层 API（§27.2；配置 = 场景级 environment.physics）====================
+
+void PhysicsWorld::setLayerName(int layer, const std::string& name) {
+    if (layer < 0 || layer >= kMaxLayers)
+        return;
+    // scene.physicsLayerNames = 权威存储（序列化/面板共享）；不足 16 时补齐（防御）
+    while (m_impl->scene.physicsLayerNames.size() < size_t(kMaxLayers))
+        m_impl->scene.physicsLayerNames.push_back(std::string());
+    m_impl->scene.physicsLayerNames[size_t(layer)] = name;
+}
+
+const std::string& PhysicsWorld::layerName(int layer) {
+    static const std::string s_empty;
+    if (layer < 0 || layer >= kMaxLayers)
+        return s_empty;
+    auto& names = m_impl->scene.physicsLayerNames;
+    if (size_t(layer) >= names.size())
+        return s_empty;
+    return names[size_t(layer)];
+}
+
+void PhysicsWorld::setCollisionEnabled(int a, int b, bool enabled) {
+    if (a < 0 || a >= kMaxLayers || b < 0 || b >= kMaxLayers)
+        return;
+    Impl& impl = *m_impl;
+    // 对称写：矩阵对称不变量（matrix[a][b] == matrix[b][a]，UI 只展示三角区）
+    impl.collisionMatrix[a * 16 + b] = enabled;
+    impl.collisionMatrix[b * 16 + a] = enabled;
+    impl.recomputeLayerMasks();
+    // 同步场景字段（序列化持久化 + 面板读取）
+    impl.scene.physicsCollisionMatrix[a][b] = enabled;
+    impl.scene.physicsCollisionMatrix[b][a] = enabled;
+    // Play 中变更：既有宽相配对按新矩阵重建（否则关断不互穿——验收 3）
+    impl.refreshBroadphasePairs();
+}
+
+bool PhysicsWorld::collisionEnabled(int a, int b) const {
+    if (a < 0 || a >= kMaxLayers || b < 0 || b >= kMaxLayers)
+        return false;
+    return m_impl->collisionMatrix[a * 16 + b];
+}
+
+// ==================== V1.0-3 CharacterController 桥（§27.2；CC.cpp 经 friend 调用）====================
+
+void PhysicsWorld::registerCharacter(CharacterController* cc) {
+    if (cc == nullptr || m_impl->characters.contains(cc) || m_impl->tearingDown)
+        return;   // 批量销毁期：角色由 teardownAll 统一销毁，syncFromTransforms 全量重建
+    // CC 优先互斥（Play 中动态挂 CC）：拆除该 GO 已建 Rigidbody body
+    if (GameObject* go = cc->gameObject()) {
+        if (Rigidbody* rb = go->getComponent<Rigidbody>()) {
+            if (auto it = m_impl->bodyByRb.find(rb); it != m_impl->bodyByRb.end()) {
+                std::vector<Collider*> hosted;
+                for (const auto& [hc, hid] : m_impl->hostByCollider)
+                    if (hid == it->second)
+                        hosted.push_back(hc);
+                for (Collider* hc : hosted)
+                    m_impl->hostByCollider.erase(hc);
+                m_impl->destroyBody(it->second);
+                m_impl->bodyByRb.erase(it);
+                Logger::warn("[Physics] GO \"{}\" 动态挂载 CharacterController：Rigidbody body 已拆除"
+                             "（CC 优先互斥）", go->name());
+            }
+        }
+    }
+    if (!m_impl->synced)
+        return;   // Edit：待 syncFromTransforms 全量创建（synced 在角色创建前已置位，见 sync）
+    m_impl->createCharacterFor(cc);
+}
+
+void PhysicsWorld::unregisterCharacter(CharacterController* cc) {
+    m_impl->destroyCharacter(cc);
+}
+
+void PhysicsWorld::characterMove(CharacterController* cc, const glm::vec3& displacement) {
+    auto it = m_impl->characters.find(cc);
+    if (it == m_impl->characters.end())
+        return;   // Edit / 角色未创建：no-op
+    it->second.pendingDisplacement += displacement;
+}
+
+bool PhysicsWorld::characterVelocity(const CharacterController* cc, glm::vec3& out) const {
+    auto it = m_impl->characters.find(const_cast<CharacterController*>(cc));
+    if (it == m_impl->characters.end() || it->second.character == nullptr)
+        return false;
+    out = toGlm(it->second.character->GetLinearVelocity());
+    return true;
+}
+
+bool PhysicsWorld::setCharacterVelocity(CharacterController* cc, const glm::vec3& v) {
+    auto it = m_impl->characters.find(cc);
+    if (it == m_impl->characters.end())
+        return false;
+    it->second.pendingVelocity = v;
+    it->second.pendingVelocityOverride = true;
+    return true;
+}
+
+bool PhysicsWorld::characterGrounded(const CharacterController* cc) const {
+    auto it = m_impl->characters.find(const_cast<CharacterController*>(cc));
+    return it != m_impl->characters.end() && it->second.character != nullptr &&
+           it->second.character->IsSupported();
 }
 
 void PhysicsWorld::setGravity(const glm::vec3& g) {

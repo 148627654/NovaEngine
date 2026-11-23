@@ -19,11 +19,15 @@
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>   // InputText(std::string*) 包装
 
+#include <NovaEngine/Physics/PhysicsWorld.h>   // kMaxLayers
+#include <NovaEngine/Scene/CharacterController.h>
 #include <NovaEngine/Scene/Collider.h>
 #include <NovaEngine/Scene/Rigidbody.h>
+#include <NovaEngine/Scene/Scene.h>   // physicsLayerNames（层名下拉数据源）
 
 #include <glm/gtc/type_ptr.hpp>
 
+#include <algorithm>
 #include <cfloat>
 #include <string>
 
@@ -65,12 +69,66 @@ inline void drawRigidbodyEditor(NovaEngine::Rigidbody& rb, EditorContext& ctx) {
     dragFloatDirty(ctx, "Angular Damping", rb.angularDamping, 0.01f, 0.0f, 10.0f);
 }
 
+// ===== V1.0-3 物理材质控件（§27.2：Collider 内联字段 Inspector 编辑）=====
+// Layer：场景层名下拉（environment.physics 配置；PhysicsLayersPanel 编辑层名/矩阵）；
+// Friction 0..10 / Restitution 0..1 滑条。Edit 态改动进入 Play 时生效（syncFromTransforms
+// 全量重建 body——与物理组件同纪律，见文件头注释）。
+inline void drawColliderPhysicsMaterialEditor(NovaEngine::Collider& c, EditorContext& ctx) {
+    using namespace PhysicsWidgetsDetail;
+    const NovaEngine::Scene* scene = ctx.scene;
+    // 层名下拉（场景层名权威存储；不足 16 用 "Layer N" 兜底——Scene 构造已保证 16 项）
+    std::string preview = (scene != nullptr && size_t(c.layer) < scene->physicsLayerNames.size())
+                              ? scene->physicsLayerNames[size_t(c.layer)]
+                              : std::string();
+    if (preview.empty())
+        preview = "Layer " + std::to_string(c.layer);
+    if (ImGui::BeginCombo("Layer", preview.c_str())) {
+        for (int i = 0; i < NovaEngine::PhysicsWorld::kMaxLayers; ++i) {
+            std::string label = (scene != nullptr && size_t(i) < scene->physicsLayerNames.size())
+                                    ? scene->physicsLayerNames[size_t(i)]
+                                    : std::string();
+            if (label.empty())
+                label = "Layer " + std::to_string(i);
+            const bool selected = (c.layer == i);
+            if (ImGui::Selectable(label.c_str(), selected)) {
+                c.layer = i;
+                ctx.markSceneDirty();
+            }
+            if (selected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+    dragFloatDirty(ctx, "Friction", c.friction, 0.01f, 0.0f, 10.0f);
+    c.friction = std::clamp(c.friction, 0.0f, 10.0f);
+    dragFloatDirty(ctx, "Restitution", c.restitution, 0.01f, 0.0f, 1.0f);
+    c.restitution = std::clamp(c.restitution, 0.0f, 1.0f);
+}
+
 // Collider 公共字段：isTrigger / center
 inline void drawColliderCommonEditor(NovaEngine::Collider& c, EditorContext& ctx) {
     using namespace PhysicsWidgetsDetail;
     if (ImGui::Checkbox("Is Trigger", &c.isTrigger))
         ctx.markSceneDirty();
     dragFloat3Dirty(ctx, "Center", c.center, 0.01f);
+    drawColliderPhysicsMaterialEditor(c, ctx);   // V1.0-3：layer/friction/restitution
+}
+
+// ===== V1.0-3 CharacterController Inspector 控件（§27.2；InspectorPanel 路由归合波日）=====
+// 提示 Rigidbody 互斥（同 GO 挂两者 = CC 优先 + 启动 warn）。
+inline void drawCharacterControllerEditor(NovaEngine::CharacterController& cc, EditorContext& ctx) {
+    using namespace PhysicsWidgetsDetail;
+    dragFloatDirty(ctx, "Radius", cc.radius, 0.01f, 0.001f, 100.0f);
+    dragFloatDirty(ctx, "Height", cc.height, 0.01f, 0.001f, 100.0f);
+    dragFloatDirty(ctx, "Step Height", cc.stepHeight, 0.01f, 0.0f, 10.0f);
+    dragFloatDirty(ctx, "Slope Limit (deg)", cc.slopeLimitDeg, 0.5f, 0.0f, 89.0f);
+    dragFloatDirty(ctx, "Mass", cc.mass, 0.1f, 0.001f, 10000.0f);
+    dragFloatDirty(ctx, "Gravity Scale", cc.gravityScale, 0.05f, 0.0f, 10.0f);
+    if (cc.gameObject() != nullptr && cc.gameObject()->getComponent<NovaEngine::Rigidbody>() !=
+                                          nullptr) {
+        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f),
+                           "注意：与 Rigidbody 互斥（CharacterController 优先）");
+    }
 }
 
 // 总入口：dynamic_cast 分发；不匹配直接 return（调用方继续其它分发）

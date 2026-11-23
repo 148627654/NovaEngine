@@ -6,14 +6,16 @@
 //   → ImGui_ImplGlfw_InitForOpenGL / ImGui_ImplOpenGL3_Init
 //   → EditorApplication.run()（内部 init/主循环/shutdown）
 //
-// CLI（V0.5-2，契约 §24.5.1）：
+// CLI（V0.5-2，契约 §24.5.1 + V1.0-11 §27.5 扩展）：
 //   NovaEditor.exe                                # 无参数 = 原 GUI 模式，行为零变化
-//   NovaEditor.exe --headless [--import] [--build --scene <path> --out <dir>] [--quit]
+//   NovaEditor.exe --headless [--import] [--build [--release] --scene <path> --out <dir>] [--quit]
 //   --headless：Window::create 后立即 glfwHideWindow（保留 GL 上下文——Renderer::init 依赖），
 //               跳过 ImGui/面板/EditorApplication，任务完成即退出（等价隐含 --quit）
 //   --import：扫描 assets/ 模型/贴图全量导入生成缓存；失败数 M>0 → 退出码 1
 //   --build：复用 Packager::buildPlayer；--scene 缺省 assets/scenes/demo.nova.json，
 //            --out 缺省 <项目根>/dist
+//   --release（V1.0-11，与 --build 组合）：改走 Packager::buildRelease（发布目录结构；
+//             --scene 参数被忽略——收集清单 = build.novabuild 全部场景）
 //   --quit：GUI 启动即退（CI 冒烟）
 //   退出码：0 成功；1 任务失败；2 参数错误。stderr + Logs 文件双通道记错误。
 
@@ -46,11 +48,12 @@
 
 namespace {
 
-// 命令行参数（§24.5.1）
+// 命令行参数（§24.5.1 + V1.0-11）
 struct CliOptions {
     bool headless = false;
     bool importAssets = false;
     bool build = false;
+    bool release = false;   // V1.0-11：--build 组合 → Packager::buildRelease
     bool quit = false;
     std::string scene = "assets/scenes/demo.nova.json";  // --scene 缺省
     std::string outDir;                                   // --out 缺省 <项目根>/dist
@@ -66,6 +69,8 @@ bool parseCli(int argc, char** argv, CliOptions& out) {
             out.importAssets = true;
         } else if (arg == "--build") {
             out.build = true;
+        } else if (arg == "--release") {
+            out.release = true;   // V1.0-11：与 --build 组合生效
         } else if (arg == "--quit") {
             out.quit = true;
         } else if (arg == "--scene" || arg == "--out") {
@@ -160,7 +165,8 @@ int runImportTask() {
     return 0;
 }
 
-// --build（§24.5.1）：复用 Packager::buildPlayer（无 UI 依赖）。返回 0 成功 / 1 失败
+// --build（§24.5.1）：复用 Packager::buildPlayer；--build --release（V1.0-11 §27.5）：
+// Packager::buildRelease（收集 = build.novabuild 全部场景，--scene 被忽略）。返回 0 成功 / 1 失败
 int runBuildTask(const CliOptions& opt) {
     using namespace NovaEngine;
     // 输出目录：--out 相对路径按项目根解析（与 --scene 同规则）
@@ -168,6 +174,13 @@ int runBuildTask(const CliOptions& opt) {
     const std::filesystem::path out = opt.outDir.empty()
         ? AssetDatabase::projectRoot() / "dist"
         : (outPath.is_absolute() ? outPath : AssetDatabase::projectRoot() / outPath);
+    if (opt.release) {
+        Logger::info("命令行发布构建：out={}（buildRelease，收集 = build.novabuild 全部场景）",
+                     out.string());
+        if (NovaEditor::Packager::buildRelease(out)) return 0;
+        std::cerr << "NovaEditor: 发布构建失败（详见日志）" << std::endl;
+        return 1;
+    }
     Logger::info("命令行打包：scene={} out={}", opt.scene, out.string());
     if (NovaEditor::Packager::buildPlayer(opt.scene, out)) return 0;
     std::cerr << "NovaEditor: 打包失败（详见日志）" << std::endl;
@@ -256,6 +269,11 @@ int main(int argc, char** argv) {
         if (taskCode != 0)
             Logger::warn("命令行任务失败（退出码 {}），继续进入 GUI（-batchmode 对齐）", taskCode);
     }
+
+    // 5.2 异步加载线程（V1.0-2 波 2 合波接线，§27.1）：仅 GUI 路径启动——headless 批处理
+    //（上面的分支）不启动（CLI 任务用同步加载）；避免线程存活至进程退出（cG 实测
+    // headless 退出 std::terminate 的教训）。GUI 侧由 EditorApplication::shutdown 关闭。
+    AsyncLoader::init();
 
     // 5.5 音频引擎（V0.3-2 §14.2：编辑器启动即 init，Play 只 stopAll）。
     // 无可用设备时 init 返回 false——音频功能降级禁用（available()=false 全 API no-op），

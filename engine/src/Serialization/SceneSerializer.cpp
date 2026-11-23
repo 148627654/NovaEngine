@@ -252,8 +252,16 @@ void SceneSerializer::deserialize(Scene& target, const std::string& json) {
                                             : kEmptyObject;
         target.iblIntensity = safeGet(iblNode, "iblIntensity", 1.0f);
 
-        // 碰撞层矩阵（V1.0-3，§27.2 骨架日布）：旧文件无此段 → 保持 Scene 构造缺省
-        //（全通 + 默认层名，零警告）；段存在但形态不符（非 16）→ 同样保持缺省
+        // 碰撞层矩阵（V1.0-3，§27.2 骨架日布）：旧文件无此段 → 保持缺省（全通 + 默认层名，零警告）
+        // P1-2 修复（2026-11-23 合波日）：编辑器复用同一 Scene 对象加载场景，必须先重置缺省
+        // 再条件读——否则打开无 physics 段的旧文件会残留上一场景的矩阵/层名（对齐 postProcess
+        // 的「先重置后读」模式；§27.6 schema 回归验收「旧文件参数不变」依赖此重置）
+        for (int a = 0; a < 16; ++a)
+            for (int b = 0; b < 16; ++b)
+                target.physicsCollisionMatrix[a][b] = true;
+        target.physicsLayerNames.clear();
+        for (int i = 0; i < 16; ++i)
+            target.physicsLayerNames.push_back(i == 0 ? "Default" : "Layer" + std::to_string(i));
         if (env.contains("physics") && env["physics"].is_object()) {
             const nlohmann::json& phys = env["physics"];
             if (phys.contains("layerNames") && phys["layerNames"].is_array() &&

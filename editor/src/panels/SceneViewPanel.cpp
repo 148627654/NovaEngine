@@ -21,6 +21,7 @@
 #include <NovaEngine/Scene/Canvas.h>
 #include <NovaEngine/Scene/MeshRenderer.h>
 #include <NovaEngine/Scene/Scene.h>
+#include <NovaEngine/Scene/SceneManager.h>   // loadedScenes（V1.0-2 波 2 合波接线）
 #include <NovaEngine/Scene/SceneRenderer.h>
 #include <NovaEngine/Scene/Transform.h>
 #include <NovaEngine/Terrain/Terrain.h>       // 地形笔刷 raycast/applyBrush（V0.5-8，c6）
@@ -186,7 +187,9 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
     const bool hdrMode = scene->postProcess.enabled && PostProcess::hdrSupported();
     // 波 2 合波（§25.3 + 骨架日落地裁定 4）：SSAO 开且 hdr 时挂法线/线性深度附件（MRT）；
     // 开关变化与 hdr 模式变化同权重（都需全删重建，附件集合不同）
-    const bool normalDepth = hdrMode && scene->postProcess.ssaoEnabled;
+    // V1.0-4（§27.3，cG 一行补）：DOF 同样消费线性深度附件（与 SSAO 同源 MRT）
+    const bool normalDepth = hdrMode && (scene->postProcess.ssaoEnabled ||
+                                         scene->postProcess.dofEnabled);
     bool fboReady = true;
     if (!m_fboCreated || hdrMode != m_fboHdrMode || normalDepth != m_fboNormalDepth) {
         m_hdrFbo.destroy();
@@ -266,8 +269,16 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
     m_hdrFbo.bind();
     // 参数形态按架构师最终冻结签名（afterSceneDraw 为 const std::function<void()>&，
     // 默认 nullptr；空 std::function = 无注入点回调）
-    const uint32_t outTex = SceneRenderer::renderSceneToOutput(
-        *scene, renderCam, m_hdrFbo, m_outFbo, scene->postProcess,
+    // V1.0-2 波 2 合波接线（§27.1）：Play 中经 SceneManager::loadedScenes() 合并渲染
+    //（additive 场景一并渲染；Edit/无登记场景回退单场景，单场景 = 旧入口逐像素等价）
+    const std::vector<Scene*>& loaded = SceneManager::loadedScenes();
+    std::vector<const Scene*> scenes;
+    if (playMode && !loaded.empty())
+        scenes.assign(loaded.begin(), loaded.end());
+    else
+        scenes = {scene};
+    const uint32_t outTex = SceneRenderer::renderScenesToOutput(
+        scenes, renderCam, m_hdrFbo, m_outFbo, scene->postProcess,
         editMode ? &outlines : nullptr,
         afterSceneDraw,
         /*useSceneCamera=*/!editMode);   // Edit 用编辑器相机（场景相机不得劫持 Scene View）

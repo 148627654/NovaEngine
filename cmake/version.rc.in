@@ -1,0 +1,47 @@
+// 注意：code_page pragma 必须是文件首行——rc.exe 顺序解析，非 ASCII 字符出现前
+// 未声明 UTF-8 会按 ANSI 码页误读（中文注释 GBK 尾字节可能撞上注释结束序列）。
+#pragma code_page(65001)
+// version.rc.in —— NovaEngine Windows 版本信息资源模板（V1.0-11 发布流水线，§27.5）
+// configure_file(@ONLY) 注入：文件版本号 / 产品名 / 公司名 / 版权 / 图标路径等，
+// 由 editor 与 player 两处 CMakeLists 的 RC 段各自生成一份（§27.0 冻结项 12）。
+// 值来源：project VERSION（1.0.0 → FILEVERSION 1,0,0,0）+ NOVA_PRODUCT / NOVA_COMPANY /
+// NOVA_COPYRIGHT（默认 NovaEngine / Nova）。
+// 可复现纪律（§27.5 验收 3）：无时间戳注入——FILEFLAGS 只随 Debug/Release 配置切换，
+// 字符串区全部为编译期常量，同配置重复构建 RC 对象字节一致。
+
+#include <winres.h>
+
+IDI_ICON1 ICON "@NOVA_RC_ICON@"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION @NOVA_RC_FILE_VERSION@
+ PRODUCTVERSION @NOVA_RC_FILE_VERSION@
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404b0"
+        BEGIN
+            VALUE "CompanyName", "@NOVA_COMPANY@"
+            VALUE "FileDescription", "@NOVA_RC_FILE_DESC@"
+            VALUE "FileVersion", "@PROJECT_VERSION@.0"
+            VALUE "InternalName", "@NOVA_RC_INTERNAL_NAME@"
+            VALUE "LegalCopyright", "@NOVA_COPYRIGHT@"
+            VALUE "OriginalFilename", "@NOVA_RC_ORIGINAL_NAME@"
+            VALUE "ProductName", "@NOVA_PRODUCT@"
+            VALUE "ProductVersion", "@PROJECT_VERSION@.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x804, 1200
+    END
+END

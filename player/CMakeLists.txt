@@ -34,6 +34,39 @@ set_target_properties(NovaPlayer PROPERTIES
 nova_configure_target(NovaPlayer)
 
 # ============================================================
+# V1.0-11 版本信息注入（Windows RC，§27.5 冻结项 12 播放器侧）：
+# configure_file 生成 NovaPlayer_version.rc（cmake/version.rc.in 模板 @ONLY 注入），
+# 版本号取 project VERSION（1.0.0）；产品/公司名与编辑器共用默认（NovaEngine/Nova），
+# 图标同样用 editor/res/app.ico（双 exe 同款，§27.5）。
+# RC 对象与 /WHOLEARCHIVE、/DEF 导出链互不干扰（§27.7-5 审重点，双配置验证）。
+# 同时注入 NOVA_PRODUCT 编译定义：窗口标题（「窗口元数据」，ROADMAP §7-11）。
+# ============================================================
+if(WIN32)
+    if(NOT DEFINED NOVA_PRODUCT)
+        set(NOVA_PRODUCT "NovaEngine")
+    endif()
+    if(NOT DEFINED NOVA_COMPANY)
+        set(NOVA_COMPANY "Nova")
+    endif()
+    if(NOT DEFINED NOVA_COPYRIGHT)
+        set(NOVA_COPYRIGHT "Copyright (C) 2026 Nova")
+    endif()
+
+    enable_language(RC)
+    set(NOVA_RC_FILE_VERSION "${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSION_PATCH},0")
+    set(NOVA_RC_FILE_DESC "NovaEngine 播放器（打包运行时）")
+    set(NOVA_RC_INTERNAL_NAME "NovaPlayer")
+    set(NOVA_RC_ORIGINAL_NAME "NovaPlayer.exe")
+    # rc.exe 字符串转义：反斜杠路径的 "\r" 等序列会被当转义（RC2135 教训），用正斜杠
+    file(TO_CMAKE_PATH "${CMAKE_SOURCE_DIR}/editor/res/app.ico" NOVA_RC_ICON)
+    configure_file("${CMAKE_SOURCE_DIR}/cmake/version.rc.in"
+                   "${CMAKE_CURRENT_BINARY_DIR}/NovaPlayer_version.rc" @ONLY)
+    target_sources(NovaPlayer PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/NovaPlayer_version.rc")
+    target_compile_definitions(NovaPlayer PRIVATE $<$<CONFIG:Debug>:_DEBUG>)
+    target_compile_definitions(NovaPlayer PRIVATE NOVA_PRODUCT="${NOVA_PRODUCT}")
+endif()
+
+# ============================================================
 # V0.5-7 引擎符号导出表（脚本 DLL 引用依赖）
 # WINDOWS_EXPORT_ALL_SYMBOLS 只扫 target 自身 .obj，不扫静态库成员（CMake 文档限制，
 # 已实测：objects.txt 仅含本 target .obj）→ 用 dumpbin 从 NovaEngine.lib 生成去重 .def。

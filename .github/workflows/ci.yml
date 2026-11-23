@@ -82,3 +82,76 @@ jobs:
           name: ci-logs
           path: Logs/
           if-no-files-found: ignore
+
+  # ============================================================
+  # V1.0-11 发布流水线（§27.5）：release 打包 job（追加式——上方波 1 job 零改动）
+  # - Release 构建 NovaEditor + NovaPlayer：RC 注入后 /WHOLEARCHIVE + /DEF 导出链
+  #   双 exe 链接验证（§27.7-5 审重点；CI 镜像无 GL 4.5 硬件环境，只验证构建不跑 exe）
+  # - NovaEditor --headless --build --release 调 Packager::buildRelease 至 dist/——
+  #   CI 无 GPU 时 Window::create 可能失败（退出码 2），该步 continue-on-error 仅告警，
+  #   buildRelease 完整链路由 DevOps 本机验证（波 1 既有分工口径）
+  # - PowerShell 验证两 exe 版本资源（FileVersion 1.0.0.0 / ProductName / CompanyName
+  #   —— GL 无关，CI 可跑）
+  # - 上传发行目录 artifact（产出存在时；缺失则跳过）
+  # ============================================================
+  package-release:
+    name: Release 打包（buildRelease + 版本资源验证）
+    runs-on: windows-latest
+    timeout-minutes: 120
+    needs: build-and-test
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 安装 glad 生成器依赖（jinja2）
+        run: |
+          python -m pip install --disable-pip-version-check -q -r requirements.txt
+
+      - name: Configure
+        run: |
+          New-Item -ItemType Directory -Force Logs
+          $py = python -c "import sys; print(sys.executable)"
+          cmake -S . -B build "-DPython_EXECUTABLE=$py" "-DPython3_EXECUTABLE=$py" *> Logs/ci_configure.log
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content Logs/ci_configure.log -Tail 40 | ForEach-Object { "::error::" + ($_.ToString() -replace '\(' ,'[' -replace '\)',']') }
+            exit 1
+          }
+
+      - name: Release 构建 NovaEditor + NovaPlayer（RC/导出链链接验证）
+        run: |
+          cmake --build build --config Release --target NovaEditor NovaPlayer *> Logs/ci_release_build.log
+          if ($LASTEXITCODE -ne 0) {
+            $lines = Get-Content Logs/ci_release_build.log | Select-String -Pattern "error" | Select-Object -First 40
+            if (-not $lines) { $lines = Get-Content Logs/ci_release_build.log -Tail 40 }
+            $lines | ForEach-Object { "::error::" + ($_.ToString() -replace '\(' ,'[' -replace '\)',']') }
+            exit 1
+          }
+
+      - name: buildRelease（headless 发布打包至 dist/）
+        # CI 无 GL 4.5 硬件环境：窗口创建可能失败 → 告警不判失败（本机 DevOps 验证完整链路）
+        continue-on-error: true
+        run: |
+          New-Item -ItemType Directory -Force dist
+          & build\editor\Release\NovaEditor.exe --headless --build --release --out dist *> Logs/ci_release_pack.log
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content Logs/ci_release_pack.log -Tail 40 | ForEach-Object { "::warning::" + ($_.ToString() -replace '\(' ,'[' -replace '\)',']') }
+            exit 1
+          }
+
+      - name: 版本资源验证（FileVersion 1.0.0.0 / ProductName / CompanyName）
+        run: |
+          foreach ($exe in @('build\editor\Release\NovaEditor.exe', 'build\player\Release\NovaPlayer.exe')) {
+            $v = (Get-Item $exe).VersionInfo
+            Write-Host "$exe => FileVersion=$($v.FileVersion) ProductName=$($v.ProductName) CompanyName=$($v.CompanyName)"
+            if ($v.FileVersion -ne '1.0.0.0' -or $v.ProductName -ne 'NovaEngine' -or $v.CompanyName -ne 'Nova') {
+              Write-Host "::error::版本资源不符: $exe"
+              exit 1
+            }
+          }
+
+      - name: 上传发行目录（产出存在时）
+        uses: actions/upload-artifact@v4
+        with:
+          name: novaengine-release
+          path: dist/NovaEngine_*/
+          if-no-files-found: ignore

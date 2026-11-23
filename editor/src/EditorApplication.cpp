@@ -12,8 +12,10 @@
 #include "panels/InputBindingsPanel.h"
 #include "panels/InspectorPanel.h"
 #include "panels/MixerPanel.h"             // V1.0-8 波 1 合波接线
+#include "panels/PhysicsLayersPanel.h"     // V1.0-3 波 2 合波接线
 #include "panels/ProfilerPanel.h"          // V1.0-1 波 1 合波接线
 #include "panels/ReferenceCheckerPanel.h"  // V1.0-7 波 1 合波接线
+#include "panels/ShaderGraphPanel.h"       // V1.0-5 波 2 合波接线
 #include "panels/SceneViewPanel.h"
 #include "panels/StatsPanel.h"
 #include "panels/TerrainPanel.h"
@@ -257,6 +259,14 @@ void EditorApplication::init() {
     auto mixerPanel = std::make_unique<MixerPanel>();
     mixerPanel->open = false;
     m_panels.push_back(std::move(mixerPanel));
+    // Physics Layers（V1.0-3 波 2 合波接线，第 15 面板）：默认关，View 菜单打开；dock 底部 Tab
+    auto physicsLayersPanel = std::make_unique<PhysicsLayersPanel>();
+    physicsLayersPanel->open = false;
+    m_panels.push_back(std::move(physicsLayersPanel));
+    // Shader Graph（V1.0-5 波 2 合波接线，第 16 面板）：默认关，View 菜单/AssetBrowser 右键打开
+    auto shaderGraphPanel = std::make_unique<ShaderGraphPanel>();
+    shaderGraphPanel->open = false;
+    m_panels.push_back(std::move(shaderGraphPanel));
 
     // 脚本 DLL 初始加载（V0.5-7 波 2 2b 合波修复：此前漏接，编辑器启动即加载——
     // 必须在场景加载之前，脚本组件反序列化才能命中注册表；失败仅 warn，场景其余正常）
@@ -292,6 +302,7 @@ void EditorApplication::shutdown() {
     // 再清面板与 Renderer（§14.2 生命周期）
     AudioEngine::shutdown();
     SceneManager::shutdown();  // V0.3-12 波 3：清活动场景指针/构建列表/待加载队列
+    AsyncLoader::shutdown();   // V1.0-2 波 2 合波接线（§27.1：须先于 Renderer::shutdown——join 加载线程）
     m_panels.clear();  // ConsolePanel 析构时注销 Logger sink
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
@@ -384,12 +395,14 @@ void EditorApplication::update(float dt) {
     if (m_context.state == EditorContext::EditorState::Play) {
         if (m_context.paused && m_context.stepRequested) {
             m_context.stepRequested = false;
-            m_scene->update(dt);  // V0.3-10 子集：Pause 中单步推进一帧（F10 / Edit→Step）
+            SceneManager::updateAll(dt);  // V1.0-2 波 2 合波（§27.1）：全部已加载场景（active 先）；
+                                          // V0.3-10 子集：Pause 中单步推进一帧（F10 / Edit→Step）
         } else if (!m_context.paused) {
-            m_scene->update(dt);
+            SceneManager::updateAll(dt);  // V1.0-2（§27.1）：替代单 m_scene->update
         }
-        // §15 帧内顺序（V0.3-12 波 3）：scene->update 之后执行帧末场景切换
-        //（SceneManager::loadScene 入队的请求在此落地；无待加载 no-op）
+        // §15 修订帧序（V1.0-2 波 2 合波接线，§27.1）：flushPendingResults（GPU 上传+场景挂载）
+        // 必须先于 flushPendingLoad（挂载引用已上传资产）；两者都在 update 之后执行
+        AsyncLoader::flushPendingResults();
         SceneManager::flushPendingLoad();
     } else {
         m_scene->flushDestroyQueue();
@@ -489,6 +502,8 @@ void EditorApplication::buildDockLayout(ImGuiID dockspaceId) {
     ImGui::DockBuilderDockWindow("Profiler", dockBottom);          // V1.0-1 波 1 合波接线
     ImGui::DockBuilderDockWindow("Reference Checker", dockBottom); // V1.0-7 波 1 合波接线
     ImGui::DockBuilderDockWindow("Mixer", dockBottom);             // V1.0-8 波 1 合波接线
+    ImGui::DockBuilderDockWindow("Physics Layers", dockBottom);    // V1.0-3 波 2 合波接线
+    ImGui::DockBuilderDockWindow("Shader Graph", dockBottom);      // V1.0-5 波 2 合波接线
     ImGui::DockBuilderDockWindow("Scene", dockMain);
     ImGui::DockBuilderFinish(dockspaceId);
 }
@@ -701,6 +716,7 @@ void EditorApplication::enterPlayMode() {
 
     // 音频生命周期（§14.2）：进入 Play 前停掉一切残留声音（编辑期预览/上一轮 Play 遗留），防爆音
     AudioEngine::stopAll();
+    AsyncLoader::reset();   // V1.0-2 波 2 合波接线（§27.1）：清队列+代际递增，旧异步结果作废
     // 场景管理（V0.3-12 波 3）：登记活动场景——Play 中 loadScene/flushPendingLoad 的
     // DDOL 迁移与原地重建都作用于此 Scene 指针（同一对象原地重建，指针不失效）
     SceneManager::setActiveScene(m_scene.get());

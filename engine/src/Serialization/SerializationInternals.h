@@ -63,6 +63,10 @@ inline void writeMaterialJson(nlohmann::json& out, const Material& material) {
     // 均视为整块引用资产 → 只写 "materialAsset" 键并省略内联 material 段（无 per-instance override）
     if (material.materialAsset || !material.materialAssetPath.empty()) {
         out["materialAsset"] = material.materialAssetPath;
+        // V1.0-5（§27.4 序列化键名，cG 补）：shaderGraphPath 独立于双轨（渲染覆盖用；
+        // 空 = 缺省零变化，不写键）
+        if (!material.shaderGraphPath.empty())
+            out["shaderGraphPath"] = material.shaderGraphPath;
         return;
     }
 
@@ -82,6 +86,8 @@ inline void writeMaterialJson(nlohmann::json& out, const Material& material) {
     out["emissionColor"] = nlohmann::json::array(
         {material.emissionColor.x, material.emissionColor.y, material.emissionColor.z});
     out["emissionIntensity"] = material.emissionIntensity;
+    // V1.0-5（§27.4 序列化键名，cG 补）：.novashadergraph 相对路径（空 = 默认 shader）
+    out["shaderGraphPath"] = material.shaderGraphPath;
 }
 
 // material 段 JSON 节点 → Material（旧键默认值与 V0.2-8 一致；新键 V0.3-4/6 默认值兜底）
@@ -98,6 +104,8 @@ inline void readMaterialJson(const nlohmann::json& in, Material& material) {
     // 资产指针由调用方（MeshRenderer::onDeserialize）经 AssetDatabase 解析；
     // 内联字段仍读入，作为资产加载失败时的回退值（"非空 + 内联同时存在 → 资产为准"）
     material.materialAssetPath = jsonToString(in, "materialAsset", std::string());
+    // V1.0-5（§27.4 序列化键名，cG 补）：缺省空 = 默认 shader（旧文件零变化）
+    material.shaderGraphPath = jsonToString(in, "shaderGraphPath", std::string());
 
     material.albedo = jsonToVec3(in.value("albedo", nlohmann::json()), glm::vec3(0.8f));
     material.roughness = jsonToFloat(in, "roughness", 0.6f);

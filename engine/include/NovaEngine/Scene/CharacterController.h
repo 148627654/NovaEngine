@@ -5,6 +5,8 @@
 
 namespace NovaEngine {
 
+class PhysicsWorld;
+
 // ===== V1.0-3 CharacterController（§27.2 冻结接口，2026-11-23 波 2 骨架日布）=====
 // 选型裁定：封装 Jolt CharacterVirtual（楼梯步进/坡度限制/地面检测库内现成）——
 // 库能力消费，非新依赖。头文件签名冻结：物理行为实现归 cR
@@ -13,6 +15,7 @@ namespace NovaEngine {
 class CharacterController : public Component {
 public:
     explicit CharacterController(GameObject* owner);
+    ~CharacterController() override;             // 注销物理宿主（PhysicsWorld 角色表）
     float radius = 0.4f, height = 1.8f;          // 胶囊
     float stepHeight = 0.35f;                    // 楼梯步进高度
     float slopeLimitDeg = 45.0f;                 // 坡度上限（超过 = 阻挡）
@@ -27,7 +30,11 @@ public:
     // 注：与 Rigidbody 互斥（同 GO 挂两者 = 启动 warn + CharacterController 优先）
 
 private:
-    glm::vec3 m_velocity{0.0f};   // 骨架日补：velocity 存取（cR 实现 CharacterVirtual 后由物理驱动）
+    // 位置约定（cR 裁定）：Transform 世界位置 = 胶囊中心（Jolt CharacterVirtual 位置同义，
+    // 形状无偏移；站立地面时胶囊中心在地面上方 height/2 处）
+    glm::vec3 m_velocity{0.0f};        // 骨架日补：Edit 态 velocity 缓冲（Play 由物理驱动）
+    bool m_conflictWarned = false;     // Rigidbody 互斥 warn 只打一次
+    friend class PhysicsWorld;         // 物理驱动桥（全部 Jolt 封装在 PhysicsWorld.cpp 内）
 };
 
 }  // namespace NovaEngine

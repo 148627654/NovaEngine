@@ -172,6 +172,8 @@ void scanMaterialNode(const nlohmann::json& mat, const std::string& fromFile,
     addRef(out, fromFile, mat.value("metallicMap", std::string()), "texture");
     addRef(out, fromFile, mat.value("roughnessMap", std::string()), "texture");
     addRef(out, fromFile, mat.value("emissionMap", std::string()), "texture");
+    // V1.0-5 扩展位落地（波 2 合波日，§26.4 约定）：material.shaderGraphPath → "shaderGraph"
+    addRef(out, fromFile, mat.value("shaderGraphPath", std::string()), "shaderGraph");
     addRef(out, fromFile, mat.value("materialAsset", std::string()), "materialAsset");
 }
 
@@ -453,6 +455,11 @@ std::vector<AssetReference> AssetReferenceScanner::scanScene(
     if (root.contains("environment") && root["environment"].is_object())
         addRef(out, fromFile, root["environment"].value("skyCubemapPath", std::string()),
                "cubemap");
+        // V1.0-4 扩展位落地（波 2 合波日，§26.4 约定）：environment.postProcess.lutPath → "lut"
+        const nlohmann::json& envPost = root["environment"];
+        if (envPost.contains("postProcess") && envPost["postProcess"].is_object())
+            addRef(out, fromFile,
+                   envPost["postProcess"].value("lutPath", std::string()), "lut");
 
     std::unordered_set<std::string> visited;
     if (root.contains("objects") && root["objects"].is_array())

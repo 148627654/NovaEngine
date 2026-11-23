@@ -19,6 +19,10 @@ uniform float uLutIntensity;         // 0 = 直通
 uniform float uVignetteIntensity;    // 0 = 关
 uniform float uGrainAmount;          // 0 = 关
 uniform float uGrainSeed;            // 每帧时间抖动种子（C++ 侧每帧传）
+// ===== V1.0-4 直通路径一致性（§27.7-4，cG 最小补）：1 = RGBA8 直通模式 =====
+// 输入已是 sRGB 显示编码：跳过 ACES/曝光，先线性化再走 LUT/渐晕/颗粒段
+//（LUT 采样域与 HDR 路径一致），末段 gamma 重编码回显示域。
+uniform int uDirectPassthrough;      // 0（默认）= HDR 链；1 = RGBA8 直通（仅 LUT/渐晕/颗粒生效）
 
 vec3 acesTonemap(vec3 x) {
     // Narkowicz ACES 拟合（© Krzysztof Narkowicz，公开近似式）
@@ -31,7 +35,10 @@ void main() {
     // AO 合成（V0.5-5，§25.3）：0 = 乘 1（C++ 侧兜底白纹理，AO 无贡献）
     float ao = texture(uAmbientOcclusionTexture, vUv).r;
     vec3 color = (scene + bloom) * ao;
-    color = acesTonemap(color * uExposure);            // 曝光 → 色调映射
+    if (uDirectPassthrough != 0)
+        color = pow(max(color, vec3(0.0)), vec3(2.2));   // sRGB → 线性（LUT 域一致，§27.7-4）
+    else
+        color = acesTonemap(color * uExposure);          // 曝光 → 色调映射
     // ===== V1.0-4 LUT / 渐晕 / 颗粒（§27.3 位置裁定：ACES 后、gamma 前；全关 = 旧行为）=====
     if (uLutIntensity > 0.0) {
         vec3 lutColor = texture(uLut, clamp(color, 0.0, 1.0)).rgb;   // 线性 LDR 域采样

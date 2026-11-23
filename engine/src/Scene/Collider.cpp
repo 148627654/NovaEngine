@@ -15,6 +15,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 
@@ -57,11 +58,19 @@ void Collider::onAwake() {
 void Collider::onSerialize(nlohmann::json& out) const {
     out["isTrigger"] = isTrigger;
     out["center"] = nlohmann::json::array({center.x, center.y, center.z});
+    // V1.0-3（§27.2）：layer/friction/restitution 纯增量键，version 4 不变
+    out["layer"] = layer;
+    out["friction"] = friction;
+    out["restitution"] = restitution;
 }
 
 void Collider::onDeserialize(const nlohmann::json& in) {
     isTrigger = in.value("isTrigger", false);
     center = jsonToVec3(in.value("center", nlohmann::json()), glm::vec3(0.0f));
+    // V1.0-3（§27.2）：缺省兜底（旧文件零变化）；layer 钳制 0..15
+    layer = std::clamp(in.value("layer", 0), 0, 15);
+    friction = std::clamp(in.value("friction", 0.5f), 0.0f, 10.0f);
+    restitution = std::clamp(in.value("restitution", 0.0f), 0.0f, 1.0f);
 }
 
 // ==================== BoxCollider ====================

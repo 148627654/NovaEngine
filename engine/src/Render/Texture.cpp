@@ -1,4 +1,5 @@
 #include <NovaEngine/Render/Texture.h>
+#include <NovaEngine/Render/Renderer.h>   // isInitialized（V1.0 波 2 合波 GL 守卫）
 #include <NovaEngine/Assets/TextureLoader.h>
 #include <NovaEngine/Core/Logger.h>
 
@@ -144,6 +145,13 @@ std::shared_ptr<Texture> Texture::createFromFile(const std::filesystem::path& pa
 std::shared_ptr<Texture> Texture::createFromPixels(const uint8_t* rgba8, int width, int height,
                                                    bool srgb, TextureWrap wrap,
                                                    TextureFilter filter, bool generateMipmaps) {
+    // ===== V1.0 波 2 合波（cR 遗留 3）：GL 就绪守卫 =====
+    // 无 GL 上下文（headless 测试/未初始化）→ nullptr + warn，与 Mesh::create 同纪律；
+    // 运行期必先 Renderer::init，行为零变化
+    if (!Renderer::isInitialized()) {
+        Logger::warn("[Texture] GL 未初始化，跳过贴图上传");
+        return nullptr;
+    }
     // 二进制缓存命中路径（V0.3-7）：像素已在内存，跳过文件读取与 stb 解码
     if (!rgba8 || width <= 0 || height <= 0) return nullptr;
     auto tex = std::shared_ptr<Texture>(new Texture());

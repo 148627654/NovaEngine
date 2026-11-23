@@ -1,8 +1,10 @@
 #include "InspectorPanel.h"
+#include "../DragDrop.h"           // kAssetPayload（V1.0-5 波 2 合波接线：Shader Graph 拖放赋值）
 #include "AudioWidgets.h"         // 音频组件编辑（V0.3-2，本线 Coder C）
 #include "MaterialEditorWidgets.h"   // 材质编辑控件集（Inspector 与 .novamat 模态共用，V0.3-6）
 #include "ParticleWidgets.h"      // 粒子系统编辑（V0.5-6，波 2 合波接线；不匹配类型 no-op）
 #include "PhysicsWidgets.h"       // 物理组件编辑（V0.3-1，Coder A 波 2 并行创建；不匹配类型 no-op）
+#include <NovaEngine/Scene/CharacterController.h>   // V1.0-3 波 2 合波接线
 #include "UIWidgets.h"            // UI 组件编辑（V0.3-3，Coder B 波 2 并行创建；不匹配类型 no-op）
 
 #include "../EditorContext.h"
@@ -269,6 +271,10 @@ void InspectorPanel::onGui(EditorContext& ctx, EditorCamera&) {
             drawAudioComponents(ctx, comp, editMode);
             drawUIComponents(ctx, comp, editMode);
             ParticleWidgets::drawParticleComponents(ctx, comp, editMode);
+            // V1.0-3 波 2 合波接线：CharacterController 编辑器（PhysicsWidgets.h 提供；
+            // 与物理组件同纪律：Edit 可编辑参数，Play 行为由引擎侧保证）
+            if (auto* cc = dynamic_cast<NovaEngine::CharacterController*>(comp))
+                drawCharacterControllerEditor(*cc, ctx);
             // 上面的 Remove 按钮可能已释放 comp（析构指针作废）：校验存活后继续，
             // 否则终止分发（后续快照指针不可再解引用）
             bool alive = false;
@@ -377,6 +383,46 @@ void InspectorPanel::drawMeshRenderer(EditorContext& ctx, NovaEngine::GameObject
             }
             if (!edit) ImGui::EndDisabled();
             ImGui::TextDisabled("(assets/... .novamat path, Enter)");
+        }
+        ImGui::Separator();
+    }
+
+    // ---- V1.0-5 波 2 合波接线：Shader Graph 引用（实例级，序列化键 shaderGraphPath；
+    //      P1-3 修复后实例级优先于材质资产，渲染侧经缓存解析编译）----
+    {
+        const std::string sgLabel = mr->material.shaderGraphPath.empty()
+                                        ? "Shader Graph: none"
+                                        : "Shader Graph: " + mr->material.shaderGraphPath;
+        ImGui::TextUnformatted(sgLabel.c_str());
+        if (!mr->material.shaderGraphPath.empty()) {
+            if (!edit) ImGui::BeginDisabled();
+            if (ImGui::Button("Detach Shader Graph")) {
+                mr->material.shaderGraphPath.clear();
+                mr->material.shaderOverride.reset();   // 回退默认 blinn_phong
+                ctx.markSceneDirty();
+            }
+            if (!edit) ImGui::EndDisabled();
+        } else {
+            // 拖放赋值（AssetBrowser .novashadergraph 为 kAssetPayload 拖拽源）
+            if (ImGui::BeginDragDropTarget()) {
+                if (const ImGuiPayload* payload =
+                        ImGui::AcceptDragDropPayload(NovaEditor::DragDrop::kAssetPayload)) {
+                    const std::string abs(reinterpret_cast<const char*>(payload->Data),
+                                          payload->DataSize);
+                    const std::filesystem::path p(abs);
+                    if (p.extension() == ".novashadergraph") {
+                        std::error_code ec;
+                        const std::filesystem::path rel =
+                            std::filesystem::relative(p, NovaEngine::AssetDatabase::projectRoot(), ec);
+                        if (!ec) {
+                            mr->material.shaderGraphPath = rel.generic_string();
+                            mr->material.shaderOverride.reset();
+                            ctx.markSceneDirty();
+                        }
+                    }
+                }
+                ImGui::EndDragDropTarget();
+            }
         }
         ImGui::Separator();
     }
