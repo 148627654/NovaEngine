@@ -30,7 +30,9 @@ jobs:
         run: |
           cmake --build build --config Debug *> Logs/ci_debug_build.log
           if ($LASTEXITCODE -ne 0) {
-            Get-Content Logs/ci_debug_build.log -Tail 80 | ForEach-Object { "::error::$_" }
+            $lines = Get-Content Logs/ci_debug_build.log | Select-String -Pattern "error" | Select-Object -First 40
+            if (-not $lines) { $lines = Get-Content Logs/ci_debug_build.log -Tail 40 }
+            $lines | ForEach-Object { "::error::" + ($_.ToString() -replace '\(' ,'[' -replace '\)',']') }
             exit 1
           }
 
@@ -38,7 +40,9 @@ jobs:
         run: |
           ctest --test-dir build -C Debug --output-on-failure *> Logs/ci_ctest_debug.log
           if ($LASTEXITCODE -ne 0) {
-            Get-Content Logs/ci_ctest_debug.log -Tail 80 | ForEach-Object { "::error::$_" }
+            $lines = Get-Content Logs/ci_ctest_debug.log | Select-String -Pattern "error|Failed|FAILED" | Select-Object -First 40
+            if (-not $lines) { $lines = Get-Content Logs/ci_ctest_debug.log -Tail 40 }
+            $lines | ForEach-Object { "::error::" + ($_.ToString() -replace '\(' ,'[' -replace '\)',']') }
             exit 1
           }
 
@@ -46,7 +50,9 @@ jobs:
         run: |
           cmake --build build --config Release *> Logs/ci_release_build.log
           if ($LASTEXITCODE -ne 0) {
-            Get-Content Logs/ci_release_build.log -Tail 80 | ForEach-Object { "::error::$_" }
+            $lines = Get-Content Logs/ci_release_build.log | Select-String -Pattern "error" | Select-Object -First 40
+            if (-not $lines) { $lines = Get-Content Logs/ci_release_build.log -Tail 40 }
+            $lines | ForEach-Object { "::error::" + ($_.ToString() -replace '\(' ,'[' -replace '\)',']') }
             exit 1
           }
 
