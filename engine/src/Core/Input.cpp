@@ -251,6 +251,40 @@ void pollGamepads() {
 
 }  // namespace
 
+// ===== V1.0 按键调试日志（环境变量 NOVA_DBG_KEYS=1 开启，2026-11-23 用户需求）=====
+// 按下/松开边沿逐键打日志——验收与排障时确认按键是否到达引擎
+//（编辑器 Console 面板与终端/日志文件均可见）。生产环境不设该变量 = 零开销。
+const char* keyDebugName(Key key) {
+    if (key >= Key::A && key <= Key::Z) {
+        static char letter[2] = {'A', '\0'};
+        letter[0] = static_cast<char>('A' + (static_cast<int>(key) - static_cast<int>(Key::A)));
+        return letter;
+    }
+    switch (key) {
+        case Key::Space: return "Space";
+        case Key::Num0: return "Num0"; case Key::Num1: return "Num1";
+        case Key::Num2: return "Num2"; case Key::Num3: return "Num3";
+        case Key::Num4: return "Num4"; case Key::Num5: return "Num5";
+        case Key::Num6: return "Num6"; case Key::Num7: return "Num7";
+        case Key::Num8: return "Num8"; case Key::Num9: return "Num9";
+        case Key::Escape: return "Escape"; case Key::Enter: return "Enter";
+        case Key::Tab: return "Tab"; case Key::Backspace: return "Backspace";
+        case Key::Insert: return "Insert"; case Key::Delete: return "Delete";
+        case Key::Right: return "Right"; case Key::Left: return "Left";
+        case Key::Down: return "Down"; case Key::Up: return "Up";
+        case Key::PageUp: return "PageUp"; case Key::PageDown: return "PageDown";
+        case Key::Home: return "Home"; case Key::End: return "End";
+        case Key::F1: return "F1"; case Key::F2: return "F2"; case Key::F3: return "F3";
+        case Key::F4: return "F4"; case Key::F5: return "F5"; case Key::F6: return "F6";
+        case Key::F7: return "F7"; case Key::F8: return "F8"; case Key::F9: return "F9";
+        case Key::F10: return "F10"; case Key::F11: return "F11"; case Key::F12: return "F12";
+        case Key::LeftShift: return "LeftShift"; case Key::LeftControl: return "LeftControl";
+        case Key::LeftAlt: return "LeftAlt"; case Key::RightShift: return "RightShift";
+        case Key::RightControl: return "RightControl"; case Key::RightAlt: return "RightAlt";
+        default: return "Unknown";
+    }
+}
+
 void Input::beginFrame() {
     GLFWwindow* win = glfwGetCurrentContext();
 
@@ -273,6 +307,16 @@ void Input::beginFrame() {
         for (Key key : kTrackedKeys) {
             g_keyDown[static_cast<int>(key)] =
                 glfwGetKey(win, static_cast<int>(key)) == GLFW_PRESS;
+        }
+        // 按键调试日志（NOVA_DBG_KEYS=1）：按下/松开边沿（与 isKeyPressed/Released 同源判定）
+        if (std::getenv("NOVA_DBG_KEYS") != nullptr) {
+            for (Key key : kTrackedKeys) {
+                const int i = static_cast<int>(key);
+                if (g_keyDown[i] && !g_keyPrevDown[i])
+                    Logger::info("[Input] 按下 {} 键", keyDebugName(key));
+                else if (!g_keyDown[i] && g_keyPrevDown[i])
+                    Logger::info("[Input] 松开 {} 键", keyDebugName(key));
+            }
         }
         for (int b = 0; b < 3; ++b) {
             g_mouseDown[b] = glfwGetMouseButton(win, b) == GLFW_PRESS;

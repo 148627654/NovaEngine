@@ -1,8 +1,10 @@
 #include "CharacterWalk.h"
 
 #include <NovaEngine/Core/InputMap.h>
+#include <NovaEngine/Core/Logger.h>
 #include <NovaEngine/Scene/CharacterController.h>
 #include <NovaEngine/Scene/GameObject.h>
+#include <NovaEngine/Scene/Transform.h>
 #include <NovaEngine/Scripting/ScriptRegistry.h>
 
 #include <nlohmann/json.hpp>
@@ -11,13 +13,30 @@ namespace NovaGame {
 
 CharacterWalk::CharacterWalk(NovaEngine::GameObject* owner) : Behaviour(owner) {}
 
-void CharacterWalk::onUpdate(float /*dt*/) {
+void CharacterWalk::onStart() {
+    // 挂载诊断（验收/排障可见）：CC 未找到时后续 onUpdate 全部静默跳过——这里必须打日志
+    const auto* cc = gameObject()->getComponent<NovaEngine::CharacterController>();
+    NovaEngine::Logger::info("CharacterWalk: 已挂载到 \"{}\"（CharacterController {}）",
+                             gameObject()->name(), cc ? "已连接" : "未找到!");
+}
+
+void CharacterWalk::onUpdate(float dt) {
     if (!enabled) return;
     NovaEngine::CharacterController* cc = gameObject()->getComponent<NovaEngine::CharacterController>();
     if (!cc) return;
 
     const float h = NovaEngine::InputMap::getAxis("Horizontal");
     const float v = NovaEngine::InputMap::getAxis("Vertical");
+
+    // 输入诊断（限频 1 次/秒）：确认轴读取与物理速度设置链路
+    if ((h != 0.0f || v != 0.0f) && (m_logAccum += dt) > 1.0f) {
+        m_logAccum = 0.0f;
+        const glm::vec3 p = gameObject()->transform()->worldPosition();
+        NovaEngine::Logger::info(
+            "CharacterWalk: 轴(h={:.1f},v={:.1f}) → setVelocity 位置=({:.2f},{:.2f},{:.2f}) "
+            "着地={}",
+            h, v, p.x, p.y, p.z, cc->isGrounded());
+    }
 
     // 垂直速度保留物理积分值（重力/落地清空由 PhysicsWorld 处理）；
     // 只有按下跳跃且着地时才注入起跳初速（单帧注入，下一固定步消费）

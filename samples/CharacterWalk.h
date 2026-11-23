@@ -12,9 +12,13 @@ public:
     explicit CharacterWalk(NovaEngine::GameObject* owner);
     float m_speed = 4.0f;      // 米/秒，Inspector 可调
     float m_jumpSpeed = 6.0f;  // 起跳初速（米/秒），Inspector 可调
+    void onStart() override;   // 挂载诊断日志（CC 是否找到）
     void onUpdate(float dt) override;
     void onSerialize(nlohmann::json& out) const override;   // 写 speed/jumpSpeed
     void onDeserialize(const nlohmann::json& in) override;  // 读 speed/jumpSpeed
+
+private:
+    float m_logAccum = 0.0f;   // 输入日志限频累积（运行时状态，不序列化）
 };
 
 }  // namespace NovaGame

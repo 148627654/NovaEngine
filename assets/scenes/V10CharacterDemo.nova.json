@@ -44,13 +44,96 @@
                 {
                     "position": [
                         0.0,
-                        3.5,
-                        10.0
+                        0.9,
+                        0.0
                     ],
                     "rotation": [
                         0.0,
-                        1.0,
                         0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "type": "Transform"
+                },
+                {
+                    "radius": 0.4,
+                    "height": 1.8,
+                    "stepHeight": 0.35,
+                    "slopeLimitDeg": 45.0,
+                    "mass": 70.0,
+                    "gravityScale": 1.0,
+                    "type": "CharacterController"
+                },
+                {
+                    "enabled": true,
+                    "speed": 4.0,
+                    "jumpSpeed": 6.0,
+                    "type": "CharacterWalk"
+                }
+            ],
+            "id": 7010000000000000009,
+            "name": "Player",
+            "parent": 0
+        },
+        {
+            "active": true,
+            "components": [
+                {
+                    "position": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "scale": [
+                        0.8,
+                        1.8,
+                        0.8
+                    ],
+                    "type": "Transform"
+                },
+                {
+                    "material": {
+                        "albedo": [
+                            0.9,
+                            0.55,
+                            0.1
+                        ],
+                        "albedoMap": "",
+                        "metallic": 0.0,
+                        "roughness": 0.5
+                    },
+                    "mesh": "assets/models/sphere.obj",
+                    "type": "MeshRenderer"
+                }
+            ],
+            "id": 7010000000000000010,
+            "name": "Visual",
+            "parent": 7010000000000000009
+        },
+        {
+            "active": true,
+            "components": [
+                {
+                    "position": [
+                        0.0,
+                        2.5,
+                        5.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.9919,
+                        -0.1271,
                         0.0
                     ],
                     "scale": [
@@ -76,7 +159,7 @@
             ],
             "id": 7010000000000000001,
             "name": "Main Camera",
-            "parent": 0
+            "parent": 7010000000000000009
         },
         {
             "active": true,
@@ -101,7 +184,7 @@
                     "type": "Transform"
                 },
                 {
-                    "castShadows": true,
+                    "castShadows": false,
                     "color": [
                         1.0,
                         0.949999988079071,
@@ -446,62 +529,6 @@
             ],
             "id": 7010000000000000008,
             "name": "Slope30deg",
-            "parent": 0
-        },
-        {
-            "active": true,
-            "components": [
-                {
-                    "position": [
-                        0.0,
-                        0.9,
-                        0.0
-                    ],
-                    "rotation": [
-                        0.0,
-                        0.0,
-                        0.0,
-                        1.0
-                    ],
-                    "scale": [
-                        0.8,
-                        1.8,
-                        0.8
-                    ],
-                    "type": "Transform"
-                },
-                {
-                    "material": {
-                        "albedo": [
-                            0.8999999761581421,
-                            0.550000011920929,
-                            0.10000000149011612
-                        ],
-                        "albedoMap": "",
-                        "metallic": 0.0,
-                        "roughness": 0.5
-                    },
-                    "mesh": "assets/models/sphere.obj",
-                    "type": "MeshRenderer"
-                },
-                {
-                    "radius": 0.4,
-                    "height": 1.8,
-                    "stepHeight": 0.35,
-                    "slopeLimitDeg": 45.0,
-                    "mass": 70.0,
-                    "gravityScale": 1.0,
-                    "type": "CharacterController"
-                },
-                {
-                    "enabled": true,
-                    "speed": 4.0,
-                    "jumpSpeed": 6.0,
-                    "type": "CharacterWalk"
-                }
-            ],
-            "id": 7010000000000000009,
-            "name": "Player",
             "parent": 0
         }
     ],
