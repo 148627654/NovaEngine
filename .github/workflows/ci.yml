@@ -22,16 +22,25 @@ jobs:
       - name: 检出仓库
         uses: actions/checkout@v4
 
-      - name: 安装 glad 生成器依赖（jinja2）
+      - name: 安装 glad 生成器依赖（jinja2）+ 验证
         # glad REPRODUCIBLE 模式在构建期用 Python+jinja2 生成 GL 加载器源码
         #（glad_add_library 的 .rule 自定义构建步骤）——镜像自带 Python 无 jinja2，
         # 缺它会 MSB8066（2026-11-23 首跑教训）。本机 Anaconda 恰好自带才一直未暴露。
-        run: python -m pip install --disable-pip-version-check -q jinja2
+        # 注意：镜像多 Python（PATH 与 CMake 注册表搜索命中的可能不是同一个）——
+        # 必须把 CMake 的 Python3 绑定到本步骤装 jinja2 的这个解释器（见 Configure 步骤）。
+        run: |
+          python -m pip install --disable-pip-version-check -q jinja2
+          python -c "import jinja2, sys; print('jinja2 OK', jinja2.__version__, sys.executable)"
 
       - name: Configure（默认 VS 生成器，镜像当前 VS2026；FetchContent 首次配置需联网，Python 已预装）
         run: |
           New-Item -ItemType Directory -Force Logs
-          cmake -S . -B build *> Logs/ci_configure.log
+          $py = python -c "import sys; print(sys.executable)"
+          cmake -S . -B build "-DPython3_EXECUTABLE=$py" *> Logs/ci_configure.log
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content Logs/ci_configure.log -Tail 40 | ForEach-Object { "::error::" + ($_.ToString() -replace '\(' ,'[' -replace '\)',']') }
+            exit 1
+          }
 
       - name: Debug 全量构建
         run: |
