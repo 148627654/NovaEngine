@@ -1,7 +1,8 @@
-# NovaEngine CI（V1.0-9）—— push / PR 触发：Windows + VS2022
+# NovaEngine CI（V1.0-9）—— push / PR 触发：Windows（windows-latest，默认 VS 生成器）
 #
-# 流程：Configure → Debug 全量构建 → ctest（NovaTests，--output-on-failure）→ Release 全量构建
-# 失败时归档 Logs/（引擎文件日志；无则忽略）。
+# 流程：装 jinja2（glad 生成器依赖）→ Configure → Debug 全量构建 → ctest（NovaTests，
+# --output-on-failure）→ Release 全量构建；失败时构建/测试日志尾部以 ::error 注解输出
+# （check-runs annotations 公开可读）+ 归档 Logs/。
 #
 # 注意：CI 机器无 GPU —— 只跑 NovaTests（无 GL 上下文纪律：测试进程不 init GL，
 # Mesh 上传路径靠 §26.0 骨架日 GL 守卫降级）；编辑器/Player 完整冒烟由 DevOps 本机执行。
@@ -21,7 +22,13 @@ jobs:
       - name: 检出仓库
         uses: actions/checkout@v4
 
-      - name: Configure（VS2022 生成器；FetchContent 首次配置需联网，Python 已预装）
+      - name: 安装 glad 生成器依赖（jinja2）
+        # glad REPRODUCIBLE 模式在构建期用 Python+jinja2 生成 GL 加载器源码
+        #（glad_add_library 的 .rule 自定义构建步骤）——镜像自带 Python 无 jinja2，
+        # 缺它会 MSB8066（2026-11-23 首跑教训）。本机 Anaconda 恰好自带才一直未暴露。
+        run: python -m pip install --disable-pip-version-check -q jinja2
+
+      - name: Configure（默认 VS 生成器，镜像当前 VS2026；FetchContent 首次配置需联网，Python 已预装）
         run: |
           New-Item -ItemType Directory -Force Logs
           cmake -S . -B build *> Logs/ci_configure.log
