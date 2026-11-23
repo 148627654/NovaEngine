@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -62,6 +63,11 @@ public:
 
     // 后处理（V0.3-14，波 3 冻结；SceneSerializer 读写 environment.postProcess 段）
     PostProcessSettings postProcess;
+    // ===== V1.0-3 碰撞层矩阵（environment.physics 段，§27.2 骨架日布）=====
+    // 缺省 = 全通矩阵 + 默认层名（"Default","Layer1".."Layer15"），Scene 构造函数初始化；
+    // 矩阵对称：collisionEnabled(a,b) == collisionEnabled(b,a)，UI 只展示三角区
+    std::vector<std::string> physicsLayerNames;
+    std::array<std::array<bool, 16>, 16> physicsCollisionMatrix{};
 
     // 编辑器相机状态（随场景保存/恢复；SceneSerializer 直接读写）
     glm::vec3 editorCameraTarget = glm::vec3(0.0f, 1.0f, 0.0f);

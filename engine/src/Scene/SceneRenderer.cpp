@@ -467,6 +467,32 @@ uint32_t SceneRenderer::renderSceneToOutput(const Scene& scene, const RenderCame
     return outLdrFbo.colorTextureId();
 }
 
+uint32_t SceneRenderer::renderScenesToOutput(const std::vector<const Scene*>& scenes,
+                                             const RenderCamera& fallbackCamera,
+                                             Framebuffer& hdrFbo, Framebuffer& outLdrFbo,
+                                             const PostProcessSettings& pp,
+                                             const std::vector<OutlineItem>* outlines,
+                                             const std::function<void()>& afterSceneDraw,
+                                             bool useSceneCamera) {
+    // ===== V1.0-2 骨架日实现（§27.1）：单场景 = 旧入口精确转发（逐像素零变化）=====
+    if (scenes.empty()) return outLdrFbo.colorTextureId();
+    if (scenes.size() == 1) {
+        if (const Scene* s = scenes[0])
+            return renderSceneToOutput(*s, fallbackCamera, hdrFbo, outLdrFbo, pp, outlines,
+                                       afterSceneDraw, useSceneCamera);
+        return outLdrFbo.colorTextureId();
+    }
+    // 多场景合并遍历（§27.1 渲染合并：跨场景剔除/阴影/透明排序/实例化分组统一收集）
+    // 实现归 cR 波 2——骨架日临时：只渲染主场景并 warn 一次（行为可预期，不静默）
+    static bool s_warned = false;
+    if (!s_warned) {
+        Logger::warn("[SceneRenderer] 多场景渲染合并尚未实现（cR 波 2 施工中），临时只渲染主场景");
+        s_warned = true;
+    }
+    return renderSceneToOutput(*scenes[0], fallbackCamera, hdrFbo, outLdrFbo, pp, outlines,
+                               afterSceneDraw, useSceneCamera);
+}
+
 void SceneRenderer::collectCamera(const Scene& scene, const RenderCamera& fallback,
                                   RenderCamera& out) {
     // isMain 优先（任意位置），无则第一个 Camera（深度优先序），再无则复制 fallback。

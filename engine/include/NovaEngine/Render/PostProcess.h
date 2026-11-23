@@ -1,5 +1,7 @@
 #pragma once
 #include <cstdint>
+#include <filesystem>
+#include <string>
 
 namespace NovaEngine {
 
@@ -14,6 +16,13 @@ struct PostProcessSettings {
     float ssaoRadius = 0.5f;       // 采样半径（米，view-space）
     float ssaoStrength = 1.0f;     // 遮蔽强度
     int ssaoSampleCount = 16;      // 半球采样数（8/16/32）
+    // ===== V1.0-4 色彩分级与后期完善（§27.3 骨架日布，2026-11-23；缺省全关 = 旧行为零变化）=====
+    std::string lutPath;           // .cube 相对路径（空 = 关）
+    float lutIntensity = 1.0f;     // 0..1 混合
+    bool dofEnabled = false;       // 简版 DOF（可选）
+    float dofFocusDistance = 5.0f, dofAperture = 0.05f;
+    bool vignetteEnabled = false;  float vignetteIntensity = 0.4f;
+    bool grainEnabled = false;     float grainAmount = 0.05f;   // 时间抖动胶片颗粒
 };
 
 // 后处理链（V0.3-14，波 3）：Bloom（brightpass → 降采样高斯 → 升采样合成）+ Narkowicz ACES + gamma
@@ -28,6 +37,9 @@ public:
     static void apply(uint32_t hdrColorTexture, const PostProcessSettings& s);
     // 追加（V0.5-5 SSAO）：combine 合成用 AO 纹理（0 = 无 AO，combine 跳过合成乘 1）
     static void setAmbientOcclusionTexture(uint32_t tex);
+    // 追加（V1.0-4，§27.3 骨架日布）：LUT 设置变更时调用。实现归 cG——
+    // 内部缓存 LUT 纹理 id + 常驻绑定 unit 8 兜底白 3D 纹理；失败 warn + 关闭 LUT
+    static bool setLut(const std::filesystem::path& relPath);
 };
 
 }  // namespace NovaEngine

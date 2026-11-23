@@ -7,6 +7,7 @@
 #include <NovaEngine/Scene/BoxCollider2D.h>
 #include <NovaEngine/Scene/Button.h>
 #include <NovaEngine/Scene/Camera.h>
+#include <NovaEngine/Scene/CharacterController.h>
 #include <NovaEngine/Scene/Canvas.h>
 #include <NovaEngine/Scene/Collider.h>
 #include <NovaEngine/Scene/DirectionalLight.h>
@@ -93,6 +94,8 @@ std::unique_ptr<Component> ComponentRegistry::create(const std::string& typeName
         (void)std::make_unique<BoxCollider2D>(owner);        // V0.5-10（c8 2D）
         (void)std::make_unique<SkeletalMeshRenderer>(owner); // V0.5-9（c7 动画）
         (void)std::make_unique<Animator>(owner);             // V0.5-9（c7 动画）
+        // ===== V1.0 波 2 骨架日（§27.0，2026-11-23）：内置组件 25→26 =====
+        (void)std::make_unique<CharacterController>(owner);  // V1.0-3（cR 波 2）
     }
 
     auto& map = entries();

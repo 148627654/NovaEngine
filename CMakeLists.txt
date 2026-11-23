@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 # C 语言一并启用：glad 的 cmake/CMakeLists.txt 内部声明 project(glad C)
-project(NovaEngine VERSION 0.1.0 LANGUAGES C CXX)
+# VERSION 1.0.0（V1.0 波 2 骨架日，§27.0 冻结项 7；Windows RC 版本注入归 cT，cmake/version.rc.in）
+project(NovaEngine VERSION 1.0.0 LANGUAGES C CXX)
 
 # 第三方依赖（全部 FetchContent，见 cmake/Dependencies.cmake）
 include(cmake/Dependencies.cmake)

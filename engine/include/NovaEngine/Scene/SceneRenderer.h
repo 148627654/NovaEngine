@@ -50,6 +50,19 @@ public:
                                         const std::vector<OutlineItem>* outlines = nullptr,
                                         const std::function<void()>& afterSceneDraw = {},
                                         bool useSceneCamera = true);
+
+    // ===== V1.0-2 多场景渲染（§27.1 骨架日布，2026-11-23）=====
+    // scenes[0] 为主场景（环境/天空/IBL/后处理参数/相机取自它）；对象遍历合并全部场景
+    //（剔除/阴影/透明排序/实例化分组跨场景统一收集；additive 场景不画自己的天空）。
+    // 单场景 = 逐像素等价 renderSceneToOutput（旧入口保留，行为零变化）。
+    // 骨架日实现 = 单场景精确转发 + 多场景临时只渲染主场景（合并遍历归 cR 波 2）。
+    static uint32_t renderScenesToOutput(const std::vector<const Scene*>& scenes,
+                                         const RenderCamera& fallbackCamera,
+                                         Framebuffer& hdrFbo, Framebuffer& outLdrFbo,
+                                         const PostProcessSettings& pp,
+                                         const std::vector<OutlineItem>* outlines = nullptr,
+                                         const std::function<void()>& afterSceneDraw = {},
+                                         bool useSceneCamera = true);
 };
 
 }  // namespace NovaEngine

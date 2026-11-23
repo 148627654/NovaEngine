@@ -45,6 +45,21 @@ std::string SceneSerializer::serialize(const Scene& scene, int indent) {
             ibl["iblIntensity"] = scene.iblIntensity;
             env["ibl"] = std::move(ibl);
         }
+        // 碰撞层矩阵（V1.0-3，§27.2 骨架日布）：environment.physics 段
+        // （16 层命名 + 16×16 对称矩阵；读时缺省 = Scene 构造缺省，旧文件零变化）
+        {
+            nlohmann::json phys;
+            phys["layerNames"] = scene.physicsLayerNames;
+            nlohmann::json mat = nlohmann::json::array();
+            for (int a = 0; a < 16; ++a) {
+                nlohmann::json row = nlohmann::json::array();
+                for (int b = 0; b < 16; ++b)
+                    row.push_back(scene.physicsCollisionMatrix[a][b]);
+                mat.push_back(std::move(row));
+            }
+            phys["collisionMatrix"] = std::move(mat);
+            env["physics"] = std::move(phys);
+        }
         // 后处理（V0.3-14，波 3）：environment.postProcess 段，读时全默认值兜底
         {
             nlohmann::json pp;
@@ -58,6 +73,16 @@ std::string SceneSerializer::serialize(const Scene& scene, int indent) {
             pp["ssaoRadius"] = scene.postProcess.ssaoRadius;
             pp["ssaoStrength"] = scene.postProcess.ssaoStrength;
             pp["ssaoSampleCount"] = scene.postProcess.ssaoSampleCount;
+            // 色彩分级（V1.0-4，§27.3 骨架日布）：九键追加（缺省全关；旧文件读时兜底零警告）
+            pp["lutPath"] = scene.postProcess.lutPath;
+            pp["lutIntensity"] = scene.postProcess.lutIntensity;
+            pp["dofEnabled"] = scene.postProcess.dofEnabled;
+            pp["dofFocusDistance"] = scene.postProcess.dofFocusDistance;
+            pp["dofAperture"] = scene.postProcess.dofAperture;
+            pp["vignetteEnabled"] = scene.postProcess.vignetteEnabled;
+            pp["vignetteIntensity"] = scene.postProcess.vignetteIntensity;
+            pp["grainEnabled"] = scene.postProcess.grainEnabled;
+            pp["grainAmount"] = scene.postProcess.grainAmount;
             env["postProcess"] = std::move(pp);
         }
         root["environment"] = std::move(env);
@@ -227,6 +252,29 @@ void SceneSerializer::deserialize(Scene& target, const std::string& json) {
                                             : kEmptyObject;
         target.iblIntensity = safeGet(iblNode, "iblIntensity", 1.0f);
 
+        // 碰撞层矩阵（V1.0-3，§27.2 骨架日布）：旧文件无此段 → 保持 Scene 构造缺省
+        //（全通 + 默认层名，零警告）；段存在但形态不符（非 16）→ 同样保持缺省
+        if (env.contains("physics") && env["physics"].is_object()) {
+            const nlohmann::json& phys = env["physics"];
+            if (phys.contains("layerNames") && phys["layerNames"].is_array() &&
+                phys["layerNames"].size() == 16) {
+                target.physicsLayerNames.clear();
+                for (const auto& n : phys["layerNames"])
+                    target.physicsLayerNames.push_back(
+                        n.is_string() ? n.get<std::string>() : std::string());
+            }
+            if (phys.contains("collisionMatrix") && phys["collisionMatrix"].is_array() &&
+                phys["collisionMatrix"].size() == 16) {
+                for (int a = 0; a < 16; ++a) {
+                    const auto& row = phys["collisionMatrix"][a];
+                    if (!row.is_array() || row.size() != 16) continue;
+                    for (int b = 0; b < 16; ++b)
+                        target.physicsCollisionMatrix[a][b] =
+                            row[b].is_boolean() ? row[b].get<bool>() : true;
+                }
+            }
+        }
+
         // 后处理（V0.3-14，波 3）：旧文件无此段 → 全默认值兜底（与 PostProcessSettings 一致）
         const nlohmann::json& pp = (env.contains("postProcess") && env["postProcess"].is_object())
                                        ? env["postProcess"]
@@ -241,6 +289,16 @@ void SceneSerializer::deserialize(Scene& target, const std::string& json) {
         target.postProcess.ssaoRadius = safeGet(pp, "ssaoRadius", 0.5f);
         target.postProcess.ssaoStrength = safeGet(pp, "ssaoStrength", 1.0f);
         target.postProcess.ssaoSampleCount = safeGet(pp, "ssaoSampleCount", 16);
+        // 色彩分级（V1.0-4）：九键缺省兜底（旧文件零警告）
+        target.postProcess.lutPath = safeGet(pp, "lutPath", std::string(""));
+        target.postProcess.lutIntensity = safeGet(pp, "lutIntensity", 1.0f);
+        target.postProcess.dofEnabled = safeGet(pp, "dofEnabled", false);
+        target.postProcess.dofFocusDistance = safeGet(pp, "dofFocusDistance", 5.0f);
+        target.postProcess.dofAperture = safeGet(pp, "dofAperture", 0.05f);
+        target.postProcess.vignetteEnabled = safeGet(pp, "vignetteEnabled", false);
+        target.postProcess.vignetteIntensity = safeGet(pp, "vignetteIntensity", 0.4f);
+        target.postProcess.grainEnabled = safeGet(pp, "grainEnabled", false);
+        target.postProcess.grainAmount = safeGet(pp, "grainAmount", 0.05f);
 
         const nlohmann::json& cam =
             (root.contains("editorCamera") && root["editorCamera"].is_object()) ? root["editorCamera"] : kEmptyObject;

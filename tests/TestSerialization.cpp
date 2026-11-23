@@ -33,13 +33,14 @@ using namespace NovaTest;
 
 namespace {
 
-// 内置组件 25 项（ComponentRegistry.cpp link-guard 清单逐项对照；波 1 无新组件，数量冻结）
+// 内置组件 26 项（ComponentRegistry.cpp link-guard 清单逐项对照；波 2 骨架日 +CharacterController）
 const char* const kBuiltinComponentNames[] = {
     "Transform",        "MeshRenderer",   "Camera",           "DirectionalLight", "AudioSource",
     "AudioListener",    "Canvas",         "Image",            "Text",             "Button",
     "Rigidbody",        "BoxCollider",    "SphereCollider",   "CapsuleCollider",  "MeshCollider",
     "PrefabInstance",   "Slider",         "ScrollView",       "LODGroup",         "ParticleSystem",
     "Terrain",          "SpriteRenderer", "BoxCollider2D",    "SkeletalMeshRenderer", "Animator",
+    "CharacterController",
 };
 
 // 组装场景并返回其序列化文本（组件经注册表创建 → 与反序列化路径同源分发）
@@ -60,9 +61,9 @@ Component* findComponentByType(GameObject* go, const std::string& name) {
 
 }  // namespace
 
-TEST_CASE("Serialization: builtin component registry has 25 entries", "[serialization][registry]") {
+TEST_CASE("Serialization: builtin component registry has 26 entries", "[serialization][registry]") {
     const std::vector<std::string> names = ComponentRegistry::builtinNames();
-    REQUIRE(names.size() == 25);
+    REQUIRE(names.size() == 26);
     for (const char* expect : kBuiltinComponentNames) {
         INFO("缺注册组件: " << expect);
         REQUIRE(ComponentRegistry::exists(expect));
@@ -74,7 +75,7 @@ TEST_CASE("Serialization: builtin component registry has 25 entries", "[serializ
     }
 }
 
-TEST_CASE("Serialization: 25 components JSON lossless roundtrip", "[serialization][roundtrip]") {
+TEST_CASE("Serialization: 26 components JSON lossless roundtrip", "[serialization][roundtrip]") {
     for (const char* name : kBuiltinComponentNames) {
         DYNAMIC_SECTION("组件 " << name) {
             Scene src("Src");

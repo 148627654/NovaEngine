@@ -94,3 +94,10 @@
 #include <NovaEngine/Profiling/Profiler.h>
 #include <NovaEngine/Profiling/ProfilerSections.h>   // 合波日收编（评审 P2-8：面板段名读取辅助）
 #include <NovaEngine/Assets/AssetReferenceScanner.h>
+
+// ===== V1.0 波 2 骨架日（§27.0 冻结项 6，2026-11-23）=====
+#include <NovaEngine/Assets/AsyncLoader.h>
+#include <NovaEngine/Scene/CharacterController.h>
+#include <NovaEngine/Render/ColorGrading.h>
+#include <NovaEngine/ShaderGraph/ShaderGraphAsset.h>
+#include <NovaEngine/ShaderGraph/ShaderGraphCodeGen.h>

@@ -31,7 +31,17 @@ thread_local std::unordered_map<std::string, float> s_scriptOnUpdateMs;
 }  // namespace
 
 Scene::Scene(const std::string& name)
-    : m_name(name), m_physics(std::make_unique<PhysicsWorld>(*this)) {}
+    : m_name(name), m_physics(std::make_unique<PhysicsWorld>(*this)) {
+    // ===== V1.0-3 碰撞层矩阵缺省（§27.2 骨架日布）：全通矩阵 + 默认层名 =====
+    // 旧场景无 environment.physics 段时读时保持本缺省（零警告）
+    for (int a = 0; a < 16; ++a)
+        for (int b = 0; b < 16; ++b)
+            physicsCollisionMatrix[a][b] = true;
+    physicsLayerNames.clear();
+    physicsLayerNames.reserve(16);
+    for (int i = 0; i < 16; ++i)
+        physicsLayerNames.push_back(i == 0 ? "Default" : "Layer" + std::to_string(i));
+}
 
 // 析构定义在 .cpp：unique_ptr<PhysicsWorld> 需要 Impl 完整类型（PhysicsWorld.h 为 pimpl）
 Scene::~Scene() {

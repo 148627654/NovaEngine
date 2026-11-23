@@ -11,6 +11,14 @@ uniform sampler2D uBloom;         // bloom 链最终级（半/1/4/1/8 分辨率�
 uniform sampler2D uAmbientOcclusionTexture;   // AO（V0.5-5 SSAO）；0 = C++ 侧绑 1×1 白（乘 1）
 uniform float uBloomIntensity;
 uniform float uExposure;
+// ===== V1.0-4 色彩分级（§27.3 骨架日布；缺省全关 = 逐像素旧行为）=====
+// 注：uLut 为 sampler3D（unit 8）——C++ 侧必须常驻绑定：无 LUT 时绑 1×1 白 3D 兜底
+//（永不黑屏契约；实现归 cG 的 ColorGrading）
+uniform sampler3D uLut;
+uniform float uLutIntensity;         // 0 = 直通
+uniform float uVignetteIntensity;    // 0 = 关
+uniform float uGrainAmount;          // 0 = 关
+uniform float uGrainSeed;            // 每帧时间抖动种子（C++ 侧每帧传）
 
 vec3 acesTonemap(vec3 x) {
     // Narkowicz ACES 拟合（© Krzysztof Narkowicz，公开近似式）
@@ -24,6 +32,19 @@ void main() {
     float ao = texture(uAmbientOcclusionTexture, vUv).r;
     vec3 color = (scene + bloom) * ao;
     color = acesTonemap(color * uExposure);            // 曝光 → 色调映射
+    // ===== V1.0-4 LUT / 渐晕 / 颗粒（§27.3 位置裁定：ACES 后、gamma 前；全关 = 旧行为）=====
+    if (uLutIntensity > 0.0) {
+        vec3 lutColor = texture(uLut, clamp(color, 0.0, 1.0)).rgb;   // 线性 LDR 域采样
+        color = mix(color, lutColor, uLutIntensity);
+    }
+    if (uVignetteIntensity > 0.0) {
+        float d = distance(vUv, vec2(0.5));
+        color *= 1.0 - uVignetteIntensity * smoothstep(0.3, 1.0, d);
+    }
+    if (uGrainAmount > 0.0) {
+        float n = fract(sin(dot(vUv * 437.7 + vec2(uGrainSeed), vec2(12.9898, 78.233))) * 43758.5453);
+        color += (n - 0.5) * uGrainAmount;
+    }
     color = pow(max(color, vec3(0.0)), vec3(1.0 / 2.2));  // gamma 校正（sRGB 显示）
     fragColor = vec4(color, 1.0);
 }
