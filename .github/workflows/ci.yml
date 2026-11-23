@@ -36,7 +36,10 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force Logs
           $py = python -c "import sys; print(sys.executable)"
-          cmake -S . -B build "-DPython3_EXECUTABLE=$py" *> Logs/ci_configure.log
+          # 两个模块名都绑定：本项目用 find_package(Python3)（Dependencies.cmake），
+          # 而 glad 的 GladConfig.cmake 用老版 find_package(Python) + ${Python_EXECUTABLE}
+          # 在构建期跑生成脚本——只绑 Python3 时 glad 仍会自己搜到别的解释器（2026-11-23 教训二）
+          cmake -S . -B build "-DPython_EXECUTABLE=$py" "-DPython3_EXECUTABLE=$py" *> Logs/ci_configure.log
           if ($LASTEXITCODE -ne 0) {
             Get-Content Logs/ci_configure.log -Tail 40 | ForEach-Object { "::error::" + ($_.ToString() -replace '\(' ,'[' -replace '\)',']') }
             exit 1
