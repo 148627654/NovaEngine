@@ -29,7 +29,7 @@ jobs:
         # 注意：镜像多 Python（PATH 与 CMake 注册表搜索命中的可能不是同一个）——
         # 必须把 CMake 的 Python3 绑定到本步骤装 jinja2 的这个解释器（见 Configure 步骤）。
         run: |
-          python -m pip install --disable-pip-version-check -q jinja2
+          python -m pip install --disable-pip-version-check -q -r requirements.txt
           python -c "import jinja2, sys; print('jinja2 OK', jinja2.__version__, sys.executable)"
 
       - name: Configure（默认 VS 生成器，镜像当前 VS2026；FetchContent 首次配置需联网，Python 已预装）

@@ -1,0 +1,5 @@
+# NovaEngine 构建期 Python 依赖（CI 与开发机从源码构建所需；纯运行时 exe 不需要）
+# glad REPRODUCIBLE 模式在构建期用 Python+jinja2 生成 GL 加载器源码
+#（glad_add_library 的 .rule 自定义构建步骤；2026-11-23 CI 首跑教训：
+#  干净 Python 环境缺 jinja2 → MSB8066，本机 Anaconda 自带掩盖至今）
+jinja2
