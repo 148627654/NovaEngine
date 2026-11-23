@@ -18,6 +18,8 @@ set(NOVA_GAME_SOURCES
     OrbitCamera.cpp
     SceneSwitcher.cpp
     MoveWithInput.cpp
+    CharacterWalk.cpp      # V1.0-3 验收演示：WASD 驱动 CharacterController
+    SceneLoadDemo.cpp      # V1.0-2 验收演示：数字键驱动异步场景加载/卸载
 )
 
 if(NOVA_SCRIPTS_DLL)

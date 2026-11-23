@@ -1,0 +1,20 @@
+{
+    "version": 1,
+    "scenes": [
+        { "name": "demo", "path": "assets/scenes/demo.nova.json" },
+        { "name": "V10CharacterDemo", "path": "assets/scenes/V10CharacterDemo.nova.json" },
+        { "name": "V10MultiSceneDemo", "path": "assets/scenes/V10MultiSceneDemo.nova.json" },
+        { "name": "V10AdditiveLevel", "path": "assets/scenes/V10AdditiveLevel.nova.json" },
+        { "name": "Second", "path": "assets/scenes/Second.nova.json" },
+        { "name": "PhysicsTest", "path": "assets/scenes/PhysicsTest.nova.json" },
+        { "name": "V05Wave2Demo", "path": "assets/scenes/V05Wave2Demo.nova.json" },
+        { "name": "V05TerrainDemo", "path": "assets/scenes/V05TerrainDemo.nova.json" },
+        { "name": "SkinnedQuadDemo", "path": "assets/scenes/SkinnedQuadDemo.nova.json" },
+        { "name": "2DTemplate", "path": "assets/scenes/2DTemplate.nova.json" },
+        { "name": "V05PerfTest", "path": "assets/scenes/V05PerfTest.nova.json" },
+        { "name": "V05InputTest", "path": "assets/scenes/V05InputTest.nova.json" },
+        { "name": "V05UITest", "path": "assets/scenes/V05UITest.nova.json" },
+        { "name": "FontTest", "path": "assets/scenes/FontTest.nova.json" },
+        { "name": "UITest", "path": "assets/scenes/UITest.nova.json" }
+    ]
+}

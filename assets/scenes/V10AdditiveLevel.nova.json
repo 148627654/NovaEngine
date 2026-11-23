@@ -1,0 +1,301 @@
+{
+    "editorCamera": {
+        "distance": 12.0,
+        "pitch": -0.35,
+        "target": [
+            0.0,
+            1.5,
+            0.0
+        ],
+        "yaw": 0.6
+    },
+    "environment": {
+        "ambientColor": [
+            0.15000000596046448,
+            0.15000000596046448,
+            0.18000000715255737
+        ],
+        "showGrid": true,
+        "skyColor": [
+            0.18000000715255737,
+            0.2199999988079071,
+            0.3499999940395355
+        ],
+        "skyCubemapPath": "",
+        "skyExposure": 1.0,
+        "skyHorizonColor": [
+            0.550000011920929,
+            0.6200000047683716,
+            0.7200000286102295
+        ],
+        "skyMode": "Gradient",
+        "skyRotation": 0.0,
+        "skyZenithColor": [
+            0.2199999988079071,
+            0.30000001192092896,
+            0.47999998927116394
+        ]
+    },
+    "name": "V10AdditiveLevel",
+    "objects": [
+        {
+            "active": true,
+            "components": [
+                {
+                    "position": [
+                        0.0,
+                        3.5,
+                        10.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        1.0,
+                        0.0,
+                        0.0
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "type": "Transform"
+                },
+                {
+                    "clearColor": [
+                        0.18000000715255737,
+                        0.2199999988079071,
+                        0.3499999940395355,
+                        1.0
+                    ],
+                    "farPlane": 1000.0,
+                    "fov": 60.0,
+                    "isMain": true,
+                    "nearPlane": 0.10000000149011612,
+                    "type": "Camera"
+                }
+            ],
+            "id": 7030000000000000001,
+            "name": "Main Camera",
+            "parent": 0
+        },
+        {
+            "active": true,
+            "components": [
+                {
+                    "position": [
+                        0.0,
+                        5.0,
+                        0.0
+                    ],
+                    "rotation": [
+                        -0.3535766899585724,
+                        0.3535766899585724,
+                        -0.14639034867286682,
+                        0.853543758392334
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        1.0
+                    ],
+                    "type": "Transform"
+                },
+                {
+                    "castShadows": true,
+                    "color": [
+                        1.0,
+                        0.949999988079071,
+                        0.8500000238418579
+                    ],
+                    "intensity": 1.2000000476837158,
+                    "shadowBias": 0.0005000000237487257,
+                    "shadowMapSize": 2048,
+                    "shadowRange": 60.0,
+                    "type": "DirectionalLight"
+                }
+            ],
+            "id": 7030000000000000002,
+            "name": "Sun",
+            "parent": 0
+        },
+        {
+            "active": true,
+            "components": [
+                {
+                    "position": [
+                        4.0,
+                        2.0,
+                        -2.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "scale": [
+                        1.2,
+                        1.2,
+                        1.2
+                    ],
+                    "type": "Transform"
+                },
+                {
+                    "material": {
+                        "albedo": [
+                            0.8999999761581421,
+                            0.550000011920929,
+                            0.10000000149011612
+                        ],
+                        "albedoMap": "",
+                        "metallic": 0.0,
+                        "roughness": 0.5
+                    },
+                    "mesh": "assets/models/cube.obj",
+                    "type": "MeshRenderer"
+                }
+            ],
+            "id": 7030000000000000003,
+            "name": "LevelCubeOrange",
+            "parent": 0
+        },
+        {
+            "active": true,
+            "components": [
+                {
+                    "position": [
+                        4.0,
+                        2.0,
+                        0.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "scale": [
+                        1.2,
+                        1.2,
+                        1.2
+                    ],
+                    "type": "Transform"
+                },
+                {
+                    "material": {
+                        "albedo": [
+                            0.6299999952316284,
+                            0.30000001192092896,
+                            0.8999999761581421
+                        ],
+                        "albedoMap": "",
+                        "metallic": 0.0,
+                        "roughness": 0.5
+                    },
+                    "mesh": "assets/models/cube.obj",
+                    "type": "MeshRenderer"
+                }
+            ],
+            "id": 7030000000000000004,
+            "name": "LevelCubePurple",
+            "parent": 0
+        },
+        {
+            "active": true,
+            "components": [
+                {
+                    "position": [
+                        4.0,
+                        2.0,
+                        2.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "scale": [
+                        1.2,
+                        1.2,
+                        1.2
+                    ],
+                    "type": "Transform"
+                },
+                {
+                    "material": {
+                        "albedo": [
+                            0.30000001192092896,
+                            0.7599999904632568,
+                            0.6000000238418579
+                        ],
+                        "albedoMap": "",
+                        "metallic": 0.0,
+                        "roughness": 0.5
+                    },
+                    "mesh": "assets/models/cube.obj",
+                    "type": "MeshRenderer"
+                }
+            ],
+            "id": 7030000000000000005,
+            "name": "LevelCubeTeal",
+            "parent": 0
+        },
+        {
+            "active": true,
+            "components": [
+                {
+                    "position": [
+                        4.0,
+                        0.5,
+                        -2.0
+                    ],
+                    "rotation": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                    ],
+                    "scale": [
+                        1.0,
+                        1.0,
+                        5.0
+                    ],
+                    "type": "Transform"
+                },
+                {
+                    "material": {
+                        "albedo": [
+                            0.8999999761581421,
+                            0.3499999940395355,
+                            0.20000000298023224
+                        ],
+                        "albedoMap": "",
+                        "metallic": 0.0,
+                        "roughness": 0.699999988079071
+                    },
+                    "mesh": "assets/models/cube.obj",
+                    "type": "MeshRenderer"
+                },
+                {
+                    "isTrigger": false,
+                    "center": [
+                        0.0,
+                        0.0,
+                        0.0
+                    ],
+                    "halfExtents": [
+                        0.5,
+                        0.5,
+                        0.5
+                    ],
+                    "type": "BoxCollider"
+                }
+            ],
+            "id": 7030000000000000006,
+            "name": "LevelPlatform",
+            "parent": 0
+        }
+    ],
+    "version": 3
+}
