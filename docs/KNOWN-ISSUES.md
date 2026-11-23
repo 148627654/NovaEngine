@@ -344,3 +344,11 @@ Wave 2 审查无 P0；两条 P1 已修复（见下段「已修复项」）。以
 - **备案（已回写 ARCHITECTURE §27）**：自定义 shader 队列 v1 范围、物理 v1 范围（蹲伏/攀爬/游泳后续波次）、buildPlayer 收集行为变化；追认 4 项（延迟卸载语义、routeItem 实例级优先级、cG 共享 shader 接触、cT --release CLI 扩展）。
 - **验收演示包（2026-11-23，b2aa897）**：为非技术验收准备的现成资产——assets/scenes/V10CharacterDemo（#3：0.3m 三级楼梯 + 0.5m 阻挡台 + 30° 斜坡 + 胶囊角色）、V10MultiSceneDemo/V10AdditiveLevel（#2：大厅+关卡场景对）、assets/shadergraphs/v10demo.novashadergraph（#5 示例图）；samples/CharacterWalk（WASD+Space 驱动角色）、samples/SceneLoadDemo（数字键 1 叠加/2 卸载/3 切换关卡/4 切回大厅）；assets/build.novabuild（15 场景构建列表，#11 收集前置）。
 - **待人工验收（GUI 交互）**：① 角色控制（打开 V10CharacterDemo → Play：WASD 行走 + Space 跳跃 + 上绿色楼梯/被红色 0.5m 台阻挡/上蓝色斜坡 + Physics Layers 面板层矩阵切换）；② 多场景异步（打开 V10MultiSceneDemo → Play：按 1 右侧出现橙色关卡方块（additive 无黑屏）→ 2 卸载消失 → 3 异步切换关卡 → 4 切回大厅，Console 面板看加载进度日志）；③ 色彩分级（Environment 面板 Color Grading 区：LUT 选 assets/luts/warm.cube 或 cool.cube + intensity 滑条 A/B 氛围对比、DOF/渐晕/颗粒开关无残留）；④ Shader Graph（V10MultiSceneDemo 中悬浮球 = 示例图渲染（紫色 + 粗糙度随时间波动）；ShaderGraph 面板打开 v10demo.novashadergraph 看节点连线；新建图 → 连 Color→albedo → 保存 → 拖到任意材质生效）；⑤ 发布流水线（已机器验证：buildRelease 双跑字节一致 + 发行目录 Player 冒烟 + exe 版本 1.0.0.0/图标；人工项 = 发行目录 dist_a/NovaEngine_1.0.0/NovaPlayer.exe 双击即玩 + 右键 exe 属性查看版本/图标）。
+
+## 2026-11-23 波 2 验收期修复（用户像素级反馈「屏幕什么都没有」，18e8f7b）
+
+- **白屏根因**：`PostProcessSettings.lutIntensity` 默认 **1.0**（cG 波 2 新字段）——场景 JSON 无该键 → 运行时恒 1.0；无 LUT 加载时 C++ 侧按「永不黑屏契约」绑定 1×1×1 白 3D 兜底纹理 → combine 的 `mix(color, 白, 1.0)` = **纯白**。编辑器 Scene 视口、开发 Player、发行包 Player 三面全白（此前机器冒烟只验「进程存活 + 日志」，从未验像素——**验收教训：渲染功能必须像素级验证，白屏无任何日志报错**）。「白兜底 = 直通」的不变量仅在强度 0 时成立，而默认强度 1.0 恰好打破它。
+- **修复**：两处 combine（applyDirectCombine 直通路径 + HDR 主链）在 `ColorGrading::lutTexture()==0` 时强制 `uLutIntensity=0`——白兜底永不参与混合；选了 LUT 后默认全强度语义保留（面板滑条照常）。
+- **排障手段备案（可复用）**：临时 GL 读回探针（hdr/out/默认帧缓冲三级 glReadPixels + 环境变量开关，定位到 LUT 混合环节）+ PrintWindow 截窗像素统计（全白 3 色 → 场景 89 色确认修复）。探针已全部移除，仅修复入库。
+- **验证**：Debug/Release 双构建 73/73 全绿；编辑器视口（天空蓝 + 深色地形 + 面板布局 ASCII 色图确认）、开发 Player、发行包 Player 三面像素验证正常。
+- **候选回归测试**：GL 像素级「无 LUT + 默认设置渲染非白」断言（现有 GL 测试 harness 可承载，波 3 #9 测试域归 cT）。
