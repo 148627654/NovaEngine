@@ -327,3 +327,19 @@ Wave 2 审查无 P0；两条 P1 已修复（见下段「已修复项」）。以
 - **遗留转后续波次**：Packager 收集段不收集 AudioSource.clipPath/normalMap 等贴图（预检会拦缺失但存在资产不进 pak——波 2 #11 发布流水线一并修）；流式 blend∈(0,1) 双分量共享同一 ma_decoder 游标（需听测复现，候选 ma_data_source_splitter）；Texture.cpp 上传路径无 GL 守卫（NovaTests 贴图真值断言前置，后续补）；AssetReferenceScanner 目录级 moveAsset 不重写目录内文件级引用（验收只要求文件级，扩展场景）；resolveAssetAbs 复刻待抽公共入口；Scene.cpp 私有头 include 待提公共入口。
 - **待人工验收（GUI 交互）**：① Profiler 面板（Window→Profiler：录制 10s 帧时间线/点击定位/CPU 段堆叠条/GPU 6 段/内存分类）；② 纹理压缩 A/B 目测 + 导入日志 before/after 数字；③ Reference Checker（Assets 菜单/AssetBrowser 右键：删贴图→扫描命中→打包失败清单→Move Asset 重链）；④ Mixer（Audio 菜单：四滑条实时生效 + Save 后重启保持）；⑤ 音频听测（fadeIn/Out 无爆音、流式 BGM 内存平稳、快速进出 Play 无爆音）；⑥ 重父子 keepWorld 世界位置保持（P1 修复目测）。
 - **人工验收（2026-11-23，通过）**：波 1 全部 GUI 交互项核验成功——Profiler 面板（帧时间线/CPU 段/GPU 段/内存分类）、纹理压缩画质目测、Reference Checker 扫描、Mixer 滑条实时生效与设置保持、重父子 keepWorld 位置保持（P1 修复目测）。波 1 收官，进入波 2（§27）。
+
+## 2026-11-23 V1.0 波 2 交付与审查记录（代码闭环，交互项待人工验收）
+
+三线并行交付 → Reviewer 审查（无 P0；3 P1 + P2 编号至 12 全部修复或备案）→ 修复 → 合波接线。机器级验证全绿：NovaTests 73 项 Debug/Release 双配置全过、编辑器 --quit/--headless --import exit 0、Player 12s 稳定。交付物：#2 多场景异步加载（AsyncLoader 单线程 + 主线程 flush、延迟卸载、场景参数）、#3 物理增强（CharacterController 胶囊/楼梯/斜坡、射线与形状查询、层碰撞矩阵、Physics Layers 面板）、#4 色彩分级（LUT/DOF/渐晕/颗粒 + RGBA8 直通一致性）、#5 Shader Graph（节点编辑器 + 代码生成 + 独立队列）、#11 发布流水线（RC 版本/图标、buildRelease 发行目录、README/steam 占位、CLI --release、收集补齐波 1 遗留 17 形态 + 新资产形态）。
+
+- **P1-1：unloadScene 同步销毁 = updateAll 遍历迭代器失效**：帧内卸载直接 erase 已加载列表 → 后续遍历悬垂。修复：延迟卸载——unloadScene 校验后入队，flushPendingLoad 头部统一销毁（erase → Scene 析构 → rebuildView → releaseUnused → SceneUnloaded 事件）；updateAll 遍历快照副本 + 迭代兜底。回归测试「V1.0-2 updateAll unloadScene deferred no dangling (P1-1)」。
+- **P1-2：physicsCollisionMatrix 序列化复位缺失**：编辑器复用同一 Scene 对象，含 physics 段的旧场景保存后矩阵保留上次值（条件读取兜底挡不住复用态）。修复：复位全 true + 默认层名在条件读取 environment.physics 之前执行。
+- **P1-3：实例级 shaderGraphPath/shaderOverride 被材质资产覆盖**：routeItem 以 materialAsset 字段组装材质 → 组件实例上的注入被静默丢弃。修复：MR/SMR 双路由实例字段优先（资产字段兜底）。
+- **P2-5：Shader Graph 缓存无上限**：s_graphShaderCache 键含 mtime（每保存图换键），长期编辑泄漏。修复：上限 64 超限淘汰最旧。
+- **P2-6（cG）：坏图资产崩溃**：ShaderGraphAsset::load 未捕获 JSON 异常（version 非整数/pos 为字符串等）→ 抛异常。修复：try/catch（json::exception + std::exception）→ nullptr + warn，编译失败缓存防每帧重试。
+- **P2-8（cG）：EnvironmentPanel LUT 状态陈旧**：状态文本只随面板操作更新——场景切换/外部改路径后显示旧状态。修复：状态与路径 diff 绑定刷新。
+- **P2-9（cR）：非 additive 异步加载与同步加载竞态**：loadSceneAsync(false) 入队时同帧更早的同步加载请求仍生效 → 覆盖语义混乱。修复：非 additive 异步加载清空 s_pendingLoad（互斥不变量 + 断言）。
+- **合波日接线（主会话）**：编辑器/Player 主循环按 §27.1 帧序重排（updateAll → flushPendingResults → flushPendingLoad → 音频监听 → renderScenesToOutput → 显示）；AsyncLoader::init 移 GUI 专属路径（**headless 退出 std::terminate 教训**——CLI 分支无 shutdown 调用点，线程存活至进程退出）；SceneViewPanel/InspectorPanel/AssetBrowser 面板接线（Shader Graph 拖放赋值 + Detach、CharacterController 编辑器区、New→Shader Graph）；AsyncLoader::shutdown/reset 接入 shutdown/enterPlayMode；NovaTests 16 个新用例全部改 ASCII 名（中文名经 ctest 控制台代码页过滤 → 「No test cases matched」假失败）。
+- **存量引擎修复（合波日）**：Texture::createFromPixels GL 守卫（NovaTests 无 GL 上下文上传段）；TestMain.cpp 防弹窗静态初始化器（_CrtSetReportMode→文件，vector 下标断言不再弹中止对话框）。
+- **备案（已回写 ARCHITECTURE §27）**：自定义 shader 队列 v1 范围、物理 v1 范围（蹲伏/攀爬/游泳后续波次）、buildPlayer 收集行为变化；追认 4 项（延迟卸载语义、routeItem 实例级优先级、cG 共享 shader 接触、cT --release CLI 扩展）。
+- **待人工验收（GUI 交互）**：① 角色控制（大厅场景 WASD 行走 + 0.3m 楼梯步进/0.5m 阻挡 + 斜坡 + Physics Layers 面板层矩阵切换）；② 多场景异步（Play 中脚本触发大厅+关卡 additive 共存、卸载内存回落、进度条）；③ 色彩分级（Environment 面板 LUT A/B 氛围对比、DOF/渐晕/颗粒开关无残留）；④ Shader Graph（ShaderGraph 面板连图 → 保存 → 拖到材质 → 渲染生效、断链高亮）；⑤ 发布流水线（--build --release 产物：双 exe 版本/图标属性 + 发行目录双击即玩 + 两次构建字节一致）。

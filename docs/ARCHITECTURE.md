@@ -3551,6 +3551,18 @@ static bool buildRelease(const std::filesystem::path& outputDir);
 7. 主循环重排回归：帧内顺序修订后协程/事件/物理的既有帧序断言（§15）与 Profiler 钩子（波 1）全部重验。
 8. schema 增量回归：environment.physics/environment.postProcess/Collider 新字段/CharacterController 全部往返 + 旧文件零警告。
 
+**波 2 合波日落地裁定与追认（2026-11-23，主会话）**——对 §27 冻结契约的 4 处追加式补充与 3 项 v1 范围备案（评审实据通过；不改任何已冻结签名）：
+
+1. **unloadScene 延迟卸载语义（P1-1 修复，§27.1 细化）**：unloadScene 校验通过后仅入队，实际销毁在下一处 flushPendingLoad 头部执行（erase → Scene 析构 → rebuildView → releaseUnused → SceneUnloaded 事件）。原因：updateAll 遍历中同步销毁 = 迭代器失效；updateAll 改遍历已加载场景快照副本。外部语义等价「帧末生效」，调用方无需变更。
+2. **routeItem 实例级优先级（P1-3 修复，§27.4 细化）**：MeshRenderer/SkeletalMeshRenderer 组件实例上的 shaderGraphPath/shaderOverride 优先于 materialAsset 资产内同名字段（资产字段为兜底）——面板注入 + 资产默认的常见组合不再被资产字段覆盖。
+3. **cG 共享文件接触追认（批准）**：① post_combine.frag +uDirectPassthrough（0 = HDR 链默认 / 1 = RGBA8 直通仅 LUT/渐晕/颗粒生效）——§27.7-4「LUT 直通路径」风险点落地：直通时跳过 ACES/曝光、先 sRGB→线性再走 LUT 段（采样域与 HDR 路径一致）再 gamma 重编码；② blinn_phong.frag 仅追加同步维护标记注释（生成模板与 uniform 契约耦合警示，无代码行为变化）。
+4. **cT 契约扩展追认（批准）**：editor main.cpp CLI +`--release`（与 --build 组合 → Packager::buildRelease，--scene 被忽略）。§27.5 原契约只定义静态入口；CLI 透出 = 验收 3「产物可复现」的可运行路径（§24.5.1 CLI 契约扩展，无 --release 时行为零变化）。
+
+**v1 范围备案**：
+- **自定义 shader 独立队列（§27.4）**：v1 = 不参与实例化分组/共享材质队列，opaque/transparent 排序保留；缓存键 = 路径+mtime、上限 64（P2-5）。跨队列统一排序、图变体派生为后续候选。
+- **物理 v1 范围（P2-10）**：CharacterController 封装 Jolt CharacterVirtual——0.35m 默认步进/45° 坡度/胶囊-地面；蹲伏、攀爬、游泳、推进重叠解析为后续波次；与 Rigidbody 同挂互斥（warn + CC 优先）。
+- **buildPlayer 收集行为变化（P2-12）**：收集补齐 §26.4 全 17 形态 + 新资产形态（.novashadergraph/.cube）——pak 内容较波 1 更全（包体增大为预期）；项目外绝对路径引用（系统字体等）不进 pak、运行时 AssetStream 磁盘回退直读（与编辑器同语义）。
+
 ---
 
 # V1.0 波 3 契约（2026-11-20 冻结）
