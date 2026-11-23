@@ -22,16 +22,18 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure（VS2022 生成器；FetchContent 首次配置需联网，Python 已预装）
-        run: cmake -S . -B build
+        run: |
+          New-Item -ItemType Directory -Force Logs
+          cmake -S . -B build *> Logs/ci_configure.log
 
       - name: Debug 全量构建
-        run: cmake --build build --config Debug
+        run: cmake --build build --config Debug *> Logs/ci_debug_build.log
 
       - name: Debug 测试（ctest + Catch2 逐用例失败可见）
-        run: ctest --test-dir build -C Debug --output-on-failure
+        run: ctest --test-dir build -C Debug --output-on-failure *> Logs/ci_ctest_debug.log
 
       - name: Release 全量构建
-        run: cmake --build build --config Release
+        run: cmake --build build --config Release *> Logs/ci_release_build.log
 
       - name: 失败归档日志
         if: failure()
