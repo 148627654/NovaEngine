@@ -27,13 +27,28 @@ jobs:
           cmake -S . -B build *> Logs/ci_configure.log
 
       - name: Debug 全量构建
-        run: cmake --build build --config Debug *> Logs/ci_debug_build.log
+        run: |
+          cmake --build build --config Debug *> Logs/ci_debug_build.log
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content Logs/ci_debug_build.log -Tail 80 | ForEach-Object { "::error::$_" }
+            exit 1
+          }
 
       - name: Debug 测试（ctest + Catch2 逐用例失败可见）
-        run: ctest --test-dir build -C Debug --output-on-failure *> Logs/ci_ctest_debug.log
+        run: |
+          ctest --test-dir build -C Debug --output-on-failure *> Logs/ci_ctest_debug.log
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content Logs/ci_ctest_debug.log -Tail 80 | ForEach-Object { "::error::$_" }
+            exit 1
+          }
 
       - name: Release 全量构建
-        run: cmake --build build --config Release *> Logs/ci_release_build.log
+        run: |
+          cmake --build build --config Release *> Logs/ci_release_build.log
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content Logs/ci_release_build.log -Tail 80 | ForEach-Object { "::error::$_" }
+            exit 1
+          }
 
       - name: 失败归档日志
         if: failure()
