@@ -323,13 +323,17 @@ void ShaderGraphPanel::onGui(EditorContext& ctx, EditorCamera&) {
     const bool mouseInCanvas = mouse.x >= canvasMin.x && mouse.x <= canvasMax.x &&
                                mouse.y >= canvasMin.y && mouse.y <= canvasMax.y;
 
-    // 节点拖入（palette 拖拽）
-    if (inCanvas && mouseInCanvas)
+    // 节点拖入（palette 拖拽）——AcceptDragDropPayload 必须包在 Begin/EndDragDropTarget 内
+    //（2026-11-24 用户报障修复：裸调 Accept 触发 ImGui 断言 g.DragDropActive → abort，
+    //  鼠标一进画布即崩——面板打开后首个鼠标悬停帧必现）
+    if (inCanvas && mouseInCanvas && ImGui::BeginDragDropTarget()) {
         if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(kNodeTypePayload)) {
             const std::string type(static_cast<const char*>(p->Data));
             addNodeToGraph(type, ImVec2(mouse.x - canvasMin.x - 40.0f,
                                         mouse.y - canvasMin.y - kHeaderH * 0.5f));
         }
+        ImGui::EndDragDropTarget();
+    }
 
     // 节点布局（端口位置缓存：nodeId → 输入/输出端口屏幕坐标）
     struct PortPos {
