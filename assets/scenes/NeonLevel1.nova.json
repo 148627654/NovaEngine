@@ -4757,6 +4757,595 @@
       "id": 7110000000000000085,
       "name": "DashTrail",
       "parent": 7110000000000000001
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            2.0,
+            5.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            2.5,
+            0.6,
+            2.5
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.06,
+              0.07,
+              0.1
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.6,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.45,
+            "roughnessMap": "",
+            "shaderGraphPath": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        },
+        {
+          "isTrigger": false,
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "halfExtents": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "type": "BoxCollider"
+        }
+      ],
+      "id": 7110000000000000086,
+      "name": "Shortcut1",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            2.0,
+            1.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            2.5,
+            0.6,
+            2.5
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.06,
+              0.07,
+              0.1
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.6,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.45,
+            "roughnessMap": "",
+            "shaderGraphPath": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        },
+        {
+          "isTrigger": false,
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "halfExtents": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "type": "BoxCollider"
+        }
+      ],
+      "id": 7110000000000000087,
+      "name": "Shortcut2",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            2.31,
+            3.75
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            2.5,
+            0.08,
+            0.12
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.8,
+              0.9
+            ],
+            "emissionIntensity": 0.6,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": "",
+            "shaderGraphPath": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7110000000000000090,
+      "name": "ShortcutStrip1",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            2.31,
+            0.25
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            2.5,
+            0.08,
+            0.12
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.8,
+              0.9
+            ],
+            "emissionIntensity": 0.6,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": "",
+            "shaderGraphPath": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7110000000000000091,
+      "name": "ShortcutStrip2",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            3.3,
+            9.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            0.3,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              1.0,
+              0.35,
+              0.05
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.0,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.3,
+            "roughnessMap": "",
+            "shaderGraphPath": "assets/shadergraphs/neon_orange.novashadergraph"
+          },
+          "mesh": "assets/models/neon/neon_crystal.obj",
+          "type": "MeshRenderer"
+        },
+        {
+          "enabled": true,
+          "pickupRadius": 1.8,
+          "bobHeight": 0.15,
+          "bobSpeed": 2.0,
+          "spinSpeedDeg": 90.0,
+          "hidden": true,
+          "type": "NeonCollectible"
+        }
+      ],
+      "id": 7110000000000000092,
+      "name": "HiddenOrb1",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "billboard": true,
+          "blendAdditive": true,
+          "emissionRate": 80.0,
+          "endColor": [
+            1.0,
+            0.6,
+            0.2,
+            0.0
+          ],
+          "endSize": 0.05,
+          "gravity": 0.3,
+          "initialSpeed": 2.0,
+          "lifetime": 0.5,
+          "loop": false,
+          "maxParticles": 60,
+          "playOnAwake": false,
+          "startColor": [
+            1.0,
+            0.6,
+            0.2,
+            1.0
+          ],
+          "startSize": 0.3,
+          "tileX": 1,
+          "tileY": 1,
+          "type": "ParticleSystem"
+        }
+      ],
+      "id": 7110000000000000093,
+      "name": "Burst",
+      "parent": 7110000000000000092
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            -2.0,
+            -0.8,
+            -14.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            0.3,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              1.0,
+              0.35,
+              0.05
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.0,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.3,
+            "roughnessMap": "",
+            "shaderGraphPath": "assets/shadergraphs/neon_orange.novashadergraph"
+          },
+          "mesh": "assets/models/neon/neon_crystal.obj",
+          "type": "MeshRenderer"
+        },
+        {
+          "enabled": true,
+          "pickupRadius": 1.8,
+          "bobHeight": 0.15,
+          "bobSpeed": 2.0,
+          "spinSpeedDeg": 90.0,
+          "hidden": true,
+          "type": "NeonCollectible"
+        }
+      ],
+      "id": 7110000000000000094,
+      "name": "HiddenOrb2",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "billboard": true,
+          "blendAdditive": true,
+          "emissionRate": 80.0,
+          "endColor": [
+            1.0,
+            0.6,
+            0.2,
+            0.0
+          ],
+          "endSize": 0.05,
+          "gravity": 0.3,
+          "initialSpeed": 2.0,
+          "lifetime": 0.5,
+          "loop": false,
+          "maxParticles": 60,
+          "playOnAwake": false,
+          "startColor": [
+            1.0,
+            0.6,
+            0.2,
+            1.0
+          ],
+          "startSize": 0.3,
+          "tileX": 1,
+          "tileY": 1,
+          "type": "ParticleSystem"
+        }
+      ],
+      "id": 7110000000000000095,
+      "name": "Burst",
+      "parent": 7110000000000000094
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.9,
+            10.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.8,
+            1.8,
+            0.8
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.3,
+              0.9,
+              1.0
+            ],
+            "albedoMap": "",
+            "alpha": 0.35,
+            "blendMode": "Transparent",
+            "emissionColor": [
+              0.1,
+              0.5,
+              0.6
+            ],
+            "emissionIntensity": 0.8,
+            "emissionMap": "",
+            "metallic": 0.0,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.4,
+            "roughnessMap": "",
+            "shaderGraphPath": ""
+          },
+          "mesh": "builtin:sphere",
+          "type": "MeshRenderer"
+        },
+        {
+          "enabled": true,
+          "sampleInterval": 0.1,
+          "type": "NeonGhost"
+        }
+      ],
+      "id": 7110000000000000096,
+      "name": "Ghost",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "隐藏晶体 0/2",
+          "fontSize": 20.0,
+          "color": [
+            1.0,
+            0.7,
+            0.3,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            1.0,
+            0.0
+          ],
+          "offset": [
+            -180,
+            60
+          ],
+          "wrap": false,
+          "wrapWidth": 0,
+          "hAlign": "Right",
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000097,
+      "name": "HiddenText",
+      "parent": 7110000000000000046
     }
   ],
   "version": 4

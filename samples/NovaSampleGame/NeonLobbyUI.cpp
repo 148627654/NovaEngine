@@ -1,6 +1,7 @@
 #include "NeonLobbyUI.h"
 #include "NeonGameManager.h"
 
+#include <NovaEngine/Core/FileUtil.h>
 #include <NovaEngine/Core/Logger.h>
 #include <NovaEngine/SaveGame/SaveGame.h>
 #include <NovaEngine/Scene/Button.h>
@@ -52,9 +53,26 @@ void NeonLobbyUI::onStart() {
             break;
         }
     }
+    // ===== V1.2 本地排行榜 TOP3（saves/leaderboard.novaboard）=====
+    std::string boardLine;
+    std::string boardRaw;
+    if (NovaEngine::FileUtil::readText("saves/leaderboard.novaboard", boardRaw)) {
+        try {
+            const nlohmann::json bj = nlohmann::json::parse(boardRaw);
+            if (bj.is_array()) {
+                for (size_t i = 0; i < bj.size() && i < 3; ++i)
+                    boardLine += (i ? " / " : "") + std::format("{:.1f}", bj[i].get<float>());
+            }
+        } catch (...) { boardLine.clear(); }
+    }
     if (NovaEngine::GameObject* textGo = findOne("BestTimeText")) {
-        if (auto* txt = textGo->getComponent<NovaEngine::Text>())
-            txt->text = best >= 0.0f ? std::format("最佳纪录:{:.1f} 秒", best) : "最佳纪录:暂无";
+        if (auto* txt = textGo->getComponent<NovaEngine::Text>()) {
+            std::string s = best >= 0.0f ? std::format("最佳纪录:{:.1f} 秒", best)
+                                         : "最佳纪录:暂无";
+            if (!boardLine.empty())
+                s += std::format("\nTOP3: {}", boardLine);
+            txt->text = s;
+        }
     }
 
     // ===== 上次通关（§28.3.10 回传参数）：win=true 时显示并激活 LastRunText =====

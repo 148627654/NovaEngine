@@ -27,6 +27,7 @@ set(NOVA_GAME_SOURCES
     NovaSampleGame/NeonGate.cpp             # 示例游戏：终点传送门（激活序列 + 胜利区判定）
     NovaSampleGame/NeonPlayerWatcher.cpp    # 示例游戏：玩家看守（掉落复活 + 跳跃音效）
     NovaSampleGame/NeonCameraShake.cpp      # V1.1：收集镜头震动（挂 Main Camera）
+    NovaSampleGame/NeonGhost.cpp            # V1.2：幽灵回放（最佳纪录轨迹重放）
 )
 
 if(NOVA_SCRIPTS_DLL)

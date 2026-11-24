@@ -55,8 +55,12 @@ void NeonCollectible::onUpdate(float dt) {
                 ps->play();
         }
     }
-    if (auto* mgr = NeonGameManager::instance())
-        mgr->notifyCollected();
+    if (auto* mgr = NeonGameManager::instance()) {
+        if (m_hidden)
+            mgr->notifyHiddenCollected();
+        else
+            mgr->notifyCollected();
+    }
     NovaEngine::Logger::info("NeonCollectible: 能量球被拾取 @ ({:.2f},{:.2f},{:.2f})",
                              pos.x, pos.y, pos.z);
     m_collected = true;
@@ -68,6 +72,7 @@ void NeonCollectible::onSerialize(nlohmann::json& out) const {
     out["bobHeight"] = m_bobHeight;
     out["bobSpeed"] = m_bobSpeed;
     out["spinSpeedDeg"] = m_spinSpeedDeg;
+    out["hidden"] = m_hidden;   // V1.2
 }
 
 void NeonCollectible::onDeserialize(const nlohmann::json& in) {
@@ -79,6 +84,8 @@ void NeonCollectible::onDeserialize(const nlohmann::json& in) {
         m_bobSpeed = in["bobSpeed"].get<float>();
     if (in.contains("spinSpeedDeg") && in["spinSpeedDeg"].is_number())
         m_spinSpeedDeg = in["spinSpeedDeg"].get<float>();
+    if (in.contains("hidden") && in["hidden"].is_boolean())
+        m_hidden = in["hidden"].get<bool>();
 }
 
 }  // namespace NovaGame

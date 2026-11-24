@@ -28,6 +28,7 @@ void NeonLevelHud::onStart() {
     m_timerText = cache("TimerText");
     m_hintText = cache("HintText");
     m_comboText = cache("ComboText");   // V1.1 连击显示
+    m_hiddenText = cache("HiddenText"); // V1.2 隐藏晶体计数
     m_victoryRoot = cache("VictoryRoot");
     m_winTitle = cache("WinTitle");     // V1.1 评级
     m_winTime = cache("WinTime");
@@ -91,6 +92,15 @@ void NeonLevelHud::onUpdate(float /*dt*/) {
                 txt->text = s;
         }
     }
+    // ===== V1.2 隐藏晶体计数（右上角计时下方）=====
+    if (m_hiddenText) {
+        if (auto* txt = m_hiddenText->getComponent<NovaEngine::Text>()) {
+            const std::string s = std::format("隐藏晶体 {}/{}", mgr->hiddenCollected(),
+                                              mgr->hiddenTotal());
+            if (txt->text != s)
+                txt->text = s;
+        }
+    }
     // 提示文案：激活后切换（只在变化时重赋，避免每帧字符串分配）
     const std::string hint = mgr->gateActive() && !mgr->won()
                                  ? "传送门已激活!冲进传送门!"
@@ -116,12 +126,19 @@ void NeonLevelHud::onUpdate(float /*dt*/) {
             }
         }
         if (m_winTime) {
-            if (auto* txt = m_winTime->getComponent<NovaEngine::Text>())
-                txt->text = std::format("用时 {:.1f} 秒", mgr->elapsedTime());
+            if (auto* txt = m_winTime->getComponent<NovaEngine::Text>()) {
+                // V1.2：用时 + 隐藏晶体（有则显）合一行
+                const bool allHidden = mgr->hiddenCollected() >= mgr->hiddenTotal();
+                txt->text = allHidden
+                                ? std::format("用时 {:.1f} 秒 · 隐藏晶体全收集!", mgr->elapsedTime())
+                                : std::format("用时 {:.1f} 秒", mgr->elapsedTime());
+            }
         }
+        // ===== V1.2 最佳分段 =====
         if (m_winBest) {
             if (auto* txt = m_winBest->getComponent<NovaEngine::Text>())
-                txt->text = std::format("最佳纪录:{:.1f} 秒", mgr->bestTime());
+                txt->text = std::format("最佳纪录:{:.1f} 秒 · 最佳分段:{:.1f} 秒",
+                                        mgr->bestTime(), mgr->bestSplit());
         }
         NovaEngine::Logger::info("NeonLevelHud: 胜利面板已激活");
     }

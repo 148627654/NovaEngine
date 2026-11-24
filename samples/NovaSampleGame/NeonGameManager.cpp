@@ -2,6 +2,7 @@
 
 #include <NovaEngine/Audio/AudioClip.h>
 #include <NovaEngine/Audio/AudioEngine.h>
+#include <NovaEngine/Core/FileUtil.h>
 #include <NovaEngine/Core/Logger.h>
 #include <NovaEngine/Core/Time.h>
 #include <NovaEngine/SaveGame/SaveGame.h>
@@ -9,6 +10,7 @@
 #include <NovaEngine/Scene/MeshRenderer.h>
 #include <NovaEngine/Scene/Scene.h>
 #include <NovaEngine/Scene/SceneManager.h>
+#include <NovaEngine/Scene/Transform.h>
 #include <NovaEngine/Scripting/ScriptRegistry.h>
 
 #include <algorithm>
@@ -46,6 +48,11 @@ void NeonGameManager::onStart() {
     m_rankName = "";
     m_strips.clear();
     m_envSnapped = false;
+    m_hiddenCollected = 0;
+    m_bestSplit = 0.0f;
+    m_recAccum = 0.0f;
+    m_recording.clear();
+    m_splitTimes.clear();
 
     // 读关卡参数（§28.3.10：缺失/坏 JSON → 默认 index=1、orbTotal=10）
     const std::string raw = NovaEngine::SceneManager::getSceneParam("level");
@@ -96,6 +103,26 @@ void NeonGameManager::onUpdate(float dt) {
 
     // ===== V1.1 维度突破：世界随收集渐亮 =====
     updateDimensionLight(dt);
+
+    // ===== V1.2 幽灵轨迹录制（0.1s 采样；胜利后停）=====
+    if (!m_won) {
+        m_recAccum += dt;
+        if (m_recAccum >= 0.1f) {
+            m_recAccum = 0.0f;
+            if (NovaEngine::Scene* scene = gameObject()->scene()) {
+                const auto players = scene->findGameObjectsByName("Player");
+                if (!players.empty())
+                    m_recording.emplace_back(elapsedTime(),
+                                             players[0]->transform()->worldPosition());
+            }
+        }
+    }
+}
+
+void NeonGameManager::notifyHiddenCollected() {
+    ++m_hiddenCollected;
+    playSfx("assets/audio/sfx_pickup3.wav", 1.0f);
+    NovaEngine::Logger::info("NeonGameManager: 隐藏晶体 {}/{}", m_hiddenCollected, m_hiddenTotal);
 }
 
 void NeonGameManager::updateDimensionLight(float dt) {
@@ -117,6 +144,9 @@ void NeonGameManager::updateDimensionLight(float dt) {
 
 void NeonGameManager::notifyCollected() {
     ++m_collected;
+
+    // ===== V1.2 分段计时：记录每颗晶体收集时刻 =====
+    m_splitTimes.push_back(elapsedTime());
 
     // ===== V1.1 Combo：2.5s 窗口内连续收集，音效逐级升高（3 档音高变体）=====
     ++m_combo;
@@ -161,6 +191,43 @@ float NeonGameManager::finishRun() {
         }
     }
     m_bestTime = std::min(oldBest, elapsed);
+
+    // ===== V1.2 最佳分段（相邻晶体间隔的最小值）=====
+    for (size_t i = 0; i + 1 < m_splitTimes.size(); ++i) {
+        const float seg = m_splitTimes[i + 1] - m_splitTimes[i];
+        if (m_bestSplit <= 0.0f || seg < m_bestSplit)
+            m_bestSplit = seg;
+    }
+
+    // ===== V1.2 幽灵落盘：刷新纪录才写（保留最快一局的轨迹）+ 本地排行榜 TOP5 =====
+    if (elapsed < oldBest) {
+        nlohmann::json ghost;
+        ghost["best"] = elapsed;
+        nlohmann::json samples = nlohmann::json::array();
+        for (const auto& [t, p] : m_recording)
+            samples.push_back({t, p.x, p.y, p.z});
+        ghost["samples"] = std::move(samples);
+        if (!NovaEngine::FileUtil::writeText("saves/ghost.novaghost", ghost.dump()))
+            NovaEngine::Logger::warn("NeonGameManager: 幽灵轨迹写入失败");
+    }
+    {
+        // 排行榜：读旧表 → 追加本次 → 排序取 TOP5 → 原子写回
+        std::vector<float> board;
+        std::string old;
+        if (NovaEngine::FileUtil::readText("saves/leaderboard.novaboard", old)) {
+            try {
+                for (const auto& v : nlohmann::json::parse(old))
+                    if (v.is_number())
+                        board.push_back(v.get<float>());
+            } catch (...) { board.clear(); }
+        }
+        board.push_back(elapsed);
+        std::sort(board.begin(), board.end());
+        if (board.size() > 5)
+            board.resize(5);
+        nlohmann::json out = board;
+        NovaEngine::FileUtil::writeText("saves/leaderboard.novaboard", out.dump());
+    }
 
     // ===== V1.1 评级（S < 20s / A < 30s / B < 45s / C 其余）=====
     if (elapsed < 20.0f) {

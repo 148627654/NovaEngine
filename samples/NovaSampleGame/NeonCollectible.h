@@ -15,6 +15,7 @@ public:
     float m_bobHeight = 0.15f;     // 上浮摆动幅度（米）
     float m_bobSpeed = 2.0f;       // 摆动角速度（弧度/秒）
     float m_spinSpeedDeg = 60.0f;  // 自转角速度（度/秒）
+    bool m_hidden = false;         // V1.2：隐藏晶体（不计入通关门，独立统计）
 
     void onStart() override;
     void onUpdate(float dt) override;

@@ -44,6 +44,11 @@ public:
     int combo() const { return m_combo; }
     const char* rankName() const { return m_rankName; }   // "S"/"A"/"B"/"C"/""
     const glm::vec4& rankColor() const { return m_rankColor; }
+    // ===== V1.2 竞速 =====
+    void notifyHiddenCollected();              // 隐藏晶体（不计入通关门，独立统计）
+    int hiddenCollected() const { return m_hiddenCollected; }
+    int hiddenTotal() const { return m_hiddenTotal; }
+    float bestSplit() const { return m_bestSplit; }   // 本次最佳分段（球到球用时）
 
 private:
     static NeonGameManager* s_instance;
@@ -67,6 +72,14 @@ private:
     std::vector<NovaEngine::MeshRenderer*> m_strips;   // 路线灯带（收集后逐条点亮）
     glm::vec3 m_baseAmbient{0.0f}, m_baseFog{0.0f};    // 维度渐亮基准（onStart 快照）
     bool m_envSnapped = false;
+
+    // ===== V1.2 竞速状态（运行时，不序列化）=====
+    int m_hiddenCollected = 0;                // 隐藏晶体已收集
+    int m_hiddenTotal = 2;                    // 隐藏晶体总数（§28.3 扩展位约定）
+    float m_bestSplit = 0.0f;                 // 本次最佳分段
+    float m_recAccum = 0.0f;                  // 幽灵采样计时累积
+    std::vector<std::pair<float, glm::vec3>> m_recording;   // 幽灵轨迹（t, pos）
+    std::vector<float> m_splitTimes;          // 每颗晶体收集时刻（分段计时）
 
     void stopBgm();             // 当前场景 "BGM" AudioSource → Stop()（fadeOutSeconds 生效，防爆音）
     void updateDimensionLight(float dt);   // V1.1 维度突破：环境随收集渐亮 + 灯带点亮
