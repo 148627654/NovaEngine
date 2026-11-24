@@ -490,7 +490,7 @@
             "roughnessMap": "",
             "shaderGraphPath": "assets/shadergraphs/neon_magenta.novashadergraph"
           },
-          "mesh": "builtin:cube",
+          "mesh": "assets/models/neon/neon_crystal.obj",
           "type": "MeshRenderer"
         },
         {
@@ -549,7 +549,7 @@
             "roughnessMap": "",
             "shaderGraphPath": "assets/shadergraphs/neon_orange.novashadergraph"
           },
-          "mesh": "builtin:cube",
+          "mesh": "assets/models/neon/neon_crystal.obj",
           "type": "MeshRenderer"
         },
         {
@@ -607,7 +607,7 @@
             "roughness": 0.5,
             "roughnessMap": ""
           },
-          "mesh": "builtin:cube",
+          "mesh": "assets/models/neon/neon_hexpillar.obj",
           "type": "MeshRenderer"
         }
       ],
@@ -660,7 +660,7 @@
             "roughness": 0.5,
             "roughnessMap": ""
           },
-          "mesh": "builtin:cube",
+          "mesh": "assets/models/neon/neon_hexpillar.obj",
           "type": "MeshRenderer"
         }
       ],
@@ -713,7 +713,7 @@
             "roughness": 0.5,
             "roughnessMap": ""
           },
-          "mesh": "builtin:cube",
+          "mesh": "assets/models/neon/neon_hexpillar.obj",
           "type": "MeshRenderer"
         }
       ],
@@ -766,7 +766,7 @@
             "roughness": 0.5,
             "roughnessMap": ""
           },
-          "mesh": "builtin:cube",
+          "mesh": "assets/models/neon/neon_hexpillar.obj",
           "type": "MeshRenderer"
         }
       ],
@@ -819,7 +819,7 @@
             "roughness": 0.5,
             "roughnessMap": ""
           },
-          "mesh": "builtin:cube",
+          "mesh": "assets/models/neon/neon_hexpillar.obj",
           "type": "MeshRenderer"
         }
       ],
@@ -872,7 +872,7 @@
             "roughness": 0.5,
             "roughnessMap": ""
           },
-          "mesh": "builtin:cube",
+          "mesh": "assets/models/neon/neon_hexpillar.obj",
           "type": "MeshRenderer"
         }
       ],
@@ -925,7 +925,7 @@
             "roughness": 0.5,
             "roughnessMap": ""
           },
-          "mesh": "builtin:cube",
+          "mesh": "assets/models/neon/neon_hexpillar.obj",
           "type": "MeshRenderer"
         }
       ],
@@ -978,7 +978,7 @@
             "roughness": 0.5,
             "roughnessMap": ""
           },
-          "mesh": "builtin:cube",
+          "mesh": "assets/models/neon/neon_hexpillar.obj",
           "type": "MeshRenderer"
         }
       ],
@@ -1031,7 +1031,7 @@
             "roughness": 0.5,
             "roughnessMap": ""
           },
-          "mesh": "builtin:cube",
+          "mesh": "assets/models/neon/neon_hexpillar.obj",
           "type": "MeshRenderer"
         }
       ],
@@ -1084,7 +1084,7 @@
             "roughness": 0.5,
             "roughnessMap": ""
           },
-          "mesh": "builtin:cube",
+          "mesh": "assets/models/neon/neon_hexpillar.obj",
           "type": "MeshRenderer"
         }
       ],
@@ -1137,7 +1137,7 @@
             "roughness": 0.5,
             "roughnessMap": ""
           },
-          "mesh": "builtin:cube",
+          "mesh": "assets/models/neon/neon_hexpillar.obj",
           "type": "MeshRenderer"
         }
       ],
@@ -1190,7 +1190,7 @@
             "roughness": 0.5,
             "roughnessMap": ""
           },
-          "mesh": "builtin:cube",
+          "mesh": "assets/models/neon/neon_hexpillar.obj",
           "type": "MeshRenderer"
         }
       ],
@@ -1696,6 +1696,65 @@
       "id": 7100000000000000032,
       "name": "FooterText",
       "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            3.0,
+            -8.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.1247,
+            0.9922
+          ],
+          "scale": [
+            1.9,
+            1.9,
+            1.9
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.95,
+              1.0
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.0,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.3,
+            "roughnessMap": "",
+            "shaderGraphPath": "assets/shadergraphs/neon_cyan.novashadergraph"
+          },
+          "mesh": "assets/models/neon/neon_ring.obj",
+          "type": "MeshRenderer"
+        },
+        {
+          "enabled": true,
+          "speed": 25.0,
+          "type": "SpinningCube"
+        }
+      ],
+      "id": 7100000000000000033,
+      "name": "TitleHalo",
+      "parent": 0
     }
   ],
   "version": 4

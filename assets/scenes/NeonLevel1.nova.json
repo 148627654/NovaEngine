@@ -1168,7 +1168,7 @@
             "roughnessMap": "",
             "shaderGraphPath": "assets/shadergraphs/neon_cyan.novashadergraph"
           },
-          "mesh": "builtin:sphere",
+          "mesh": "assets/models/neon/neon_crystal.obj",
           "type": "MeshRenderer"
         },
         {
@@ -1286,7 +1286,7 @@
             "roughnessMap": "",
             "shaderGraphPath": "assets/shadergraphs/neon_cyan.novashadergraph"
           },
-          "mesh": "builtin:sphere",
+          "mesh": "assets/models/neon/neon_crystal.obj",
           "type": "MeshRenderer"
         },
         {
@@ -1404,7 +1404,7 @@
             "roughnessMap": "",
             "shaderGraphPath": "assets/shadergraphs/neon_cyan.novashadergraph"
           },
-          "mesh": "builtin:sphere",
+          "mesh": "assets/models/neon/neon_crystal.obj",
           "type": "MeshRenderer"
         },
         {
@@ -1522,7 +1522,7 @@
             "roughnessMap": "",
             "shaderGraphPath": "assets/shadergraphs/neon_cyan.novashadergraph"
           },
-          "mesh": "builtin:sphere",
+          "mesh": "assets/models/neon/neon_crystal.obj",
           "type": "MeshRenderer"
         },
         {
@@ -1640,7 +1640,7 @@
             "roughnessMap": "",
             "shaderGraphPath": "assets/shadergraphs/neon_cyan.novashadergraph"
           },
-          "mesh": "builtin:sphere",
+          "mesh": "assets/models/neon/neon_crystal.obj",
           "type": "MeshRenderer"
         },
         {
@@ -1758,7 +1758,7 @@
             "roughnessMap": "",
             "shaderGraphPath": "assets/shadergraphs/neon_cyan.novashadergraph"
           },
-          "mesh": "builtin:sphere",
+          "mesh": "assets/models/neon/neon_crystal.obj",
           "type": "MeshRenderer"
         },
         {
@@ -1876,7 +1876,7 @@
             "roughnessMap": "",
             "shaderGraphPath": "assets/shadergraphs/neon_cyan.novashadergraph"
           },
-          "mesh": "builtin:sphere",
+          "mesh": "assets/models/neon/neon_crystal.obj",
           "type": "MeshRenderer"
         },
         {
@@ -1994,7 +1994,7 @@
             "roughnessMap": "",
             "shaderGraphPath": "assets/shadergraphs/neon_cyan.novashadergraph"
           },
-          "mesh": "builtin:sphere",
+          "mesh": "assets/models/neon/neon_crystal.obj",
           "type": "MeshRenderer"
         },
         {
@@ -2112,7 +2112,7 @@
             "roughnessMap": "",
             "shaderGraphPath": "assets/shadergraphs/neon_cyan.novashadergraph"
           },
-          "mesh": "builtin:sphere",
+          "mesh": "assets/models/neon/neon_crystal.obj",
           "type": "MeshRenderer"
         },
         {
@@ -2230,7 +2230,7 @@
             "roughnessMap": "",
             "shaderGraphPath": "assets/shadergraphs/neon_cyan.novashadergraph"
           },
-          "mesh": "builtin:sphere",
+          "mesh": "assets/models/neon/neon_crystal.obj",
           "type": "MeshRenderer"
         },
         {
@@ -2460,8 +2460,8 @@
             1.0
           ],
           "scale": [
-            5.5,
-            0.5,
+            2.75,
+            2.75,
             0.5
           ],
           "type": "Transform"
@@ -2489,7 +2489,7 @@
             "roughness": 0.3,
             "roughnessMap": ""
           },
-          "mesh": "builtin:cube",
+          "mesh": "assets/models/neon/neon_arch.obj",
           "type": "MeshRenderer"
         }
       ],
@@ -3988,6 +3988,114 @@
       "id": 7110000000000000058,
       "name": "LobbyLabel",
       "parent": 7110000000000000050
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            1.0,
+            12.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.8,
+              0.9
+            ],
+            "emissionIntensity": 2.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": "",
+            "shaderGraphPath": ""
+          },
+          "mesh": "assets/models/neon/neon_pyramid.obj",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7110000000000000072,
+      "name": "BeaconStart",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            3.6,
+            -33.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.8,
+            0.8,
+            0.8
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.9,
+              0.05,
+              0.75
+            ],
+            "emissionIntensity": 2.5,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": "",
+            "shaderGraphPath": ""
+          },
+          "mesh": "assets/models/neon/neon_pyramid.obj",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7110000000000000073,
+      "name": "BeaconGate",
+      "parent": 0
     }
   ],
   "version": 4

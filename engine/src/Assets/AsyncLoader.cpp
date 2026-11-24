@@ -116,6 +116,8 @@ bool readAllTextRobust(const std::filesystem::path& relativePath, std::string& o
 void warmMeshCache(const std::string& relPath) {
     if (relPath.empty())
         return;
+    if (relPath.starts_with("builtin:"))
+        return;   // 内置图元非文件，跳过预热（波 3 #10：消除每场景 13 条无意义警告）
     std::vector<uint8_t> srcBytes;
     if (!readAllBytesRobust(relPath, srcBytes)) {
         Logger::warn("[AsyncLoader] 预热网格失败（读取）: {}", relPath);
