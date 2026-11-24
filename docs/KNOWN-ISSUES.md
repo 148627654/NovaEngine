@@ -364,3 +364,12 @@ Wave 2 审查无 P0；两条 P1 已修复（见下段「已修复项」）。以
 ## 2026-11-23 波 2 验收期修复（第三日，用户验收反馈「红色台子可以站上去」）
 
 - **物理 v1 备案：自由台面的实际可步进高度 > stepHeight**：用户实测 0.5m 独立台子可**走**上去（无跳跃）——胶囊底部半球可「骑」上自由边缘，实际可爬 ≈ stepHeight(0.35) + 圆底骑边余量（cR 的「0.5m 阻挡」测试在受控条件下通过，自由台面不适用）。机器复现：按键注入 D+W，角色 y 0.90→1.39（= 0.5m 台顶 + 胶囊半高）。**演示修复：阻挡台加高到 1.0m（Blocker10m）**——注入实测角色顶墙止步（z 恒 -5.98、y 恒 0.90）；1.0m ≫ 可步进高度，走路必被挡，跳跃（1.84m 顶点）可上属正常。**波 3 修复方向**：步进判定收紧（自由边缘骑边补偿）或 stepHeight 语义对齐 Unity（步进 + 圆底补偿）。
+
+## 2026-11-24 波 3 示例游戏合波冒烟修复（《霓虹收集者》，GameDesigner/Scripter/Levels 三 agent 交付后主会话验证）
+
+- **LUT 每帧重载刷屏**：场景 postProcess.lutPath 触发——`PostProcessSettings.lutIntensity` 默认 1.0 违反「缺省全关」契约（§27.3 头注释明言缺省全关），Player 的 UI 回拷贝阶段 `apply(空设置)` 因 postFxActive（intensity 1.0>0）走了 syncLut → 卸载场景 LUT → 下一帧主渲染重载，每帧来回。修复：默认改 0.0；apply 内 syncLut 加 `!chainDisabled || postFxActive` 守卫（纯 blit 回拷不碰 LUT 状态）。
+- **协程切换场景崩溃（string too long / 段错误）**：`startCoroutine([name](){...}())`——MSVC 调试版下 lambda 协程的闭包捕获未随帧复制（恢复时捕获区读 0xCC 未初始化填充：字符串捕获 → fmt length_error；指针捕获 → 段错误；无捕获 lambda 正常）。**备案：本工具链下避免「lambda 协程 + 闭包捕获」组合，改用自由协程函数 + 参数（标准参数复制路径）**。已用 ASan（独立 build/asan 配置，/fsanitize=address + clang_rt 动态运行库 + 符号栈）定位分配点。`Coroutine::unhandled_exception` 已增强为记录 e.what()。
+- **掉落复活死机（用户实测）**：NeonPlayerWatcher 只改 Transform + setVelocity(0)——下一固定步 writeBackCharacters 用 CharacterVirtual 位置覆盖 Transform，复活被物理回滚 → 无限坠落刷屏。修复：CharacterController 新增 `setPosition()`（物理传送，Jolt CharacterVirtual::SetPosition + 清 pending 位移/速度），复活经物理通道。
+- **胜利面板按钮无文字（用户实测）**：UI 引擎语义——子节点 anchor 相对**屏幕**解析（仅 ScrollView 传播平移），非 Unity 式相对父 Rect；设计文档按 Unity 语义写按钮子标签 → 标签渲染到屏幕中心。修复：标签改为与按钮同偏移的兄弟节点（场景级零风险）；**引擎语义差异备案**（波 3 #12 编辑器细节可评估「父 UI 元素矩形作为子锚点参照系」的引擎级实现）。
+- **打包音效缺失风险**：脚本 `AudioClip::load` 动态加载的 sfx 无场景引用 → 引用扫描收集不到。修复：buildRelease 补 assets/audio/ 整目录兜底收集（.wav/.mp3/.flac/.ogg，照 fonts/ 既有模式）。
+- **验证**：ASan 复现定位 + 修复后大厅→关卡切换（入队→挂载）✓、LUT 单次加载 ✓、掉落复活→着地继续收集 ✓、73/73 测试全绿。

@@ -422,16 +422,19 @@ void PostProcess::apply(uint32_t hdrColorTexture, const PostProcessSettings& s) 
     if (s_width <= 0 || s_height <= 0)
         return;
 
-    // ===== LUT 同步（任何路径之前，V1.0-4）：settings.lutPath 变化 → 重载 =====
-    //（场景加载/Player/面板改动统一经此入口；面板直接 setLut 亦可即时生效）
-    syncLut(s.lutPath);
-
     // 降级统一判定（「永不黑屏」契约，评审 P1-2）：enabled=false / shader 缺失 / 未初始化 /
     // GL 不支持可渲染 RGBA16F → 直通路径。hdrSupported() 内含懒 init 与一次性探测。
     const bool chainDisabled = !s.enabled || s_disabled || !s_initialized || !hdrSupported();
     // 直通路径一致性（§27.7-4）：RGBA8 直通下 LUT/渐晕/颗粒仍经 combine 生效
     //（uDirectPassthrough=1，不重复 ACES/gamma；无效果 = 纯 blit，旧行为逐位不变）
     const bool postFxActive = s.lutIntensity > 0.0f || s.vignetteEnabled || s.grainEnabled;
+
+    // ===== LUT 同步（V1.0-4）：settings.lutPath 变化 → 重载 =====
+    // 仅当本帧会消费 LUT（完整链 / 直通 combine）时同步——纯 blit 回拷调用
+    //（Player 的 UI 阶段 apply(空设置)）若在此卸载 LUT，下一帧主渲染会每帧反复重载（波 3 修复）
+    if (!chainDisabled || postFxActive)
+        syncLut(s.lutPath);
+
     if (chainDisabled) {
         if (postFxActive && s_combineShader) {
             applyDirectCombine(hdrColorTexture, s);

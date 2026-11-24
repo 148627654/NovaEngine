@@ -95,6 +95,7 @@ private:
     void characterMove(CharacterController* cc, const glm::vec3& displacement);   // move() 缓冲，固定步消费
     bool characterVelocity(const CharacterController* cc, glm::vec3& out) const;  // false = 角色未创建（Edit）
     bool setCharacterVelocity(CharacterController* cc, const glm::vec3& v);       // false = 角色未创建（Edit）
+    void characterSetPosition(CharacterController* cc, const glm::vec3& worldPos);  // 传送（复活/瞬移；波 3 #10 掉落复活需要物理级传送）
     bool characterGrounded(const CharacterController* cc) const;                  // false = 未创建/空中
 };
 

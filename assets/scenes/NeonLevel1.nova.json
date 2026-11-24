@@ -1,0 +1,3994 @@
+{
+  "editorCamera": {
+    "distance": 16.0,
+    "pitch": 0.35,
+    "target": [
+      0.0,
+      1.0,
+      -10.0
+    ],
+    "yaw": 0.0
+  },
+  "environment": {
+    "skyColor": [
+      0.03,
+      0.04,
+      0.09
+    ],
+    "ambientColor": [
+      0.08,
+      0.09,
+      0.13
+    ],
+    "showGrid": false,
+    "fogColor": [
+      0.02,
+      0.03,
+      0.06
+    ],
+    "skyMode": "Gradient",
+    "skyHorizonColor": [
+      0.06,
+      0.08,
+      0.16
+    ],
+    "skyZenithColor": [
+      0.02,
+      0.03,
+      0.08
+    ],
+    "skyCubemapPath": "",
+    "skyRotation": 0.0,
+    "skyExposure": 1.0,
+    "ibl": {
+      "iblIntensity": 0.0
+    },
+    "postProcess": {
+      "enabled": true,
+      "bloomThreshold": 0.8,
+      "bloomIntensity": 0.6,
+      "bloomLevels": 3,
+      "exposure": 1.0,
+      "ssaoEnabled": true,
+      "ssaoRadius": 0.5,
+      "ssaoStrength": 0.8,
+      "ssaoSampleCount": 16,
+      "lutPath": "assets/luts/cool.cube",
+      "lutIntensity": 0.85,
+      "dofEnabled": false,
+      "vignetteEnabled": true,
+      "vignetteIntensity": 0.35,
+      "grainEnabled": true,
+      "grainAmount": 0.02
+    }
+  },
+  "name": "NeonLevel1",
+  "objects": [
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            6.0,
+            0.0
+          ],
+          "rotation": [
+            -0.3535766899585724,
+            0.3535766899585724,
+            -0.14639034867286682,
+            0.853543758392334
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "castShadows": false,
+          "color": [
+            0.75,
+            0.85,
+            1.0
+          ],
+          "intensity": 0.5,
+          "shadowBias": 0.0005,
+          "shadowMapSize": 2048,
+          "shadowRange": 60.0,
+          "type": "DirectionalLight"
+        }
+      ],
+      "id": 7110000000000000004,
+      "name": "Sun",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.9,
+            10.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "radius": 0.4,
+          "height": 1.8,
+          "stepHeight": 0.35,
+          "slopeLimitDeg": 45.0,
+          "mass": 70.0,
+          "gravityScale": 1.0,
+          "type": "CharacterController"
+        },
+        {
+          "enabled": true,
+          "speed": 4.0,
+          "jumpSpeed": 6.0,
+          "type": "CharacterWalk"
+        },
+        {
+          "enabled": true,
+          "respawnY": -10.0,
+          "respawnPos": [
+            0.0,
+            0.9,
+            10.0
+          ],
+          "type": "NeonPlayerWatcher"
+        }
+      ],
+      "id": 7110000000000000001,
+      "name": "Player",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.8,
+            1.8,
+            0.8
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.1,
+              0.85,
+              0.95
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.45,
+              0.55
+            ],
+            "emissionIntensity": 1.5,
+            "emissionMap": "",
+            "metallic": 0.1,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.4,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:sphere",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7110000000000000002,
+      "name": "Visual",
+      "parent": 7110000000000000001
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            2.5,
+            5.0
+          ],
+          "rotation": [
+            0.0,
+            0.9919,
+            -0.1271,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "clearColor": [
+            0.02,
+            0.03,
+            0.08,
+            1.0
+          ],
+          "farPlane": 1000.0,
+          "fov": 60.0,
+          "isMain": true,
+          "nearPlane": 0.1,
+          "orthoSize": 5.0,
+          "projectionMode": "Perspective",
+          "type": "Camera"
+        }
+      ],
+      "id": 7110000000000000003,
+      "name": "Main Camera",
+      "parent": 7110000000000000001
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            -0.3,
+            10.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            8.0,
+            0.6,
+            6.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.06,
+              0.07,
+              0.1
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.6,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.45,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        },
+        {
+          "isTrigger": false,
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "halfExtents": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "type": "BoxCollider"
+        }
+      ],
+      "id": 7110000000000000005,
+      "name": "StartPad",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            -0.3,
+            3.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            6.0,
+            0.6,
+            4.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.06,
+              0.07,
+              0.1
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.6,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.45,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        },
+        {
+          "isTrigger": false,
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "halfExtents": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "type": "BoxCollider"
+        }
+      ],
+      "id": 7110000000000000006,
+      "name": "PadA2",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.8
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            3.0,
+            0.6,
+            0.8
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.06,
+              0.07,
+              0.1
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.6,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.45,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        },
+        {
+          "isTrigger": false,
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "halfExtents": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "type": "BoxCollider"
+        }
+      ],
+      "id": 7110000000000000007,
+      "name": "StepA1",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.3,
+            0.2
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            3.0,
+            0.6,
+            0.8
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.06,
+              0.07,
+              0.1
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.6,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.45,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        },
+        {
+          "isTrigger": false,
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "halfExtents": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "type": "BoxCollider"
+        }
+      ],
+      "id": 7110000000000000008,
+      "name": "StepA2",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.6,
+            -0.4
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            3.0,
+            0.6,
+            0.8
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.06,
+              0.07,
+              0.1
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.6,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.45,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        },
+        {
+          "isTrigger": false,
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "halfExtents": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "type": "BoxCollider"
+        }
+      ],
+      "id": 7110000000000000009,
+      "name": "StepA3",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.6,
+            -3.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            4.0,
+            0.6,
+            4.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.06,
+              0.07,
+              0.1
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.6,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.45,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        },
+        {
+          "isTrigger": false,
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "halfExtents": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "type": "BoxCollider"
+        }
+      ],
+      "id": 7110000000000000010,
+      "name": "PadA4",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            3.0,
+            -0.3,
+            -7.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            4.0,
+            0.6,
+            4.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.06,
+              0.07,
+              0.1
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.6,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.45,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        },
+        {
+          "isTrigger": false,
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "halfExtents": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "type": "BoxCollider"
+        }
+      ],
+      "id": 7110000000000000011,
+      "name": "PadB1",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            -2.0,
+            -0.3,
+            -10.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            3.5,
+            0.6,
+            3.5
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.06,
+              0.07,
+              0.1
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.6,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.45,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        },
+        {
+          "isTrigger": false,
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "halfExtents": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "type": "BoxCollider"
+        }
+      ],
+      "id": 7110000000000000012,
+      "name": "PadB2",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            -2.0,
+            0.9,
+            -14.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            3.5,
+            0.6,
+            3.5
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.06,
+              0.07,
+              0.1
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.6,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.45,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        },
+        {
+          "isTrigger": false,
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "halfExtents": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "type": "BoxCollider"
+        }
+      ],
+      "id": 7110000000000000013,
+      "name": "PadB3",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            -2.0,
+            -0.3,
+            -18.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            4.0,
+            0.6,
+            4.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.06,
+              0.07,
+              0.1
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.6,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.45,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        },
+        {
+          "isTrigger": false,
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "halfExtents": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "type": "BoxCollider"
+        }
+      ],
+      "id": 7110000000000000014,
+      "name": "PadB4",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            -1.0,
+            -0.3,
+            -22.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            5.0,
+            0.6,
+            4.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.06,
+              0.07,
+              0.1
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.6,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.45,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        },
+        {
+          "isTrigger": false,
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "halfExtents": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "type": "BoxCollider"
+        }
+      ],
+      "id": 7110000000000000015,
+      "name": "PadC1",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.9,
+            -27.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            4.0,
+            0.6,
+            4.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.06,
+              0.07,
+              0.1
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.6,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.45,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        },
+        {
+          "isTrigger": false,
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "halfExtents": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "type": "BoxCollider"
+        }
+      ],
+      "id": 7110000000000000016,
+      "name": "PadC2",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            1.2,
+            -32.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            6.0,
+            0.6,
+            5.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.06,
+              0.07,
+              0.1
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.6,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.45,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        },
+        {
+          "isTrigger": false,
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "halfExtents": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "type": "BoxCollider"
+        }
+      ],
+      "id": 7110000000000000017,
+      "name": "GatePad",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            1.5,
+            10.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            0.3,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.95,
+              1.0
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.0,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.3,
+            "roughnessMap": "",
+            "shaderGraphPath": "assets/shadergraphs/neon_cyan.novashadergraph"
+          },
+          "mesh": "builtin:sphere",
+          "type": "MeshRenderer"
+        },
+        {
+          "enabled": true,
+          "pickupRadius": 1.8,
+          "bobHeight": 0.15,
+          "bobSpeed": 2.0,
+          "spinSpeedDeg": 60.0,
+          "type": "NeonCollectible"
+        }
+      ],
+      "id": 7110000000000000018,
+      "name": "Orb01",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "billboard": true,
+          "blendAdditive": true,
+          "emissionRate": 80.0,
+          "endColor": [
+            0.25,
+            1.0,
+            1.0,
+            0.0
+          ],
+          "endSize": 0.05,
+          "gravity": 0.3,
+          "initialSpeed": 2.0,
+          "lifetime": 0.5,
+          "loop": false,
+          "maxParticles": 60,
+          "playOnAwake": false,
+          "startColor": [
+            0.25,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "startSize": 0.3,
+          "texturePath": "",
+          "tileX": 1,
+          "tileY": 1,
+          "type": "ParticleSystem"
+        }
+      ],
+      "id": 7110000000000000028,
+      "name": "Burst",
+      "parent": 7110000000000000018
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            1.5,
+            3.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            0.3,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.95,
+              1.0
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.0,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.3,
+            "roughnessMap": "",
+            "shaderGraphPath": "assets/shadergraphs/neon_cyan.novashadergraph"
+          },
+          "mesh": "builtin:sphere",
+          "type": "MeshRenderer"
+        },
+        {
+          "enabled": true,
+          "pickupRadius": 1.8,
+          "bobHeight": 0.15,
+          "bobSpeed": 2.0,
+          "spinSpeedDeg": 60.0,
+          "type": "NeonCollectible"
+        }
+      ],
+      "id": 7110000000000000019,
+      "name": "Orb02",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "billboard": true,
+          "blendAdditive": true,
+          "emissionRate": 80.0,
+          "endColor": [
+            0.25,
+            1.0,
+            1.0,
+            0.0
+          ],
+          "endSize": 0.05,
+          "gravity": 0.3,
+          "initialSpeed": 2.0,
+          "lifetime": 0.5,
+          "loop": false,
+          "maxParticles": 60,
+          "playOnAwake": false,
+          "startColor": [
+            0.25,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "startSize": 0.3,
+          "texturePath": "",
+          "tileX": 1,
+          "tileY": 1,
+          "type": "ParticleSystem"
+        }
+      ],
+      "id": 7110000000000000029,
+      "name": "Burst",
+      "parent": 7110000000000000019
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            2.4,
+            -3.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            0.3,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.95,
+              1.0
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.0,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.3,
+            "roughnessMap": "",
+            "shaderGraphPath": "assets/shadergraphs/neon_cyan.novashadergraph"
+          },
+          "mesh": "builtin:sphere",
+          "type": "MeshRenderer"
+        },
+        {
+          "enabled": true,
+          "pickupRadius": 1.8,
+          "bobHeight": 0.15,
+          "bobSpeed": 2.0,
+          "spinSpeedDeg": 60.0,
+          "type": "NeonCollectible"
+        }
+      ],
+      "id": 7110000000000000020,
+      "name": "Orb03",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "billboard": true,
+          "blendAdditive": true,
+          "emissionRate": 80.0,
+          "endColor": [
+            0.25,
+            1.0,
+            1.0,
+            0.0
+          ],
+          "endSize": 0.05,
+          "gravity": 0.3,
+          "initialSpeed": 2.0,
+          "lifetime": 0.5,
+          "loop": false,
+          "maxParticles": 60,
+          "playOnAwake": false,
+          "startColor": [
+            0.25,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "startSize": 0.3,
+          "texturePath": "",
+          "tileX": 1,
+          "tileY": 1,
+          "type": "ParticleSystem"
+        }
+      ],
+      "id": 7110000000000000030,
+      "name": "Burst",
+      "parent": 7110000000000000020
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            3.0,
+            1.5,
+            -7.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            0.3,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.95,
+              1.0
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.0,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.3,
+            "roughnessMap": "",
+            "shaderGraphPath": "assets/shadergraphs/neon_cyan.novashadergraph"
+          },
+          "mesh": "builtin:sphere",
+          "type": "MeshRenderer"
+        },
+        {
+          "enabled": true,
+          "pickupRadius": 1.8,
+          "bobHeight": 0.15,
+          "bobSpeed": 2.0,
+          "spinSpeedDeg": 60.0,
+          "type": "NeonCollectible"
+        }
+      ],
+      "id": 7110000000000000021,
+      "name": "Orb04",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "billboard": true,
+          "blendAdditive": true,
+          "emissionRate": 80.0,
+          "endColor": [
+            0.25,
+            1.0,
+            1.0,
+            0.0
+          ],
+          "endSize": 0.05,
+          "gravity": 0.3,
+          "initialSpeed": 2.0,
+          "lifetime": 0.5,
+          "loop": false,
+          "maxParticles": 60,
+          "playOnAwake": false,
+          "startColor": [
+            0.25,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "startSize": 0.3,
+          "texturePath": "",
+          "tileX": 1,
+          "tileY": 1,
+          "type": "ParticleSystem"
+        }
+      ],
+      "id": 7110000000000000031,
+      "name": "Burst",
+      "parent": 7110000000000000021
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            -2.0,
+            1.5,
+            -10.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            0.3,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.95,
+              1.0
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.0,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.3,
+            "roughnessMap": "",
+            "shaderGraphPath": "assets/shadergraphs/neon_cyan.novashadergraph"
+          },
+          "mesh": "builtin:sphere",
+          "type": "MeshRenderer"
+        },
+        {
+          "enabled": true,
+          "pickupRadius": 1.8,
+          "bobHeight": 0.15,
+          "bobSpeed": 2.0,
+          "spinSpeedDeg": 60.0,
+          "type": "NeonCollectible"
+        }
+      ],
+      "id": 7110000000000000022,
+      "name": "Orb05",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "billboard": true,
+          "blendAdditive": true,
+          "emissionRate": 80.0,
+          "endColor": [
+            0.25,
+            1.0,
+            1.0,
+            0.0
+          ],
+          "endSize": 0.05,
+          "gravity": 0.3,
+          "initialSpeed": 2.0,
+          "lifetime": 0.5,
+          "loop": false,
+          "maxParticles": 60,
+          "playOnAwake": false,
+          "startColor": [
+            0.25,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "startSize": 0.3,
+          "texturePath": "",
+          "tileX": 1,
+          "tileY": 1,
+          "type": "ParticleSystem"
+        }
+      ],
+      "id": 7110000000000000032,
+      "name": "Burst",
+      "parent": 7110000000000000022
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            -2.0,
+            2.7,
+            -14.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            0.3,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.95,
+              1.0
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.0,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.3,
+            "roughnessMap": "",
+            "shaderGraphPath": "assets/shadergraphs/neon_cyan.novashadergraph"
+          },
+          "mesh": "builtin:sphere",
+          "type": "MeshRenderer"
+        },
+        {
+          "enabled": true,
+          "pickupRadius": 1.8,
+          "bobHeight": 0.15,
+          "bobSpeed": 2.0,
+          "spinSpeedDeg": 60.0,
+          "type": "NeonCollectible"
+        }
+      ],
+      "id": 7110000000000000023,
+      "name": "Orb06",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "billboard": true,
+          "blendAdditive": true,
+          "emissionRate": 80.0,
+          "endColor": [
+            0.25,
+            1.0,
+            1.0,
+            0.0
+          ],
+          "endSize": 0.05,
+          "gravity": 0.3,
+          "initialSpeed": 2.0,
+          "lifetime": 0.5,
+          "loop": false,
+          "maxParticles": 60,
+          "playOnAwake": false,
+          "startColor": [
+            0.25,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "startSize": 0.3,
+          "texturePath": "",
+          "tileX": 1,
+          "tileY": 1,
+          "type": "ParticleSystem"
+        }
+      ],
+      "id": 7110000000000000033,
+      "name": "Burst",
+      "parent": 7110000000000000023
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            -2.0,
+            1.5,
+            -18.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            0.3,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.95,
+              1.0
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.0,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.3,
+            "roughnessMap": "",
+            "shaderGraphPath": "assets/shadergraphs/neon_cyan.novashadergraph"
+          },
+          "mesh": "builtin:sphere",
+          "type": "MeshRenderer"
+        },
+        {
+          "enabled": true,
+          "pickupRadius": 1.8,
+          "bobHeight": 0.15,
+          "bobSpeed": 2.0,
+          "spinSpeedDeg": 60.0,
+          "type": "NeonCollectible"
+        }
+      ],
+      "id": 7110000000000000024,
+      "name": "Orb07",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "billboard": true,
+          "blendAdditive": true,
+          "emissionRate": 80.0,
+          "endColor": [
+            0.25,
+            1.0,
+            1.0,
+            0.0
+          ],
+          "endSize": 0.05,
+          "gravity": 0.3,
+          "initialSpeed": 2.0,
+          "lifetime": 0.5,
+          "loop": false,
+          "maxParticles": 60,
+          "playOnAwake": false,
+          "startColor": [
+            0.25,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "startSize": 0.3,
+          "texturePath": "",
+          "tileX": 1,
+          "tileY": 1,
+          "type": "ParticleSystem"
+        }
+      ],
+      "id": 7110000000000000034,
+      "name": "Burst",
+      "parent": 7110000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            -1.0,
+            1.5,
+            -22.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            0.3,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.95,
+              1.0
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.0,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.3,
+            "roughnessMap": "",
+            "shaderGraphPath": "assets/shadergraphs/neon_cyan.novashadergraph"
+          },
+          "mesh": "builtin:sphere",
+          "type": "MeshRenderer"
+        },
+        {
+          "enabled": true,
+          "pickupRadius": 1.8,
+          "bobHeight": 0.15,
+          "bobSpeed": 2.0,
+          "spinSpeedDeg": 60.0,
+          "type": "NeonCollectible"
+        }
+      ],
+      "id": 7110000000000000025,
+      "name": "Orb08",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "billboard": true,
+          "blendAdditive": true,
+          "emissionRate": 80.0,
+          "endColor": [
+            0.25,
+            1.0,
+            1.0,
+            0.0
+          ],
+          "endSize": 0.05,
+          "gravity": 0.3,
+          "initialSpeed": 2.0,
+          "lifetime": 0.5,
+          "loop": false,
+          "maxParticles": 60,
+          "playOnAwake": false,
+          "startColor": [
+            0.25,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "startSize": 0.3,
+          "texturePath": "",
+          "tileX": 1,
+          "tileY": 1,
+          "type": "ParticleSystem"
+        }
+      ],
+      "id": 7110000000000000035,
+      "name": "Burst",
+      "parent": 7110000000000000025
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            2.7,
+            -27.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            0.3,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.95,
+              1.0
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.0,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.3,
+            "roughnessMap": "",
+            "shaderGraphPath": "assets/shadergraphs/neon_cyan.novashadergraph"
+          },
+          "mesh": "builtin:sphere",
+          "type": "MeshRenderer"
+        },
+        {
+          "enabled": true,
+          "pickupRadius": 1.8,
+          "bobHeight": 0.15,
+          "bobSpeed": 2.0,
+          "spinSpeedDeg": 60.0,
+          "type": "NeonCollectible"
+        }
+      ],
+      "id": 7110000000000000026,
+      "name": "Orb09",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "billboard": true,
+          "blendAdditive": true,
+          "emissionRate": 80.0,
+          "endColor": [
+            0.25,
+            1.0,
+            1.0,
+            0.0
+          ],
+          "endSize": 0.05,
+          "gravity": 0.3,
+          "initialSpeed": 2.0,
+          "lifetime": 0.5,
+          "loop": false,
+          "maxParticles": 60,
+          "playOnAwake": false,
+          "startColor": [
+            0.25,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "startSize": 0.3,
+          "texturePath": "",
+          "tileX": 1,
+          "tileY": 1,
+          "type": "ParticleSystem"
+        }
+      ],
+      "id": 7110000000000000036,
+      "name": "Burst",
+      "parent": 7110000000000000026
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            3.0,
+            -32.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            0.3,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.95,
+              1.0
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.0,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.3,
+            "roughnessMap": "",
+            "shaderGraphPath": "assets/shadergraphs/neon_cyan.novashadergraph"
+          },
+          "mesh": "builtin:sphere",
+          "type": "MeshRenderer"
+        },
+        {
+          "enabled": true,
+          "pickupRadius": 1.8,
+          "bobHeight": 0.15,
+          "bobSpeed": 2.0,
+          "spinSpeedDeg": 60.0,
+          "type": "NeonCollectible"
+        }
+      ],
+      "id": 7110000000000000027,
+      "name": "Orb10",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "billboard": true,
+          "blendAdditive": true,
+          "emissionRate": 80.0,
+          "endColor": [
+            0.25,
+            1.0,
+            1.0,
+            0.0
+          ],
+          "endSize": 0.05,
+          "gravity": 0.3,
+          "initialSpeed": 2.0,
+          "lifetime": 0.5,
+          "loop": false,
+          "maxParticles": 60,
+          "playOnAwake": false,
+          "startColor": [
+            0.25,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "startSize": 0.3,
+          "texturePath": "",
+          "tileX": 1,
+          "tileY": 1,
+          "type": "ParticleSystem"
+        }
+      ],
+      "id": 7110000000000000037,
+      "name": "Burst",
+      "parent": 7110000000000000027
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            3.5,
+            -32.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "enabled": true,
+          "zoneHalfX": 3.0,
+          "zoneZMin": -34.5,
+          "zoneZMax": -29.5,
+          "zoneYMin": 1.9,
+          "zoneYMax": 3.5,
+          "type": "NeonGate"
+        }
+      ],
+      "id": 7110000000000000038,
+      "name": "Gate",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            -2.5,
+            3.5,
+            -32.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.5,
+            4.0,
+            0.5
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.08,
+              0.05,
+              0.1
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.5,
+              0.0,
+              0.15
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.7,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.3,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7110000000000000039,
+      "name": "GatePillarL",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            2.5,
+            3.5,
+            -32.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.5,
+            4.0,
+            0.5
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.08,
+              0.05,
+              0.1
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.5,
+              0.0,
+              0.15
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.7,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.3,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7110000000000000040,
+      "name": "GatePillarR",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            5.25,
+            -32.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            5.5,
+            0.5,
+            0.5
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.08,
+              0.05,
+              0.1
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.5,
+              0.0,
+              0.15
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.7,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.3,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7110000000000000041,
+      "name": "GateBeam",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            3.5,
+            -32.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "billboard": true,
+          "blendAdditive": true,
+          "emissionRate": 20.0,
+          "endColor": [
+            0.3,
+            1.0,
+            0.9,
+            0.0
+          ],
+          "endSize": 0.03,
+          "gravity": 0.1,
+          "initialSpeed": 1.2,
+          "lifetime": 1.2,
+          "loop": true,
+          "maxParticles": 300,
+          "playOnAwake": false,
+          "startColor": [
+            0.3,
+            1.0,
+            0.9,
+            0.8
+          ],
+          "startSize": 0.15,
+          "texturePath": "",
+          "tileX": 1,
+          "tileY": 1,
+          "type": "ParticleSystem"
+        }
+      ],
+      "id": 7110000000000000042,
+      "name": "GateAura",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            -8.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            60.0,
+            1.0,
+            60.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.02,
+              0.03,
+              0.05
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.01,
+              0.02,
+              0.05
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.0,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.95,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:plane",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7110000000000000043,
+      "name": "VoidFloor",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "clipPath": "assets/audio/bgm_level1.wav",
+          "volume": 0.8,
+          "loop": true,
+          "spatialBlend": 0.0,
+          "minDistance": 1.0,
+          "maxDistance": 50.0,
+          "playOnAwake": true,
+          "bus": 1,
+          "stream": true,
+          "fadeInSeconds": 1.0,
+          "fadeOutSeconds": 0.5,
+          "type": "AudioSource"
+        }
+      ],
+      "id": 7110000000000000044,
+      "name": "BGM",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "enabled": true,
+          "type": "NeonGameManager"
+        },
+        {
+          "enabled": true,
+          "type": "NeonLevelHud"
+        }
+      ],
+      "id": 7110000000000000045,
+      "name": "Game",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.05,
+            7.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            8.0,
+            0.1,
+            0.15
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.8,
+              0.9
+            ],
+            "emissionIntensity": 2.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7110000000000000059,
+      "name": "Strip01",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.05,
+            1.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            6.0,
+            0.1,
+            0.15
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.8,
+              0.9
+            ],
+            "emissionIntensity": 2.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7110000000000000060,
+      "name": "Strip02",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.35,
+            0.4
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            3.0,
+            0.1,
+            0.15
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.8,
+              0.9
+            ],
+            "emissionIntensity": 2.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7110000000000000061,
+      "name": "Strip03",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.65,
+            -0.2
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            3.0,
+            0.1,
+            0.15
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.8,
+              0.9
+            ],
+            "emissionIntensity": 2.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7110000000000000062,
+      "name": "Strip04",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.95,
+            -0.8
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            3.0,
+            0.1,
+            0.15
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.8,
+              0.9
+            ],
+            "emissionIntensity": 2.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7110000000000000063,
+      "name": "Strip05",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.95,
+            -5.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            4.0,
+            0.1,
+            0.15
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.8,
+              0.9
+            ],
+            "emissionIntensity": 2.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7110000000000000064,
+      "name": "Strip06",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            3.0,
+            0.05,
+            -9.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            4.0,
+            0.1,
+            0.15
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.8,
+              0.9
+            ],
+            "emissionIntensity": 2.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7110000000000000065,
+      "name": "Strip07",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            -2.0,
+            0.05,
+            -12.25
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            3.5,
+            0.1,
+            0.15
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.8,
+              0.9
+            ],
+            "emissionIntensity": 2.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7110000000000000066,
+      "name": "Strip08",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            -2.0,
+            1.25,
+            -16.25
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            3.5,
+            0.1,
+            0.15
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.8,
+              0.9
+            ],
+            "emissionIntensity": 2.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7110000000000000067,
+      "name": "Strip09",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            -2.0,
+            0.05,
+            -20.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            4.0,
+            0.1,
+            0.15
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.8,
+              0.9
+            ],
+            "emissionIntensity": 2.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7110000000000000068,
+      "name": "Strip10",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            -1.0,
+            0.05,
+            -24.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            5.0,
+            0.1,
+            0.15
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.8,
+              0.9
+            ],
+            "emissionIntensity": 2.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7110000000000000069,
+      "name": "Strip11",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            1.25,
+            -29.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            4.0,
+            0.1,
+            0.15
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.8,
+              0.9
+            ],
+            "emissionIntensity": 2.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7110000000000000070,
+      "name": "Strip12",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            1.55,
+            -34.5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            6.0,
+            0.1,
+            0.15
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.8,
+              0.9
+            ],
+            "emissionIntensity": 2.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7110000000000000071,
+      "name": "Strip13",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "uiScale": 1.0,
+          "type": "Canvas"
+        }
+      ],
+      "id": 7110000000000000046,
+      "name": "Canvas",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "能量球 0 / 10",
+          "fontSize": 28.0,
+          "color": [
+            0.4,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.0,
+            0.0
+          ],
+          "offset": [
+            24,
+            24
+          ],
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000047,
+      "name": "CountText",
+      "parent": 7110000000000000046
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "时间 0.0 秒",
+          "fontSize": 28.0,
+          "color": [
+            0.9,
+            0.95,
+            1.0,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            1.0,
+            0.0
+          ],
+          "offset": [
+            -180,
+            24
+          ],
+          "wrap": true,
+          "wrapWidth": 156.0,
+          "hAlign": "Right",
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000048,
+      "name": "TimerText",
+      "parent": 7110000000000000046
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "收集全部能量球,激活传送门!",
+          "fontSize": 20.0,
+          "color": [
+            0.8,
+            0.9,
+            1.0,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.5,
+            1.0
+          ],
+          "offset": [
+            0,
+            -36
+          ],
+          "wrap": true,
+          "wrapWidth": 600.0,
+          "hAlign": "Center",
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000049,
+      "name": "HintText",
+      "parent": 7110000000000000046
+    },
+    {
+      "active": false,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        }
+      ],
+      "id": 7110000000000000050,
+      "name": "VictoryRoot",
+      "parent": 7110000000000000046
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "spritePath": "",
+          "color": [
+            0.02,
+            0.03,
+            0.05,
+            0.85
+          ],
+          "slice9": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "anchor": [
+            0.5,
+            0.5
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "size": [
+            1280,
+            720
+          ],
+          "fillType": "None",
+          "fillAmount": 1.0,
+          "fillClockwise": true,
+          "type": "Image"
+        }
+      ],
+      "id": 7110000000000000051,
+      "name": "Backdrop",
+      "parent": 7110000000000000050
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "通关!",
+          "fontSize": 72.0,
+          "color": [
+            1.0,
+            0.85,
+            0.3,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.5,
+            0.5
+          ],
+          "offset": [
+            0,
+            -90
+          ],
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000052,
+      "name": "WinTitle",
+      "parent": 7110000000000000050
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "用时 0.0 秒",
+          "fontSize": 36.0,
+          "color": [
+            0.9,
+            0.95,
+            1.0,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.5,
+            0.5
+          ],
+          "offset": [
+            0,
+            10
+          ],
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000053,
+      "name": "WinTime",
+      "parent": 7110000000000000050
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "最佳纪录:--",
+          "fontSize": 24.0,
+          "color": [
+            1.0,
+            0.85,
+            0.3,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.5,
+            0.5
+          ],
+          "offset": [
+            0,
+            58
+          ],
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000054,
+      "name": "WinBest",
+      "parent": 7110000000000000050
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "color": [
+            0.1,
+            0.7,
+            0.9,
+            1.0
+          ],
+          "hoverColor": [
+            0.15,
+            0.8,
+            1.0,
+            1.0
+          ],
+          "pressedColor": [
+            0.05,
+            0.5,
+            0.7,
+            1.0
+          ],
+          "anchor": [
+            0.5,
+            0.5
+          ],
+          "offset": [
+            -130,
+            140
+          ],
+          "size": [
+            220,
+            56
+          ],
+          "type": "Button"
+        }
+      ],
+      "id": 7110000000000000055,
+      "name": "RetryBtn",
+      "parent": 7110000000000000050
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "再玩一次",
+          "fontSize": 28.0,
+          "color": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.5,
+            0.5
+          ],
+          "offset": [
+            -130,
+            126
+          ],
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000056,
+      "name": "RetryLabel",
+      "parent": 7110000000000000050
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "color": [
+            0.1,
+            0.7,
+            0.9,
+            1.0
+          ],
+          "hoverColor": [
+            0.15,
+            0.8,
+            1.0,
+            1.0
+          ],
+          "pressedColor": [
+            0.05,
+            0.5,
+            0.7,
+            1.0
+          ],
+          "anchor": [
+            0.5,
+            0.5
+          ],
+          "offset": [
+            130,
+            140
+          ],
+          "size": [
+            220,
+            56
+          ],
+          "type": "Button"
+        }
+      ],
+      "id": 7110000000000000057,
+      "name": "LobbyBtn",
+      "parent": 7110000000000000050
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "返回大厅",
+          "fontSize": 28.0,
+          "color": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.5,
+            0.5
+          ],
+          "offset": [
+            130,
+            126
+          ],
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000058,
+      "name": "LobbyLabel",
+      "parent": 7110000000000000050
+    }
+  ],
+  "version": 4
+}

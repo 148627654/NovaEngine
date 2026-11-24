@@ -68,6 +68,11 @@ void CharacterController::setVelocity(const glm::vec3& v) {
     m_velocity = v;       // Edit 缓冲（进入 Play 由 syncFromTransforms 重建，缓冲丢弃）
 }
 
+void CharacterController::setPosition(const glm::vec3& worldPos) {
+    if (PhysicsWorld* pw = physicsOf(this))
+        pw->characterSetPosition(this, worldPos);   // Play：物理级传送（Edit no-op）
+}
+
 void CharacterController::onAwake() {
     // Rigidbody 互斥 warn（§27.2：同 GO 挂两者 = 启动 warn + CC 优先；PhysicsWorld 同步期
     // 会跳过该 Rigidbody 的 body 创建——本处只负责提示，去重一次）

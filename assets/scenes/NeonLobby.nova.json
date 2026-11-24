@@ -1,0 +1,1702 @@
+{
+  "editorCamera": {
+    "distance": 14.0,
+    "pitch": 0.35,
+    "target": [
+      0.0,
+      1.5,
+      -2.0
+    ],
+    "yaw": 0.0
+  },
+  "environment": {
+    "skyColor": [
+      0.03,
+      0.04,
+      0.09
+    ],
+    "ambientColor": [
+      0.08,
+      0.09,
+      0.13
+    ],
+    "showGrid": false,
+    "fogColor": [
+      0.02,
+      0.03,
+      0.06
+    ],
+    "skyMode": "Gradient",
+    "skyHorizonColor": [
+      0.06,
+      0.08,
+      0.16
+    ],
+    "skyZenithColor": [
+      0.02,
+      0.03,
+      0.08
+    ],
+    "skyCubemapPath": "",
+    "skyRotation": 0.0,
+    "skyExposure": 1.0,
+    "ibl": {
+      "iblIntensity": 0.0
+    },
+    "postProcess": {
+      "enabled": true,
+      "bloomThreshold": 0.8,
+      "bloomIntensity": 0.6,
+      "bloomLevels": 3,
+      "exposure": 1.0,
+      "ssaoEnabled": true,
+      "ssaoRadius": 0.5,
+      "ssaoStrength": 0.8,
+      "ssaoSampleCount": 16,
+      "lutPath": "assets/luts/cool.cube",
+      "lutIntensity": 0.8,
+      "dofEnabled": false,
+      "vignetteEnabled": true,
+      "vignetteIntensity": 0.35,
+      "grainEnabled": true,
+      "grainAmount": 0.02
+    }
+  },
+  "name": "NeonLobby",
+  "objects": [
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            6.0,
+            0.0
+          ],
+          "rotation": [
+            -0.3535766899585724,
+            0.3535766899585724,
+            -0.14639034867286682,
+            0.853543758392334
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "castShadows": false,
+          "color": [
+            0.75,
+            0.85,
+            1.0
+          ],
+          "intensity": 0.5,
+          "shadowBias": 0.0005,
+          "shadowMapSize": 2048,
+          "shadowRange": 60.0,
+          "type": "DirectionalLight"
+        }
+      ],
+      "id": 7100000000000000004,
+      "name": "Sun",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            -0.5,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            60.0,
+            1.0,
+            60.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.03,
+              0.04,
+              0.07
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.0,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.95,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:plane",
+          "type": "MeshRenderer"
+        },
+        {
+          "isTrigger": false,
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "halfExtents": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "type": "BoxCollider"
+        }
+      ],
+      "id": 7100000000000000005,
+      "name": "Ground",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.9,
+            2.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "radius": 0.4,
+          "height": 1.8,
+          "stepHeight": 0.35,
+          "slopeLimitDeg": 45.0,
+          "mass": 70.0,
+          "gravityScale": 1.0,
+          "type": "CharacterController"
+        },
+        {
+          "enabled": true,
+          "speed": 4.0,
+          "jumpSpeed": 6.0,
+          "type": "CharacterWalk"
+        },
+        {
+          "enabled": true,
+          "respawnY": -10.0,
+          "respawnPos": [
+            0.0,
+            0.9,
+            2.0
+          ],
+          "type": "NeonPlayerWatcher"
+        }
+      ],
+      "id": 7100000000000000001,
+      "name": "Player",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.8,
+            1.8,
+            0.8
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.1,
+              0.85,
+              0.95
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.45,
+              0.55
+            ],
+            "emissionIntensity": 1.5,
+            "emissionMap": "",
+            "metallic": 0.1,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.4,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:sphere",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7100000000000000002,
+      "name": "Visual",
+      "parent": 7100000000000000001
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            2.5,
+            5.0
+          ],
+          "rotation": [
+            0.0,
+            0.9919,
+            -0.1271,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "clearColor": [
+            0.02,
+            0.03,
+            0.08,
+            1.0
+          ],
+          "farPlane": 1000.0,
+          "fov": 60.0,
+          "isMain": true,
+          "nearPlane": 0.1,
+          "orthoSize": 5.0,
+          "projectionMode": "Perspective",
+          "type": "Camera"
+        }
+      ],
+      "id": 7100000000000000003,
+      "name": "Main Camera",
+      "parent": 7100000000000000001
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            1.0,
+            -8.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            3.0,
+            2.0,
+            3.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.06,
+              0.07,
+              0.1
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.6,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.45,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        },
+        {
+          "isTrigger": false,
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "halfExtents": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "type": "BoxCollider"
+        }
+      ],
+      "id": 7100000000000000006,
+      "name": "TitlePedestal",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            3.0,
+            -8.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.1,
+            1.1,
+            1.1
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.95,
+              1.0
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.0,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.3,
+            "roughnessMap": "",
+            "shaderGraphPath": "assets/shadergraphs/neon_cyan.novashadergraph"
+          },
+          "mesh": "builtin:sphere",
+          "type": "MeshRenderer"
+        },
+        {
+          "enabled": true,
+          "speed": 45.0,
+          "type": "SpinningCube"
+        }
+      ],
+      "id": 7100000000000000007,
+      "name": "TitleOrb",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            -2.5,
+            3.0,
+            -8.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.45,
+            0.45,
+            0.45
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.6,
+              0.05,
+              0.9
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.0,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.3,
+            "roughnessMap": "",
+            "shaderGraphPath": "assets/shadergraphs/neon_magenta.novashadergraph"
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        },
+        {
+          "enabled": true,
+          "speed": 60.0,
+          "type": "SpinningCube"
+        }
+      ],
+      "id": 7100000000000000008,
+      "name": "FlankLeft",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            2.5,
+            3.0,
+            -8.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.45,
+            0.45,
+            0.45
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              1.0,
+              0.35,
+              0.05
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "emissionIntensity": 1.0,
+            "emissionMap": "",
+            "metallic": 0.0,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.3,
+            "roughnessMap": "",
+            "shaderGraphPath": "assets/shadergraphs/neon_orange.novashadergraph"
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        },
+        {
+          "enabled": true,
+          "speed": 60.0,
+          "type": "SpinningCube"
+        }
+      ],
+      "id": 7100000000000000009,
+      "name": "FlankRight",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            10,
+            1.5,
+            0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            3.0,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.9,
+              0.05,
+              0.75
+            ],
+            "emissionIntensity": 3.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7100000000000000010,
+      "name": "FencePost01",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            8.7,
+            1.5,
+            5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            3.0,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.8,
+              0.9
+            ],
+            "emissionIntensity": 3.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7100000000000000011,
+      "name": "FencePost02",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            5,
+            1.5,
+            8.7
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            3.0,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.9,
+              0.05,
+              0.75
+            ],
+            "emissionIntensity": 3.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7100000000000000012,
+      "name": "FencePost03",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0,
+            1.5,
+            10
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            3.0,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.8,
+              0.9
+            ],
+            "emissionIntensity": 3.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7100000000000000013,
+      "name": "FencePost04",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            -5,
+            1.5,
+            8.7
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            3.0,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.9,
+              0.05,
+              0.75
+            ],
+            "emissionIntensity": 3.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7100000000000000014,
+      "name": "FencePost05",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            -8.7,
+            1.5,
+            5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            3.0,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.8,
+              0.9
+            ],
+            "emissionIntensity": 3.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7100000000000000015,
+      "name": "FencePost06",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            -10,
+            1.5,
+            0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            3.0,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.9,
+              0.05,
+              0.75
+            ],
+            "emissionIntensity": 3.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7100000000000000016,
+      "name": "FencePost07",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            -8.7,
+            1.5,
+            -5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            3.0,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.8,
+              0.9
+            ],
+            "emissionIntensity": 3.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7100000000000000017,
+      "name": "FencePost08",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            -5,
+            1.5,
+            -8.7
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            3.0,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.9,
+              0.05,
+              0.75
+            ],
+            "emissionIntensity": 3.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7100000000000000018,
+      "name": "FencePost09",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0,
+            1.5,
+            -10
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            3.0,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.8,
+              0.9
+            ],
+            "emissionIntensity": 3.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7100000000000000019,
+      "name": "FencePost10",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            5,
+            1.5,
+            -8.7
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            3.0,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.9,
+              0.05,
+              0.75
+            ],
+            "emissionIntensity": 3.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7100000000000000020,
+      "name": "FencePost11",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            8.7,
+            1.5,
+            -5
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            0.3,
+            3.0,
+            0.3
+          ],
+          "type": "Transform"
+        },
+        {
+          "material": {
+            "albedo": [
+              0.05,
+              0.05,
+              0.08
+            ],
+            "albedoMap": "",
+            "alpha": 1.0,
+            "blendMode": "Opaque",
+            "emissionColor": [
+              0.05,
+              0.8,
+              0.9
+            ],
+            "emissionIntensity": 3.0,
+            "emissionMap": "",
+            "metallic": 0.3,
+            "metallicMap": "",
+            "normalMap": "",
+            "roughness": 0.5,
+            "roughnessMap": ""
+          },
+          "mesh": "builtin:cube",
+          "type": "MeshRenderer"
+        }
+      ],
+      "id": 7100000000000000021,
+      "name": "FencePost12",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "clipPath": "assets/audio/bgm_lobby.wav",
+          "volume": 0.8,
+          "loop": true,
+          "spatialBlend": 0.0,
+          "minDistance": 1.0,
+          "maxDistance": 50.0,
+          "playOnAwake": true,
+          "bus": 1,
+          "stream": true,
+          "fadeInSeconds": 1.5,
+          "fadeOutSeconds": 0.5,
+          "type": "AudioSource"
+        }
+      ],
+      "id": 7100000000000000022,
+      "name": "BGM",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "enabled": true,
+          "type": "NeonGameManager"
+        },
+        {
+          "enabled": true,
+          "type": "NeonLobbyUI"
+        }
+      ],
+      "id": 7100000000000000023,
+      "name": "Game",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "uiScale": 1.0,
+          "type": "Canvas"
+        }
+      ],
+      "id": 7100000000000000024,
+      "name": "Canvas",
+      "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "霓虹收集者",
+          "fontSize": 64.0,
+          "color": [
+            0.6,
+            0.95,
+            1.0,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.5,
+            0.5
+          ],
+          "offset": [
+            0,
+            -160
+          ],
+          "type": "Text"
+        }
+      ],
+      "id": 7100000000000000025,
+      "name": "TitleText",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "NEON COLLECTOR",
+          "fontSize": 28.0,
+          "color": [
+            1.0,
+            0.4,
+            0.95,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.5,
+            0.5
+          ],
+          "offset": [
+            0,
+            -104
+          ],
+          "type": "Text"
+        }
+      ],
+      "id": 7100000000000000026,
+      "name": "SubText",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "color": [
+            0.1,
+            0.7,
+            0.9,
+            1.0
+          ],
+          "hoverColor": [
+            0.15,
+            0.8,
+            1.0,
+            1.0
+          ],
+          "pressedColor": [
+            0.05,
+            0.5,
+            0.7,
+            1.0
+          ],
+          "anchor": [
+            0.5,
+            0.5
+          ],
+          "offset": [
+            0,
+            20
+          ],
+          "size": [
+            240,
+            64
+          ],
+          "type": "Button"
+        }
+      ],
+      "id": 7100000000000000027,
+      "name": "StartBtn",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "开始游戏",
+          "fontSize": 32.0,
+          "color": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.5,
+            0.5
+          ],
+          "offset": [
+            0,
+            4
+          ],
+          "type": "Text"
+        }
+      ],
+      "id": 7100000000000000028,
+      "name": "StartBtnLabel",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "最佳纪录:暂无",
+          "fontSize": 24.0,
+          "color": [
+            1.0,
+            0.85,
+            0.3,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.5,
+            0.5
+          ],
+          "offset": [
+            0,
+            85
+          ],
+          "type": "Text"
+        }
+      ],
+      "id": 7100000000000000029,
+      "name": "BestTimeText",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": false,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "上次通关:--",
+          "fontSize": 20.0,
+          "color": [
+            0.8,
+            0.85,
+            0.9,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.5,
+            0.5
+          ],
+          "offset": [
+            0,
+            115
+          ],
+          "type": "Text"
+        }
+      ],
+      "id": 7100000000000000030,
+      "name": "LastRunText",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "操作说明\nW A S D 移动 · 空格 跳跃\n收集全部 10 颗能量球,激活终点传送门\n掉出平台会自动回到起点",
+          "fontSize": 20.0,
+          "color": [
+            0.75,
+            0.8,
+            0.9,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.5,
+            0.5
+          ],
+          "offset": [
+            0,
+            150
+          ],
+          "wrap": true,
+          "wrapWidth": 600.0,
+          "hAlign": "Center",
+          "type": "Text"
+        }
+      ],
+      "id": 7100000000000000031,
+      "name": "HelpText",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "NovaEngine V1.0 · 示例游戏",
+          "fontSize": 16.0,
+          "color": [
+            0.5,
+            0.55,
+            0.65,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.5,
+            1.0
+          ],
+          "offset": [
+            0,
+            -26
+          ],
+          "type": "Text"
+        }
+      ],
+      "id": 7100000000000000032,
+      "name": "FooterText",
+      "parent": 7100000000000000024
+    }
+  ],
+  "version": 4
+}

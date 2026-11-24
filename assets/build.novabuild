@@ -1,8 +1,8 @@
 {
     "version": 1,
     "scenes": [
-        { "name": "demo", "path": "assets/scenes/demo.nova.json" },
-        { "name": "V10CharacterDemo", "path": "assets/scenes/V10CharacterDemo.nova.json" },
+        { "name": "NeonLobby", "path": "assets/scenes/NeonLobby.nova.json" },
+        { "name": "NeonLevel1", "path": "assets/scenes/NeonLevel1.nova.json" },
         { "name": "V10MultiSceneDemo", "path": "assets/scenes/V10MultiSceneDemo.nova.json" },
         { "name": "V10AdditiveLevel", "path": "assets/scenes/V10AdditiveLevel.nova.json" },
         { "name": "Second", "path": "assets/scenes/Second.nova.json" },

@@ -20,6 +20,12 @@ set(NOVA_GAME_SOURCES
     MoveWithInput.cpp
     CharacterWalk.cpp      # V1.0-3 验收演示：WASD 驱动 CharacterController
     SceneLoadDemo.cpp      # V1.0-2 验收演示：数字键驱动异步场景加载/卸载
+    NovaSampleGame/NeonGameManager.cpp      # 示例游戏《霓虹收集者》：全局单例（计分/切场景/音效/存档）
+    NovaSampleGame/NeonLobbyUI.cpp          # 示例游戏：大厅 UI 接线（开始按钮/最佳纪录/上次通关）
+    NovaSampleGame/NeonLevelHud.cpp         # 示例游戏：关卡 HUD/计时/结算面板
+    NovaSampleGame/NeonCollectible.cpp      # 示例游戏：能量球（摆动自转 + 距离轮询拾取）
+    NovaSampleGame/NeonGate.cpp             # 示例游戏：终点传送门（激活序列 + 胜利区判定）
+    NovaSampleGame/NeonPlayerWatcher.cpp    # 示例游戏：玩家看守（掉落复活 + 跳跃音效）
 )
 
 if(NOVA_SCRIPTS_DLL)

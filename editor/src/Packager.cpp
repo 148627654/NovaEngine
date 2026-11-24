@@ -888,7 +888,28 @@ bool Packager::buildRelease(const fs::path& outputDir) {
         if (!rel.empty()) files.emplace(rel, audioSettings);
     }
 
-    // 3.6 字体：font kind 已覆盖（项目内 .ttf 进 pak；系统绝对路径运行时磁盘直读）。
+    // 3.6 音频兜底：AudioSource clipPath 已由场景引用收集，但脚本运行时
+    //     AudioClip::load（AssetStream pak 兼容）动态加载的 sfx 无场景引用——
+    //     assets/audio/ 整目录兜底收集 .wav/.mp3/.flac/.ogg（示例游戏拾取/胜利等音效）
+    const fs::path audioDir = projectRoot / "assets" / "audio";
+    if (fs::is_directory(audioDir, ec)) {
+        for (fs::recursive_directory_iterator it(
+                 audioDir, fs::directory_options::skip_permission_denied, ec),
+             end;
+             !ec && it != end; it.increment(ec)) {
+            if (!it->is_regular_file(ec)) { ec.clear(); continue; }
+            std::string name = it->path().filename().string();
+            std::transform(name.begin(), name.end(), name.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (!name.ends_with(".wav") && !name.ends_with(".mp3") &&
+                !name.ends_with(".flac") && !name.ends_with(".ogg")) continue;
+            const std::string rel = toPakRel(it->path(), projectRoot);
+            if (!rel.empty()) files.emplace(rel, it->path());
+        }
+        if (ec) { Logger::warn("遍历音频目录中断: {}", ec.message()); ec.clear(); }
+    }
+
+    // 3.7 字体：font kind 已覆盖（项目内 .ttf 进 pak；系统绝对路径运行时磁盘直读）。
     //     assets/fonts/ 整目录兜底收集（项目内自备字体库整体进包）
     const fs::path fontsDir = projectRoot / "assets" / "fonts";
     if (fs::is_directory(fontsDir, ec)) {

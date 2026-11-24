@@ -27,7 +27,16 @@ public:
         std::suspend_always initial_suspend() noexcept { return {}; }
         std::suspend_always final_suspend() noexcept { return {}; }
         void return_void() noexcept {}
-        void unhandled_exception() { Logger::error("协程未捕获异常，已终止"); }
+        void unhandled_exception() {
+            // 检查并记录真实异常（不重抛 = 协程视为已处理终止；诊断信息入日志便于排障）
+            try {
+                throw;
+            } catch (const std::exception& e) {
+                Logger::error("协程未捕获异常，已终止: {}", e.what());
+            } catch (...) {
+                Logger::error("协程未捕获异常，已终止（非 std::exception）");
+            }
+        }
         std::suspend_always await_transform(WaitForSeconds v) {
             resumeMode = Resume::AfterSeconds; waitSeconds = v.seconds; return {};
         }

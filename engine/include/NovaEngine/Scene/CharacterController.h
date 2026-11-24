@@ -24,6 +24,7 @@ public:
     void move(const glm::vec3& displacement);    // Play 中；Edit no-op（与物理组件同纪律）
     glm::vec3 velocity() const;
     void setVelocity(const glm::vec3& v);
+    void setPosition(const glm::vec3& worldPos); // 物理传送（复活/瞬移）；Play 中有效，Edit no-op
     void onAwake() override; void onUpdate(float dt) override;
     void onSerialize(nlohmann::json& out) const override;
     void onDeserialize(const nlohmann::json& in) override;

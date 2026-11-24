@@ -1553,6 +1553,18 @@ bool PhysicsWorld::setCharacterVelocity(CharacterController* cc, const glm::vec3
     return true;
 }
 
+void PhysicsWorld::characterSetPosition(CharacterController* cc, const glm::vec3& worldPos) {
+    auto it = m_impl->characters.find(cc);
+    if (it == m_impl->characters.end() || it->second.character == nullptr)
+        return;   // Edit / 角色未创建：no-op
+    // 物理级传送：CharacterVirtual::SetPosition 直设（复活/瞬移——只改 Transform 会被
+    // 下一固定步 writeBackCharacters 覆盖回旧位置，波 3 #10 掉落复活 bug 根因）
+    it->second.character->SetPosition(toJolt(worldPos));
+    it->second.pendingDisplacement = glm::vec3(0.0f);
+    it->second.pendingVelocity = glm::vec3(0.0f);
+    it->second.pendingVelocityOverride = true;
+}
+
 bool PhysicsWorld::characterGrounded(const CharacterController* cc) const {
     auto it = m_impl->characters.find(const_cast<CharacterController*>(cc));
     return it != m_impl->characters.end() && it->second.character != nullptr &&

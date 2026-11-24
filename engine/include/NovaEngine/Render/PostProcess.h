@@ -18,7 +18,7 @@ struct PostProcessSettings {
     int ssaoSampleCount = 16;      // 半球采样数（8/16/32）
     // ===== V1.0-4 色彩分级与后期完善（§27.3 骨架日布，2026-11-23；缺省全关 = 旧行为零变化）=====
     std::string lutPath;           // .cube 相对路径（空 = 关）
-    float lutIntensity = 1.0f;     // 0..1 混合
+    float lutIntensity = 0.0f;     // 0..1 混合（缺省 0 = 「缺省全关」契约；显式设置才生效）
     bool dofEnabled = false;       // 简版 DOF（可选）
     float dofFocusDistance = 5.0f, dofAperture = 0.05f;
     bool vignetteEnabled = false;  float vignetteIntensity = 0.4f;
