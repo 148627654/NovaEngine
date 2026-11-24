@@ -8,6 +8,7 @@
 #include "ShaderGraphPanel.h"
 
 #include "../EditorContext.h"
+#include "../FileDialog.h"   // 浏览按钮（原生文件选择框，2026-11-24）
 
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
@@ -224,8 +225,8 @@ void ShaderGraphPanel::onGui(EditorContext& ctx, EditorCamera&) {
     if (pathBuf.empty()) pathBuf = "assets/shadergraphs/untitled.novashadergraph";
     ImGui::SetNextItemWidth(300.0f);
     ImGui::InputText("##graphPath", &pathBuf);
-    ImGui::SameLine();
-    if (ImGui::Button("Load")) {
+    // 加载逻辑抽成 lambda：Load 按钮与浏览按钮共用（2026-11-24 用户需求补浏览）
+    const auto loadGraph = [&]() {
         m_graphPath = std::filesystem::path(pathBuf);
         if (const auto g = ShaderGraphAsset::load(m_graphPath)) {
             m_graph = *g;
@@ -246,8 +247,23 @@ void ShaderGraphPanel::onGui(EditorContext& ctx, EditorCamera&) {
                     }
                 }
             }
-        } else {
-            m_status = "加载失败: " + pathBuf + "（JSON/version 错误，详见日志）";
+            return true;
+        }
+        m_status = "加载失败: " + pathBuf + "（JSON/version 错误，详见日志）";
+        return false;
+    };
+    ImGui::SameLine();
+    if (ImGui::Button("Load")) loadGraph();
+    ImGui::SameLine();
+    // 浏览按钮（2026-11-24 用户需求）：原生文件框选 .novashadergraph，选完即加载
+    if (ImGui::SmallButton("...##sgBrowse")) {
+        std::string chosen;
+        if (browseOpenFile(chosen, "选择 Shader Graph 资产",
+                           std::string("Shader Graph (*.novashadergraph)") + '\0' +
+                               "*.novashadergraph" + '\0' + "所有文件 (*.*)" + '\0' + "*.*",
+                           "")) {
+            pathBuf = toProjectRelative(chosen);
+            loadGraph();
         }
     }
     ImGui::SameLine();
