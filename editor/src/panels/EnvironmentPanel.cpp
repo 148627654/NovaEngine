@@ -2,6 +2,7 @@
 
 #include "../DragDrop.h"
 #include "../EditorContext.h"
+#include "../FileDialog.h"   // 浏览按钮（原生文件选择框）
 
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>   // InputText(std::string*) 包装（ImGui 1.90+ 移除内建重载）
@@ -139,6 +140,23 @@ void EnvironmentPanel::onGui(EditorContext& ctx, EditorCamera&) {
         const bool lutEntered = ImGui::InputTextWithHint(
             "##lutPath", "assets/luts/xxx.cube (empty = off)", &lutPath,
             ImGuiInputTextFlags_EnterReturnsTrue);
+        // 浏览按钮（2026-11-24 用户需求）：原生文件框选 .cube——项目内取相对路径，
+        // 项目外自动拷入 assets/luts/（与拖放同规则）
+        ImGui::SameLine();
+        bool lutBrowsed = false;
+        if (ImGui::SmallButton("...##lutBrowse")) {
+            std::string chosen;
+            if (browseOpenFile(chosen, "选择 LUT 文件 (.cube)",
+                               std::string("LUT 文件 (*.cube)") + '\0' + "*.cube" + '\0' +
+                                   "所有文件 (*.*)" + '\0' + "*.*",
+                               "")) {
+                const auto rel = copyLutIntoProject(std::filesystem::path(chosen));
+                if (!rel.empty()) {
+                    lutPath = rel.generic_string();
+                    lutBrowsed = true;
+                }
+            }
+        }
         // 拖放目标：kAssetPayload（AssetBrowser 源，绝对路径）
         bool lutDropped = false;
         if (ImGui::BeginDragDropTarget()) {
@@ -156,7 +174,7 @@ void EnvironmentPanel::onGui(EditorContext& ctx, EditorCamera&) {
             }
             ImGui::EndDragDropTarget();
         }
-        if (lutDropped || lutEntered ||
+        if (lutDropped || lutEntered || lutBrowsed ||
             (ImGui::IsItemDeactivatedAfterEdit() && lutPath != pp.lutPath))
             applyLutPath(lutPath);
         if (!m_lutStatus.empty() && !pp.lutPath.empty())
@@ -213,7 +231,25 @@ void EnvironmentPanel::onGui(EditorContext& ctx, EditorCamera&) {
 
         // cubemap 路径（Enter 生效；空 = 渐变回退）
         std::string path = scene->skyCubemapPath;
-        if (ImGui::InputText("Cubemap Path", &path, ImGuiInputTextFlags_EnterReturnsTrue)) {
+        const bool skyEntered = ImGui::InputText("Cubemap Path", &path,
+                                                 ImGuiInputTextFlags_EnterReturnsTrue);
+        // 浏览按钮（2026-11-24 用户需求）：原生文件框（equirect 单文件或六面目录任一文件；
+        // 目录模式下引擎按 px/nx/py/ny/pz/nz 探测同目录六面）
+        ImGui::SameLine();
+        bool skyBrowsed = false;
+        if (ImGui::SmallButton("...##skyBrowse")) {
+            std::string chosen;
+            if (browseOpenFile(chosen, "选择天空盒文件",
+                               std::string("天空盒 (*.hdr;*.exr;*.png;*.jpg)") + '\0' +
+                                   "*.hdr;*.exr;*.png;*.jpg" + '\0' + "所有文件 (*.*)" + '\0' +
+                                   "*.*",
+                               "")) {
+                path = toProjectRelative(chosen);
+                skyBrowsed = true;
+            }
+        }
+        if (skyEntered || skyBrowsed ||
+            (ImGui::IsItemDeactivatedAfterEdit() && path != scene->skyCubemapPath)) {
             scene->skyCubemapPath = path;
             ctx.markSceneDirty();
         }

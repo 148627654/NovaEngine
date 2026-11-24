@@ -8,6 +8,7 @@
 #include "UIWidgets.h"            // UI 组件编辑（V0.3-3，Coder B 波 2 并行创建；不匹配类型 no-op）
 
 #include "../EditorContext.h"
+#include "../FileDialog.h"         // 浏览按钮（原生文件选择框，2026-11-24）
 #include "../PrefabManager.h"
 
 #include <imgui.h>
@@ -336,8 +337,25 @@ void InspectorPanel::drawMeshRenderer(EditorContext& ctx, NovaEngine::GameObject
     //（点击别处不应用也不置脏，避免「无变更却脏」）。
     std::string meshPath = mr->meshPath;
     if (!edit) ImGui::BeginDisabled();
-    if (ImGui::InputText(FieldLabel("Mesh", "mesh", overrides).c_str(), &meshPath,
-                         ImGuiInputTextFlags_EnterReturnsTrue)) {
+    const bool meshEntered = ImGui::InputText(FieldLabel("Mesh", "mesh", overrides).c_str(),
+                                              &meshPath, ImGuiInputTextFlags_EnterReturnsTrue);
+    // 浏览按钮（2026-11-24 用户需求）：原生文件框选模型（项目内取相对路径）
+    bool meshBrowsed = false;
+    if (edit) {
+        ImGui::SameLine();
+        if (ImGui::SmallButton("...##meshBrowse")) {
+            std::string chosen;
+            if (browseOpenFile(chosen, "选择模型文件",
+                               std::string("模型 (*.obj;*.fbx;*.gltf;*.glb)") + '\0' +
+                                   "*.obj;*.fbx;*.gltf;*.glb" + '\0' + "所有文件 (*.*)" + '\0' +
+                                   "*.*",
+                               "")) {
+                meshPath = toProjectRelative(chosen);
+                meshBrowsed = true;
+            }
+        }
+    }
+    if (meshEntered || meshBrowsed) {
         mr->meshPath = meshPath;
         mr->mesh = NovaEngine::AssetDatabase::instance().getMesh(meshPath);
         ctx.markSceneDirty();
@@ -366,8 +384,24 @@ void InspectorPanel::drawMeshRenderer(EditorContext& ctx, NovaEngine::GameObject
             // 局部缓冲：每次重输，Enter 才应用（与 Mesh 路径输入同模式）
             std::string assetPath;
             if (!edit) ImGui::BeginDisabled();
-            if (ImGui::InputText("Assign Material Asset", &assetPath,
-                                 ImGuiInputTextFlags_EnterReturnsTrue)) {
+            const bool assetEntered = ImGui::InputText("Assign Material Asset", &assetPath,
+                                                       ImGuiInputTextFlags_EnterReturnsTrue);
+            // 浏览按钮（2026-11-24 用户需求）：原生文件框选 .novamat
+            bool assetBrowsed = false;
+            if (edit) {
+                ImGui::SameLine();
+                if (ImGui::SmallButton("...##matBrowse")) {
+                    std::string chosen;
+                    if (browseOpenFile(chosen, "选择材质资产",
+                                       std::string("材质资产 (*.novamat)") + '\0' + "*.novamat" +
+                                           '\0' + "所有文件 (*.*)" + '\0' + "*.*",
+                                       "")) {
+                        assetPath = toProjectRelative(chosen);
+                        assetBrowsed = true;
+                    }
+                }
+            }
+            if (assetEntered || assetBrowsed) {
                 if (assetPath.empty()) {
                     NovaEngine::Logger::warn("材质资产路径为空，未赋值");
                 } else {
@@ -582,7 +616,23 @@ void InspectorPanel::drawSpriteRenderer(EditorContext& ctx, NovaEngine::GameObje
 
     // 路径变更同步刷新运行时贴图（渲染收集只读 sr->texture 成员，§25.8 合波接缝）
     std::string path = sr->texturePath;
-    if (ImGui::InputText("Texture", &path, ImGuiInputTextFlags_EnterReturnsTrue)) {
+    const bool texEntered = ImGui::InputText("Texture", &path,
+                                             ImGuiInputTextFlags_EnterReturnsTrue);
+    // 浏览按钮（2026-11-24 用户需求）：原生文件框选贴图（项目内取相对路径）
+    ImGui::SameLine();
+    bool texBrowsed = false;
+    if (ImGui::SmallButton("...##texBrowse")) {
+        std::string chosen;
+        if (browseOpenFile(chosen, "选择贴图文件",
+                           std::string("贴图 (*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.hdr)") + '\0' +
+                               "*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.hdr" + '\0' + "所有文件 (*.*)" +
+                               '\0' + "*.*",
+                           "")) {
+            path = toProjectRelative(chosen);
+            texBrowsed = true;
+        }
+    }
+    if (texEntered || texBrowsed) {
         sr->texturePath = path;
         sr->texture = path.empty() ? nullptr
                                    : NovaEngine::AssetDatabase::instance().getTexture(path);
@@ -949,8 +999,22 @@ void InspectorPanel::drawMultiMaterial(EditorContext& ctx,
         } else {
             std::string assetPath;
             if (!edit) ImGui::BeginDisabled();
-            if (ImGui::InputText("Assign Material Asset", &assetPath,
-                                 ImGuiInputTextFlags_EnterReturnsTrue)) {
+            const bool assetEntered = ImGui::InputText("Assign Material Asset", &assetPath,
+                                                       ImGuiInputTextFlags_EnterReturnsTrue);
+            // 浏览按钮（2026-11-24 用户需求）：原生文件框选 .novamat
+            bool assetBrowsed = false;
+            ImGui::SameLine();
+            if (ImGui::SmallButton("...##matBrowse")) {
+                std::string chosen;
+                if (browseOpenFile(chosen, "选择材质资产",
+                                   std::string("材质资产 (*.novamat)") + '\0' + "*.novamat" +
+                                       '\0' + "所有文件 (*.*)" + '\0' + "*.*",
+                                   "")) {
+                    assetPath = toProjectRelative(chosen);
+                    assetBrowsed = true;
+                }
+            }
+            if (assetEntered || assetBrowsed) {
                 if (assetPath.empty()) {
                     NovaEngine::Logger::warn("材质资产路径为空，未赋值");
                 } else {
