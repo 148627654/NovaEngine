@@ -39,12 +39,20 @@ void CharacterWalk::onUpdate(float dt) {
     }
 
     // 垂直速度保留物理积分值（重力/落地清空由 PhysicsWorld 处理）；
-    // 只有按下跳跃且着地时才注入起跳初速（单帧注入，下一固定步消费）
+    // 只有按下跳跃且着地时才注入起跳初速。起跳锁存（波 3 #10 修复）：高帧率下
+    // 边沿帧注入的跳跃会被下一渲染帧的 setVelocity 覆盖吞掉（vel.y 从物理读回
+    // 仍是起跳前值）——移动中每帧覆盖，「跑+跳」必吞跳。锁存到离地为止：
+    // 连续注入起跳速度，物理固定步消费后 isGrounded=false → 解锁交还物理积分。
     glm::vec3 vel = cc->velocity();
     vel.x = h * m_speed;    // A/D → 世界 X 轴
     vel.z = -v * m_speed;   // W/S → 世界 -Z（相机在 +Z 一侧取景，前进 = 走向楼梯）
     if (NovaEngine::InputMap::getActionDown("Jump") && cc->isGrounded())
+        m_jumpLatched = true;
+    if (m_jumpLatched) {
         vel.y = m_jumpSpeed;
+        if (!cc->isGrounded())
+            m_jumpLatched = false;   // 已离地：垂直速度交还物理（重力/落地清空）
+    }
     cc->setVelocity(vel);   // 每帧覆盖（pending override，PhysicsWorld 固定步消费）
 }
 

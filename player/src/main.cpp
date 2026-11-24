@@ -128,6 +128,11 @@ int main(int argc, char** argv) {
 
     // 1. 窗口（先于 Renderer::init：GL 上下文）
     auto window = Window::create(NOVA_PRODUCT, args.width, args.height);
+    // 波 3 #10：示例游戏按 1280×720 设计基准布局——固定窗口尺寸，规避最大化后
+    // GLFW_SCALE_TO_MONITOR 下鼠标坐标 × fb/win 双重换算导致的 UI 命中错位
+    //（KNOWN-ISSUES 备案，波 3 #12 编辑器细节统一修复 resize/DPI 映射）
+    if (window)
+        glfwSetWindowAttrib(window->nativeHandle(), GLFW_RESIZABLE, GLFW_FALSE);
     if (!window) {
         Logger::error("[NovaPlayer] 窗口创建失败（GLFW 初始化错误）");
         return 1;

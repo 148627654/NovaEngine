@@ -19,6 +19,7 @@ public:
 
 private:
     float m_logAccum = 0.0f;   // 输入日志限频累积（运行时状态，不序列化）
+    bool m_jumpLatched = false;  // 起跳锁存（波 3 #10 修复高帧率吞跳；运行时状态，不序列化）
 };
 
 }  // namespace NovaGame
