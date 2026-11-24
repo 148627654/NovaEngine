@@ -591,6 +591,10 @@ void EditorApplication::showMainMenu() {
         //（三个面板同时出现在 View 自动列表与底部 dock Tab，菜单为显式打开入口）
         if (ImGui::BeginMenu("Window")) {
             if (ImGui::MenuItem("Profiler")) openPanelByName("Profiler");
+            // V1.0 波 2 面板入口（2026-11-24 用户反馈补：面板存在但关闭后无入口可再打开——
+            // 合波日 dock 接线漏了 Window 菜单项）
+            if (ImGui::MenuItem("Shader Graph")) openPanelByName("Shader Graph");
+            if (ImGui::MenuItem("Physics Layers")) openPanelByName("Physics Layers");
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Assets")) {
