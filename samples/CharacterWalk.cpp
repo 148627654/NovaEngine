@@ -44,15 +44,40 @@ void CharacterWalk::onUpdate(float dt) {
     // 仍是起跳前值）——移动中每帧覆盖，「跑+跳」必吞跳。锁存到离地为止：
     // 连续注入起跳速度，物理固定步消费后 isGrounded=false → 解锁交还物理积分。
     glm::vec3 vel = cc->velocity();
-    vel.x = h * m_speed;    // A/D → 世界 X 轴
-    vel.z = -v * m_speed;   // W/S → 世界 -Z（相机在 +Z 一侧取景，前进 = 走向楼梯）
-    if (NovaEngine::InputMap::getActionDown("Jump") && cc->isGrounded())
+    const bool grounded = cc->isGrounded();
+    if (grounded)
+        m_jumpCount = 0;    // 着地：跳跃次数重置（二段跳）
+
+    // ===== V1.1 二段跳：着地跳（1）+ 空中跳（2）=====
+    if (NovaEngine::InputMap::getActionDown("Jump") &&
+        (grounded || m_jumpCount < 2)) {
         m_jumpLatched = true;
+        m_jumpCount = grounded ? 1 : 2;
+    }
     if (m_jumpLatched) {
         vel.y = m_jumpSpeed;
-        if (!cc->isGrounded())
-            m_jumpLatched = false;   // 已离地：垂直速度交还物理（重力/落地清空）
+        // 解锁条件：物理已消费起跳（读回上跳速度）或超时兜底——二段跳发生在空中，
+        // 不能用「离地」做解锁（会赶在物理消费前释放，重蹈吞跳竞态）
+        m_jumpLatchTime += dt;
+        if (cc->velocity().y > m_jumpSpeed * 0.5f || m_jumpLatchTime > 0.4f)
+            m_jumpLatched = false;
+    } else {
+        m_jumpLatchTime = 0.0f;
     }
+
+    // ===== V1.1 Dash 冲刺：Shift 边沿触发，0.25s 内水平速度 ×2.5，冷却 2s =====
+    if (m_dashCooldown > 0.0f)
+        m_dashCooldown -= dt;
+    if (m_dashTime > 0.0f)
+        m_dashTime -= dt;
+    if (NovaEngine::InputMap::getActionDown("Dash") && m_dashCooldown <= 0.0f) {
+        m_dashTime = 0.25f;
+        m_dashCooldown = 2.0f;
+    }
+    const float speedScale = m_dashTime > 0.0f ? 2.5f : 1.0f;
+
+    vel.x = h * m_speed * speedScale;    // A/D → 世界 X 轴
+    vel.z = -v * m_speed * speedScale;   // W/S → 世界 -Z（相机在 +Z 一侧取景，前进 = 走向楼梯）
     cc->setVelocity(vel);   // 每帧覆盖（pending override，PhysicsWorld 固定步消费）
 }
 

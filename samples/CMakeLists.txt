@@ -26,6 +26,7 @@ set(NOVA_GAME_SOURCES
     NovaSampleGame/NeonCollectible.cpp      # 示例游戏：能量球（摆动自转 + 距离轮询拾取）
     NovaSampleGame/NeonGate.cpp             # 示例游戏：终点传送门（激活序列 + 胜利区判定）
     NovaSampleGame/NeonPlayerWatcher.cpp    # 示例游戏：玩家看守（掉落复活 + 跳跃音效）
+    NovaSampleGame/NeonCameraShake.cpp      # V1.1：收集镜头震动（挂 Main Camera）
 )
 
 if(NOVA_SCRIPTS_DLL)

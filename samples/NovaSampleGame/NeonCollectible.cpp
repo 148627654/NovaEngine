@@ -46,18 +46,17 @@ void NeonCollectible::onUpdate(float dt) {
         >= m_pickupRadius * m_pickupRadius)
         return;
 
-    // ===== 命中（§28.3.6 拾取流程）：Burst 粒子 → sfx → 计数 → 隐藏 =====
+    // ===== 命中（§28.3.6 拾取流程 + V1.1）：Burst + Shockwave 粒子 → 计数（音效由
+    // manager.notifyCollected 统一播放，连击音高变体）→ 隐藏 =====
     for (const auto& childPtr : gameObject()->children()) {
         NovaEngine::GameObject* child = childPtr.get();
-        if (child->name() == "Burst") {
+        if (child->name() == "Burst" || child->name() == "Shockwave") {
             if (auto* ps = child->getComponent<NovaEngine::ParticleSystem>())
                 ps->play();
         }
     }
-    if (auto* mgr = NeonGameManager::instance()) {
-        mgr->playSfx("assets/audio/sfx_pickup.wav", 1.0f);
+    if (auto* mgr = NeonGameManager::instance())
         mgr->notifyCollected();
-    }
     NovaEngine::Logger::info("NeonCollectible: 能量球被拾取 @ ({:.2f},{:.2f},{:.2f})",
                              pos.x, pos.y, pos.z);
     m_collected = true;

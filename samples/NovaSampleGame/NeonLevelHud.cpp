@@ -27,7 +27,9 @@ void NeonLevelHud::onStart() {
     m_countText = cache("CountText");
     m_timerText = cache("TimerText");
     m_hintText = cache("HintText");
+    m_comboText = cache("ComboText");   // V1.1 连击显示
     m_victoryRoot = cache("VictoryRoot");
+    m_winTitle = cache("WinTitle");     // V1.1 评级
     m_winTime = cache("WinTime");
     m_winBest = cache("WinBest");
 
@@ -78,6 +80,17 @@ void NeonLevelHud::onUpdate(float /*dt*/) {
         if (auto* txt = m_timerText->getComponent<NovaEngine::Text>())
             txt->text = std::format("时间 {:.1f} 秒", mgr->elapsedTime());
     }
+    // ===== V1.1 Combo：连击 ≥2 显示，窗口结束/胜利清空 =====
+    if (m_comboText) {
+        if (auto* txt = m_comboText->getComponent<NovaEngine::Text>()) {
+            const int combo = mgr->combo();
+            const std::string s = (!mgr->won() && combo >= 2)
+                                      ? std::format("连击 x{}!", combo)
+                                      : std::string();
+            if (txt->text != s)
+                txt->text = s;
+        }
+    }
     // 提示文案：激活后切换（只在变化时重赋，避免每帧字符串分配）
     const std::string hint = mgr->gateActive() && !mgr->won()
                                  ? "传送门已激活!冲进传送门!"
@@ -93,6 +106,15 @@ void NeonLevelHud::onUpdate(float /*dt*/) {
         m_victoryShown = true;
         if (m_victoryRoot)
             m_victoryRoot->setActiveSelf(true);
+        // ===== V1.1 评级：标题「通关! 评级 S」+ 评级配色 =====
+        if (m_winTitle) {
+            if (auto* txt = m_winTitle->getComponent<NovaEngine::Text>()) {
+                if (mgr->rankName()[0] != '\0') {
+                    txt->text = std::format("通关! 评级 {}", mgr->rankName());
+                    txt->color = mgr->rankColor();
+                }
+            }
+        }
         if (m_winTime) {
             if (auto* txt = m_winTime->getComponent<NovaEngine::Text>())
                 txt->text = std::format("用时 {:.1f} 秒", mgr->elapsedTime());

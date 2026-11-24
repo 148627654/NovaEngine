@@ -23,7 +23,9 @@ private:
     NovaEngine::GameObject* m_countText = nullptr;
     NovaEngine::GameObject* m_timerText = nullptr;
     NovaEngine::GameObject* m_hintText = nullptr;
+    NovaEngine::GameObject* m_comboText = nullptr;   // V1.1 连击显示
     NovaEngine::GameObject* m_victoryRoot = nullptr;
+    NovaEngine::GameObject* m_winTitle = nullptr;    // V1.1 评级标题
     NovaEngine::GameObject* m_winTime = nullptr;
     NovaEngine::GameObject* m_winBest = nullptr;
 

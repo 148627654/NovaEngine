@@ -2,10 +2,14 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
+#include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
 #include <NovaEngine/Scripting/Behaviour.h>
 
 namespace NovaEngine {
 class AudioClip;
+class MeshRenderer;
 }
 
 namespace NovaGame {
@@ -36,6 +40,10 @@ public:
     bool won() const { return m_won; }
     float elapsedTime() const;   // 秒：进行中 = 实时，胜利后 = 结算用时
     float bestTime() const { return m_bestTime; }   // min(旧最佳, 本次)
+    // ===== V1.1 连击与评级 =====
+    int combo() const { return m_combo; }
+    const char* rankName() const { return m_rankName; }   // "S"/"A"/"B"/"C"/""
+    const glm::vec4& rankColor() const { return m_rankColor; }
 
 private:
     static NeonGameManager* s_instance;
@@ -51,7 +59,17 @@ private:
     float m_bestTime = 0.0f;    // 结算后的最佳纪录
     std::unordered_map<std::string, std::shared_ptr<NovaEngine::AudioClip>> m_sfxCache;   // SFX 加载缓存
 
+    // ===== V1.1 连击/评级/维度渐亮状态（运行时，不序列化）=====
+    int m_combo = 0;                  // 当前连击数
+    float m_comboTimer = 0.0f;        // 连击窗口剩余（秒）
+    const char* m_rankName = "";      // 通关评级 S/A/B/C
+    glm::vec4 m_rankColor{1.0f, 0.85f, 0.3f, 1.0f};
+    std::vector<NovaEngine::MeshRenderer*> m_strips;   // 路线灯带（收集后逐条点亮）
+    glm::vec3 m_baseAmbient{0.0f}, m_baseFog{0.0f};    // 维度渐亮基准（onStart 快照）
+    bool m_envSnapped = false;
+
     void stopBgm();             // 当前场景 "BGM" AudioSource → Stop()（fadeOutSeconds 生效，防爆音）
+    void updateDimensionLight(float dt);   // V1.1 维度突破：环境随收集渐亮 + 灯带点亮
 };
 
 }  // namespace NovaGame

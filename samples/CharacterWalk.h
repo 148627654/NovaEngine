@@ -20,6 +20,11 @@ public:
 private:
     float m_logAccum = 0.0f;   // 输入日志限频累积（运行时状态，不序列化）
     bool m_jumpLatched = false;  // 起跳锁存（波 3 #10 修复高帧率吞跳；运行时状态，不序列化）
+    float m_jumpLatchTime = 0.0f;  // 锁存计时（超时兜底解锁）
+    // ===== V1.1 动作系统（运行时状态，不序列化）=====
+    int m_jumpCount = 0;         // 已用跳跃数（着地重置；二段跳上限 2）
+    float m_dashTime = 0.0f;     // 冲刺剩余时间（秒）
+    float m_dashCooldown = 0.0f; // 冲刺冷却剩余（秒）
 };
 
 }  // namespace NovaGame

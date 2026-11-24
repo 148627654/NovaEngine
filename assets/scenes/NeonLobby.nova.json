@@ -312,6 +312,12 @@
           "orthoSize": 5.0,
           "projectionMode": "Perspective",
           "type": "Camera"
+        },
+        {
+          "enabled": true,
+          "intensity": 0.08,
+          "duration": 0.25,
+          "type": "NeonCameraShake"
         }
       ],
       "id": 7100000000000000003,
@@ -1755,6 +1761,61 @@
       "id": 7100000000000000033,
       "name": "TitleHalo",
       "parent": 0
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            -0.6,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "billboard": true,
+          "blendAdditive": true,
+          "emissionRate": 40.0,
+          "endColor": [
+            0.2,
+            1.0,
+            0.9,
+            0.0
+          ],
+          "endSize": 0.02,
+          "gravity": 0.0,
+          "initialSpeed": 1.5,
+          "lifetime": 0.35,
+          "loop": false,
+          "maxParticles": 60,
+          "playOnAwake": false,
+          "startColor": [
+            0.2,
+            1.0,
+            0.9,
+            0.8
+          ],
+          "startSize": 0.25,
+          "tileX": 1,
+          "tileY": 1,
+          "type": "ParticleSystem"
+        }
+      ],
+      "id": 7110000000000000086,
+      "name": "DashTrail",
+      "parent": 7100000000000000001
     }
   ],
   "version": 4
