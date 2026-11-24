@@ -3639,6 +3639,238 @@ static bool buildRelease(const std::filesystem::path& outputDir);
 
 **风险：中。回滚**：纯内容资产 + samples 脚本，删目录即回滚。**审重点**：脚本不得绕过引擎公开 API（grep 引擎私有头引用）；场景 schema 用 v4 标准形态（不得手写未来字段）。
 
+## 28.3 落地设计（2026-11-24，GameDesigner）
+
+> 《霓虹收集者》完整落地设计。Scripter/Levels 两 agent 按本节无歧义照做，禁止自行发挥。事实依据（2026-11-24 通读）：§28.3 契约、V10CharacterDemo/V10MultiSceneDemo/V10AdditiveLevel/V05Wave2Demo.nova.json、v10demo.novashadergraph、ShaderGraphAsset.h/.cpp（kSpecs 全表）、CharacterWalk.h、SceneManager.h、AudioEngine.h/AudioClip.h/AudioSource.cpp、Canvas/Text/Button/Image.h + V05UITest 序列化、Scene.h/PostProcess.h、SceneSerializer.cpp（**schema version 4 权威**）、ParticleSystem.h、SaveGame.h、player/src/main.cpp、samples/CMakeLists.txt。
+
+### 28.3.1 游戏定位与目标体验
+
+- **游戏名**：《霓虹收集者》（Neon Collector）。一句话：暗色霓虹虚空里跑跳收集 10 颗能量球，集满激活终点传送门，挑战最快通关时间的 3D 收集闯关。
+- **大厅体验**：暗色霓虹大厅，标题 + 开始按钮 + 操作说明逐字可读，可自由走动看装饰，显示最佳纪录，一键进关。
+- **关卡体验**：单条主路线约 48m，13 平台 + 3 台阶 + 10 颗能量球（拾取半径 1.8m，站立即可及全部 10 球；路线含 2 处 1.2m 跳跃平台与 1 处 0.3m 步进台阶）；掉落自动复活不惩罚计数；首次通关目标 3–5 分钟。
+- **闭环**：大厅 →（setSceneParam 传参）→ 关卡 → 集满激活传送门 → 结算（计时 + 最佳纪录存档）→ 再玩 / 回大厅（结果回传 + 显示）。
+- **第 2 关预留**：仅保留 `level.index==2` 扩展位（场景参数协议内预留），本波不建资产。
+
+### 28.3.2 全局设计裁定（含取舍理由）
+
+1. **场景 schema 一律 v4**（SceneSerializer 写 `"version": 4`；V10 两个 demo 仍是 v3 旧文件，**V05Wave2Demo.nova.json 是 v4 权威模板**）：新场景用 `builtin:cube/sphere/plane` 网格、完整材质字段（alpha/blendMode/emissionColor/emissionIntensity/emissionMap/metallicMap/normalMap/roughnessMap）、environment.postProcess 九键。**不手写未来字段；environment.physics 段不写**（读时缺省 = 全通矩阵，零风险）。
+2. **阴影 bug 规避**：两场景 DirectionalLight 一律 `castShadows:false`；霓虹氛围靠自发光 + bloom + 粒子，不依赖阴影。
+3. **光照事实**：引擎只有 DirectionalLight（无点光/聚光）→ 暗环境 = 低 ambientColor + 低强度冷色平行光 + 大量 emission 材质。
+4. **相机**：Camera 无跟随逻辑 → 沿用 V10CharacterDemo 方案：相机挂 Player 子节点 local (0, 2.5, 5.0)、绕 X -0.1271 rad 俯视。
+5. **不用 Terrain**（需 16bit 高度图 PNG 资产，且地貌风格与霓虹虚空美学不符）——§28.3 功能清单为「设计稿需覆盖」，本设计裁定跳过并记录理由；**不开 IBL/天空盒**（无 HDR cubemap 时 iblIntensity 无意义；test_ibl.hdr 是验收资产不进游戏），skyMode=Gradient 暗色渐变。功能清单其余项全部落地：多场景、CharacterController、色彩分级（LUT）、粒子、音频总线（BGM 流式 + SFX）、运行时 UI、存档（最佳纪录）。
+6. **拾取判定**：触发器无脚本回调 → 能量球脚本每帧对玩家世界坐标做 3D 距离轮询，半径 1.8m。
+7. **脚本通信**：无事件总线 → NeonGameManager 静态单例注册表 + 每帧状态轮询；场景切换感知可用 `subscribeEvent<SceneLoaded>`。
+8. **基准分辨率 1280×720**（Player 默认窗口，player/src/main.cpp 证实）；UI 按此逻辑像素布局，胜利遮罩 Image size (1280,720) 正好全屏。
+9. **存档语义**：`SaveGame::load` 会原地重建场景（不适合大厅读档）→ 大厅显示最佳纪录走 **`listSlots()` 只读元数据**（slot 0 的 playTimeSeconds）；`SaveGame::save` 只在通关时写 slot 0（scenePath 传关卡路径、playTimeSeconds 传用时）。存/读闭环完整且无场景重建风险。
+10. **build.novabuild**：新增 NeonLobby/NeonLevel1 两条目，**NeonLobby 置顶**——Player 无 --scene 时默认 = build.novabuild 第一项（player/src/main.cpp 证实），满足「双击通关」。
+11. **音频总线**：BGM 走 Music 总线（AudioSource `stream:true` 流式），SFX 走脚本 `AudioEngine::play`（spatialBlend=0）；wav 由主会话合成（清单见 §28.3.9）。
+12. **场景切换防爆音**：切场景前对 BGM AudioSource 调 `Stop()`（fadeOutSeconds 0.5），协程 `WaitForSeconds(0.5)` 后 `loadSceneAsync(name, false)`。
+
+### 28.3.3 新增资产文件清单（定稿）
+
+| 路径 | 说明 | 产出方 |
+|---|---|---|
+| assets/scenes/NeonLobby.nova.json | 大厅场景（v4） | Levels |
+| assets/scenes/NeonLevel1.nova.json | 关卡 1 场景（v4） | Levels |
+| assets/shadergraphs/neon_cyan.novashadergraph | 青色霓虹自发光图 | Levels |
+| assets/shadergraphs/neon_magenta.novashadergraph | 品红霓虹图（门激活态） | Levels |
+| assets/shadergraphs/neon_orange.novashadergraph | 橙色霓虹图（装饰） | Levels |
+| assets/audio/bgm_lobby.wav | 大厅 BGM（流式循环） | 主会话合成 |
+| assets/audio/bgm_level1.wav | 关卡 BGM（流式循环） | 主会话合成 |
+| assets/audio/sfx_pickup.wav / sfx_gate_open.wav / sfx_win.wav / sfx_ui_click.wav / sfx_jump.wav / sfx_fall.wav | 6 个短音效 | 主会话合成 |
+| samples/NovaSampleGame/NeonGameManager.h/.cpp | 全局单例：状态/场景切换/音效/存档 | Scripter |
+| samples/NovaSampleGame/NeonLobbyUI.h/.cpp | 大厅 UI 接线 | Scripter |
+| samples/NovaSampleGame/NeonLevelHud.h/.cpp | 关卡 HUD/计时/结算 UI | Scripter |
+| samples/NovaSampleGame/NeonCollectible.h/.cpp | 能量球 | Scripter |
+| samples/NovaSampleGame/NeonGate.h/.cpp | 终点传送门 | Scripter |
+| samples/NovaSampleGame/NeonPlayerWatcher.h/.cpp | 掉落复活 + 跳跃音效 | Scripter |
+| assets/build.novabuild | 修改：NeonLobby 置顶 + 两条目 | Levels |
+| samples/CMakeLists.txt | 修改：NOVA_GAME_SOURCES 追加 6 个 .cpp | Scripter |
+
+脚本命名空间一律 `NovaGame`；类 PascalCase、成员 m_ 前缀、注释中文；`NE_REGISTER_SCRIPT` 注册。资产总增量仅小 JSON + 8 个短音频（<<200MB 红线）。**场景对象 id 约定**：大厅 `710000000000000000N`、关卡 `711000000000000000N`（场景内唯一即可；child 的 parent 引用父 id；编辑器生成 id 亦可，但坐标/尺寸必须按本节表）。
+
+### 28.3.4 公共约定：玩家预制件 / 通用材质 / 环境
+
+**玩家（两场景同款，复制 V10CharacterDemo 层级）**：
+- root "Player" @ spawn：Transform + CharacterController{radius 0.4, height 1.8, stepHeight 0.35, slopeLimitDeg 45.0, mass 70.0, gravityScale 1.0} + CharacterWalk{enabled true, speed 4.0, jumpSpeed 6.0} + NeonPlayerWatcher。
+- child "Visual"：builtin:sphere scale (0.8,1.8,0.8)，材质 albedo (0.10,0.85,0.95)、emissionColor (0.05,0.45,0.55)、emissionIntensity 1.5、metallic 0.1、roughness 0.4。
+- child "Main Camera"：local (0,2.5,5.0)、rotX -0.1271、fov 60、isMain true、clearColor (0.02,0.03,0.08,1)。
+- 玩家 root Transform 位置 = 胶囊中心（站平台顶 y=T 时中心 = T+0.9），生成点即胶囊中心坐标。
+
+**平台通用材质**（全部平台/台阶）：albedo (0.06,0.07,0.10)、metallic 0.6、roughness 0.45、emissionColor (0,0,0)、emissionIntensity 1.0、blendMode Opaque、无贴图。
+
+**通用环境（两场景相同骨架）**：skyMode Gradient、skyZenith (0.02,0.03,0.08)、skyHorizon (0.06,0.08,0.16)、skyColor (0.03,0.04,0.09)、ambientColor (0.08,0.09,0.13)、fogColor (0.02,0.03,0.06)、showGrid false、skyExposure 1.0、iblIntensity 0.0。postProcess：enabled true、bloomThreshold 0.8、bloomIntensity 0.6、bloomLevels 3、exposure 1.0、ssaoEnabled true、ssaoRadius 0.5、ssaoStrength 0.8、ssaoSampleCount 16、lutPath "assets/luts/cool.cube"、lutIntensity 大厅 0.8 / 关卡 0.85、dofEnabled false（平台跳跃需要景深清晰，不开 DOF）、vignetteEnabled true、vignetteIntensity 0.35、grainEnabled true、grainAmount 0.02。DirectionalLight "Sun"：castShadows **false**、color (0.75,0.85,1.0)、intensity 0.5、pos (0,6,0)、旋转沿用 V05 模板（俯角四元数）。
+
+### 28.3.5 场景一：大厅 NeonLobby
+
+**对象清单**（除玩家外）：
+1. "Ground"：builtin:plane @ (0,-0.5,0) scale (60,1,60) + BoxCollider；albedo (0.03,0.04,0.07)、metallic 0.0、roughness 0.95。
+2. "Player" @ (0,0.9,2)（§28.3.4 预制件；Watcher 出生点 = 此坐标）。
+3. "TitlePedestal"：builtin:cube @ (0,1.0,-8) scale (3,2,3) + BoxCollider；平台通用材质。
+4. "TitleOrb"：builtin:sphere @ (0,3.0,-8) scale 1.1；材质 shaderGraphPath "assets/shadergraphs/neon_cyan.novashadergraph"（albedo 兜底 (0.05,0.95,1.0)、roughness 0.3）；挂 SpinningCube{speed 45}。
+5. "FlankLeft"：builtin:cube @ (-2.5,3.0,-8) scale 0.45；shaderGraphPath neon_magenta；SpinningCube{speed 60}。**"FlankRight"**：@ (2.5,3.0,-8)，neon_orange，SpinningCube{speed 60}。
+6. 围栏灯柱 ×12（装饰，**无碰撞体**）：半径 10 圆周（x,z）= (10,0),(8.7,5),(5,8.7),(0,10),(-5,8.7),(-8.7,5),(-10,0),(-8.7,-5),(-5,-8.7),(0,-10),(5,-8.7),(8.7,-5)；各 builtin:cube @ (x,1.5,z) scale (0.3,3,0.3)；偶数序 albedo (0.05,0.05,0.08) + emissionColor (0.05,0.8,0.9) + emissionIntensity 3.0，奇数序 emissionColor (0.9,0.05,0.75)；metallic 0.3、roughness 0.5。
+7. "BGM"：AudioSource{clipPath "assets/audio/bgm_lobby.wav", volume 0.8, loop true, spatialBlend 0.0, minDistance 1.0, maxDistance 50.0, playOnAwake true, bus 1, stream true, fadeInSeconds 1.5, fadeOutSeconds 0.5}。
+8. "Game" @ (0,0,0)：NeonGameManager + NeonLobbyUI（两脚本 enabled true）。
+9. "Canvas" + UI 子对象（全部 parent=Canvas，Canvas 挂 Canvas 组件 uiScale 1.0）：
+
+| 对象名 | 组件与字段（JSON 键名照抄 V05UITest） |
+|---|---|
+| TitleText | Text{text "霓虹收集者", fontSize 64, color (0.60,0.95,1.0,1), anchor (0.5,0.5), offset (0,-160)} |
+| SubText | Text{text "NEON COLLECTOR", fontSize 28, color (1.0,0.4,0.95,1), anchor (0.5,0.5), offset (0,-104)} |
+| StartBtn | Button{color (0.10,0.70,0.90,1), hoverColor (0.15,0.80,1.0,1), pressedColor (0.05,0.50,0.70,1), anchor (0.5,0.5), offset (0,20), size (240,64)}；子对象 StartBtnLabel：Text{text "开始游戏", fontSize 32, color (1,1,1,1), anchor (0.5,0.5), offset (0,0)} |
+| BestTimeText | Text{text "最佳纪录:暂无", fontSize 24, color (1.0,0.85,0.30,1), anchor (0.5,0.5), offset (0,85)} |
+| LastRunText | Text{text "上次通关:--", fontSize 20, color (0.8,0.85,0.9,1), anchor (0.5,0.5), offset (0,115)}，**active false**（回传参数后显示） |
+| HelpText | Text{text "操作说明\nW A S D 移动 · 空格 跳跃\n收集全部 10 颗能量球,激活终点传送门\n掉出平台会自动回到起点", fontSize 20, color (0.75,0.80,0.90,1), anchor (0.5,0.5), offset (0,150), wrap true, wrapWidth 600, hAlign "Center"} |
+| FooterText | Text{text "NovaEngine V1.0 · 示例游戏", fontSize 16, color (0.50,0.55,0.65,1), anchor (0.5,1.0), offset (0,-26)} |
+
+**大厅逻辑（NeonLobbyUI）**：onStart 找 StartBtn 赋 onClick（sfx_ui_click + `setSceneParam("level", R"({"index":1,"orbTotal":10})")` + manager.switchScene("NeonLevel1")）；读最佳纪录：`SaveGame::listSlots()` slot 0 valid → BestTimeText = `"最佳纪录:%.1f 秒"`，否则保持「最佳纪录:暂无」；读 `getSceneParam("lastResult")`（JSON 含 win/time）→ win=true 时 LastRunText = `"上次通关:%.1f 秒"` 并 setActiveSelf(true)。
+
+### 28.3.6 场景二：关卡 NeonLevel1（JSON 级坐标）
+
+**路线**：出生 (0,0.9,10) 沿 -Z 前进，终点传送门 z=-32。全部平台/台阶 = builtin:cube + BoxCollider + 平台通用材质；坐标 = 中心点，scale = 全尺寸（BoxCollider 的 center/halfExtents 用默认 (0,0,0)/(0.5,0.5,0.5)，与 V10/V05 模板一致）。
+
+**平台表**（顶面高度 = center.y + scale.y/2；间距 = 相邻台边缘水平距离，全部 ≤1.5m）：
+
+| # | 名称 | center (x,y,z) | scale (x,y,z) | 顶面 y | 与前一台边缘关系 |
+|---|---|---|---|---|---|
+| 1 | StartPad | (0,-0.3,10.0) | (8,0.6,6) | 0.0 | 出生点 |
+| 2 | PadA2 | (0,-0.3,3.5) | (6,0.6,4) | 0.0 | 水平 1.5m |
+| 3 | StepA1 | (0,0.0,0.8) | (3,0.6,0.8) | 0.3 | 0.3m，抬 0.3（步进演示 1/3） |
+| 4 | StepA2 | (0,0.3,0.2) | (3,0.6,0.8) | 0.6 | 贴邻，抬 0.3 |
+| 5 | StepA3 | (0,0.6,-0.4) | (3,0.6,0.8) | 0.9 | 贴邻，抬 0.3 |
+| 6 | PadA4 | (0,0.6,-3.0) | (4,0.6,4) | 0.9 | 水平 1.0m |
+| 7 | PadB1 | (3,-0.3,-7.0) | (4,0.6,4) | 0.0 | 侧移（x 重叠 1m），降 0.9 |
+| 8 | PadB2 | (-2,-0.3,-10.5) | (3.5,0.6,3.5) | 0.0 | 横向 1.25m |
+| 9 | PadB3 | (-2,0.9,-14.5) | (3.5,0.6,3.5) | 1.2 | 0.5m，抬 1.2（跳） |
+| 10 | PadB4 | (-2,-0.3,-18.0) | (4,0.6,4) | 0.0 | 0.25m，降 1.2 |
+| 11 | PadC1 | (-1,-0.3,-22.5) | (5,0.6,4) | 0.0 | 0.5m |
+| 12 | PadC2 | (0,0.9,-27.0) | (4,0.6,4) | 1.2 | 0.5m，抬 1.2（跳） |
+| 13 | GatePad | (0,1.2,-32.0) | (6,0.6,5) | 1.5 | 0.5m，抬 0.3（步进可上） |
+
+**能量球表**（10 颗；球 GO = builtin:sphere scale 0.3（直径 0.6m）+ NeonCollectible；材质 shaderGraphPath neon_cyan、albedo 兜底 (0.05,0.95,1.0)、roughness 0.3；每球含子对象 "Burst"：ParticleSystem{playOnAwake false, loop false, emissionRate 80, lifetime 0.5, initialSpeed 2.0, gravity 0.3, startColor (0.25,1.0,1.0,1.0), endColor (0.25,1.0,1.0,0.0), startSize 0.3, endSize 0.05, maxParticles 60, blendAdditive true, tileX 1, tileY 1}）：
+
+| 球 | 位置 (x,y,z) | 所在平台（顶面） | 拾取方式 |
+|---|---|---|---|
+| O1 | (0,1.5,10.0) | StartPad 0.0 | 步行（教学球） |
+| O2 | (0,1.5,3.5) | PadA2 0.0 | 步行 |
+| O3 | (0,2.4,-3.0) | PadA4 0.9 | 步行 |
+| O4 | (3,1.5,-7.0) | PadB1 0.0 | 步行 |
+| O5 | (-2,1.5,-10.5) | PadB2 0.0 | 步行 |
+| O6 | (-2,2.7,-14.5) | PadB3 1.2 | 步行（所在台需跳上） |
+| O7 | (-2,1.5,-18.0) | PadB4 0.0 | 步行 |
+| O8 | (-1,1.5,-22.5) | PadC1 0.0 | 步行 |
+| O9 | (0,2.7,-27.0) | PadC2 1.2 | 步行（所在台需跳上） |
+| O10 | (0,3.0,-32.0) | GatePad 1.5 | 步行 |
+
+球 y = 台顶 + 1.5；拾取判定 = 玩家世界位置到球心 3D 距离 < **1.8m**（站上平台后 10 球全部步行可及；跳跃只出现在路线上——2 处 1.2m 抬升 ≤ 跳跃顶点 1.84m，余量充足）。球脚本每帧上浮摆动（C++ `sin` 可用）：y = 基础 y + sin(Time::totalTime()×2 + 序号)×0.15，绕 Y 60°/s 旋转。
+
+**终点传送门**（GatePad 上）：门柱 ×2：builtin:cube @ (±2.5,3.5,-32) scale (0.5,4,0.5)；横梁 @ (0,5.25,-32) scale (5.5,0.5,0.5)。三者同材质：albedo (0.08,0.05,0.10)、emissionColor (0.5,0.0,0.15)、emissionIntensity 1.0、metallic 0.7、roughness 0.3（**未激活 = 暗红**）；挂 NeonGate（三对象共享一个脚本实例，挂门柱之一或独立 "Gate" 空对象均可——约定：独立 "Gate" GO @ (0,3.5,-32) 挂脚本，脚本按名称找三个门对象）。门粒子 "GateAura" @ (0,3.5,-32)：ParticleSystem{playOnAwake false, loop true, emissionRate 20, lifetime 1.2, initialSpeed 1.2, gravity 0.1, startColor (0.3,1.0,0.9,0.8), endColor (0.3,1.0,0.9,0.0), startSize 0.15, endSize 0.03, maxParticles 300, blendAdditive true}。
+**激活**（计数满）：脚本把三对象材质 `shaderGraphPath = "assets/shadergraphs/neon_magenta.novashadergraph"`（兜底 emissionColor (0.8,0.1,1.2)、emissionIntensity 1.5）、GateAura.play()、sfx_gate_open、提示文案切换。
+**胜利区**：`|x|≤3 && -34.5≤z≤-29.5 && 1.9≤playerY≤3.5`（即站上 GatePad），且已激活 → 触发胜利。
+
+**关卡其他对象**：
+- "VoidFloor"：builtin:plane @ (0,-8,0) scale (60,1,60)，**无碰撞体**（纯视觉深渊参照，albedo (0.02,0.03,0.05)、emissionColor (0.01,0.02,0.05)、emissionIntensity 1.0、roughness 0.95）；玩家掉落穿过它 → y<-10 复活。
+- "BGM"：AudioSource{clipPath "assets/audio/bgm_level1.wav", volume 0.8, loop true, spatialBlend 0.0, playOnAwake true, bus 1, stream true, fadeInSeconds 1.0, fadeOutSeconds 0.5}。
+- "Game" @ (0,0,0)：NeonGameManager + NeonLevelHud。
+- 路线导向灯带（装饰，无碰撞体）：每平台前缘一根小条 builtin:cube scale (台宽,0.1,0.15) @ (台x, 台顶+0.05, 台前缘z)（前缘 = z 较小端），emissionColor 青色 (0.05,0.8,0.9)、emissionIntensity 2.0、albedo (0.05,0.05,0.08)——13 根，Levels 按平台表逐个摆放，指引前进方向。
+
+**关卡 UI（Canvas 子对象）**：
+
+| 对象名 | 组件与字段 |
+|---|---|
+| CountText | Text{text "能量球 0 / 10", fontSize 28, color (0.4,1.0,1.0,1), anchor (0,0), offset (24,24)} |
+| TimerText | Text{text "时间 0.0 秒", fontSize 28, color (0.9,0.95,1.0,1), anchor (1,0), offset (-180,24), wrap true, wrapWidth 156, hAlign "Right"} |
+| HintText | Text{text "收集全部能量球,激活传送门!", fontSize 20, color (0.8,0.9,1.0,1), anchor (0.5,1.0), offset (0,-36), wrap true, wrapWidth 600, hAlign "Center"} |
+| VictoryRoot | **active false**，子对象：Backdrop Image{color (0.02,0.03,0.05,0.85), anchor (0.5,0.5), offset (0,0), size (1280,720)}；WinTitle Text{"通关!", 72, (1.0,0.85,0.3,1), offset (0,-90)}；WinTime Text{"用时 0.0 秒", 36, (0.9,0.95,1.0,1), offset (0,10)}；WinBest Text{"最佳纪录:--", 24, (1.0,0.85,0.3,1), offset (0,58)}；RetryBtn Button{offset (-130,140), size (220,56), 三色同 StartBtn} + 子 Text "再玩一次" (28, 白)；LobbyBtn Button{offset (130,140), size (220,56)} + 子 Text "返回大厅" (28, 白) |
+
+**关卡流程**：onStart 读 `getSceneParam("level")`（`{"index":1,"orbTotal":10}`，缺失用默认 10）→ 计时起点 = Time::totalTime()。每帧 NeonLevelHud 刷新：CountText = `"能量球 %d / %d"`、TimerText = `"时间 %.1f 秒"`。拾取 → manager.notifyCollected()（计数 +1、sfx_pickup、球 Burst.play() 后球 GO setActiveSelf(false)）。计数满 → gateActive → 门激活 + HintText 换 `"传送门已激活!冲进传送门!"`。进胜利区且 gateActive → 胜利：停止计时、sfx_win、`SaveGame::save(scene, 0, "assets/scenes/NeonLevel1.nova.json", 用时)`、VictoryRoot 激活、WinTime/WinBest 文案（最佳 = min(旧最佳, 本次)）、BGM Stop(fade)。RetryBtn → sfx_ui_click + `setSceneParam("level", …)` + switchScene("NeonLevel1")；LobbyBtn → sfx_ui_click + `setSceneParam("lastResult", {"win":true,"time":用时})` + switchScene("NeonLobby")。
+**复活（NeonPlayerWatcher）**：玩家 y < -10 → Transform::setLocalPosition(出生点 (0,0.9,10)) + CharacterController::setVelocity(0) + sfx_fall；计数保留。跳跃音效：isGrounded() 下降沿且 velocity().y > 0 → sfx_jump（volume 0.5）。
+
+### 28.3.7 Shader Graph 清单（3 张图，version 1，节点/端口逐字）
+
+引擎事实：v1 节点集 17 个（kSpecs）——**无 Sin/Frac**，脉冲式自发光不可做；图只做「常量霓虹色 + HDR emission（>1 驱动 bloom）」。Master 端口：albedo(Vec3)/roughness(Float)/metallic(Float)/normal(Vec3)/emission(Vec3)；Color 输出 rgba(Vec4)→Vec3 隐式截断合法；Scalar 输出 x(Float)。三张图结构相同，仅颜色参数不同（Levels 按此逐条连线，或编辑器里连完导出同构 JSON）：
+
+- **neon_cyan**：节点 n1 Color{color "0.05 0.95 1.0 1.0"}、n2 Scalar{value "0.3"}、n3 Scalar{value "0.0"}、n4 Color{color "0.10 1.20 1.40 1.0"}、master；边：n1.rgba→master.albedo、n2.x→master.roughness、n3.x→master.metallic、n4.rgba→master.emission。
+- **neon_magenta**：n1 color "0.60 0.05 0.90 1.0"、n2 "0.3"、n3 "0.0"、n4 "0.80 0.10 1.20 1.0"；连线同上。
+- **neon_orange**：n1 color "1.00 0.35 0.05 1.0"、n2 "0.3"、n3 "0.0"、n4 "1.30 0.45 0.10 1.0"；连线同上。
+
+（normal 端口不连 = 回退材质法线，合法；图 JSON 骨架照抄 assets/shadergraphs/v10demo.novashadergraph。）
+
+### 28.3.8 LUT 与后处理
+
+复用 `assets/luts/cool.cube`（V1.0-4 验收资产，17³ 冷色）：lutIntensity 大厅 0.8、关卡 0.85（暗场里保持霓虹色相纯度，不冲淡青/品红）。warm.cube 不用（风格不符，留作验收对比素材）。其余后处理参数见 §28.3.4 通用环境段——bloom 阈值 0.8 保证只有 emission>0.8 的霓虹件发光（平台 albedo 0.1 以下不泛光）；vignette 0.35 压暗边缘聚焦路线。
+
+### 28.3.9 音频清单（主会话合成；参数建议）
+
+| 文件 | 用途 | 接线 | 建议时长 | 建议音高/音色 |
+|---|---|---|---|---|
+| bgm_lobby.wav | 大厅 BGM | AudioSource stream, Music 总线, loop, fadeIn 1.5 | 8s 无缝循环 | 90 BPM 合成波 pad，A 小调琶音 A2-C3-E3，低通滤波，峰值约 -12dB，无鼓 |
+| bgm_level1.wav | 关卡 BGM | 同上，fadeIn 1.0 | 8s 无缝循环 | 120 BPM 八分音符琶音 + 低频脉冲贝斯，更有驱动力 |
+| sfx_pickup.wav | 拾取能量球 | 脚本 play(Sfx, spatialBlend 0) | 0.25s | 正弦+方波 880→1316Hz 上行滑音，短促明亮 |
+| sfx_gate_open.wav | 传送门激活 | 同上 | 0.9s | 低频扫频 110→220Hz + 高频闪烁琶音 |
+| sfx_win.wav | 通关 | 同上 | 1.6s | C5-E5-G5-C6 上行大调琶音，三角波+正弦，尾音留 0.3s |
+| sfx_ui_click.wav | 按钮点击 | 同上 | 0.1s | 2000Hz 方波短脉冲，快速衰减 |
+| sfx_jump.wav | 跳跃 | 同上（volume 0.5） | 0.2s | 400→600Hz 上行滑音，轻柔 |
+| sfx_fall.wav | 掉落复活 | 同上 | 0.6s | 800→150Hz 下行滑音 + 轻微噪声 |
+
+音量纪律：SFX 峰值 -6dB；BGM 总线 0.8；音频设置文件沿用 assets/audio/audio-settings.novaaudio（music/sfx/ui 总线音量可调 = 验收点）。
+
+### 28.3.10 场景参数传递方案（演示 §27.1 setSceneParam/getSceneParam）
+
+- 大厅 → 关卡（开始游戏时）：`setSceneParam("level", R"({"index":1,"orbTotal":10})")` → `loadSceneAsync("NeonLevel1", false)`。关卡 NeonGameManager::onStart 读 `getSceneParam("level")` 解析 JSON（脚本链 nlohmann_json），缺失/坏 JSON → 默认 index=1、orbTotal=10（直接启动 Player 也能玩）。
+- 关卡 → 大厅（返回大厅时）：`setSceneParam("lastResult", R"({"win":true,"time":34.5})")`（time 格式化为 1 位小数）→ `loadSceneAsync("NeonLobby", false)`。大厅读该参数显示「上次通关:34.5 秒」。
+- 扩展位：index=2 留给第 2 关（协议不变，仅加场景与数值）。
+
+### 28.3.11 脚本分工与接口约定（Scripter）
+
+全部在 samples/NovaSampleGame/，`NovaGame` 命名空间，进 NovaGame.dll（CMakeLists NOVA_GAME_SOURCES 追加 6 个 .cpp；两个 DLL 形态 NovaGame/NovaGamePlayer 共用同一源列表）。**静态单例纪律**：`static NeonGameManager* s_instance`；onStart 注册、onUpdate 开头若 `s_instance != this` 重新注册（热重载后旧指针失效自愈）。脚本只 include engine/include 公共头（Reviewer 会 grep 私有头）。
+
+1. **NeonGameManager**：状态 `m_collected / m_orbTotal / m_gateActive / m_startTime / m_won`；API `notifyCollected()`、`finishRun()`（返回用时）、`switchScene(name)`（BGM AudioSource 按名查找 → Stop(fadeOut 0.5) → 协程 WaitForSeconds(0.5) → loadSceneAsync(name,false)）、`playSfx(relPath, volume)`（AudioClip::load 缓存 + AudioEngine::play spatialBlend 0）、读 level 参数、通关写档（SaveGame::save slot 0）。
+2. **NeonLobbyUI**：按钮 onClick 接线、最佳纪录（listSlots slot 0）、lastResult 显示（§28.3.5）。
+3. **NeonLevelHud**：onStart 缓存 Count/Timer/Hint/Victory 对象引用（findGameObjectsByName）；每帧刷文案；胜利时激活 VictoryRoot、填 WinTime/WinBest；RetryBtn/LobbyBtn onClick（§28.3.6 流程）。计时显示 = Time::totalTime() - m_startTime。
+4. **NeonCollectible**：序列化字段 m_pickupRadius=1.8、m_bobHeight=0.15、m_bobSpeed=2.0、m_spinSpeedDeg=60；每帧上浮/旋转 + 与玩家 3D 距离轮询（玩家 = findGameObjectsByName("Player")[0]，每帧查询可接受，对象少）；命中 → Burst 子对象 ParticleSystem::play() → sfx → manager.notifyCollected() → 自身 GO setActiveSelf(false)。
+5. **NeonGate**：序列化 m_zoneHalfX=3.0、m_zoneZMin=-34.5、m_zoneZMax=-29.5、m_zoneYMin=1.9、m_zoneYMax=3.5；每帧轮询 manager.gateActive()（上升沿 → 激活序列：三个门对象 MeshRenderer::material.shaderGraphPath 换 neon_magenta + GateAura.play() + sfx_gate_open）；gateActive 时轮询胜利区 → manager.finishRun() 胜利序列（§28.3.6）。材质切换后无需手动刷新（SceneRenderer 按 shaderGraphPath 分组重建）。
+6. **NeonPlayerWatcher**：序列化 m_respawnY=-10.0、m_respawnPos (0,0.9,10)（关卡）；大厅出生点 (0,0.9,2)（按场景写不同默认值——大厅不写脚本时用关卡默认亦可，但**两场景 JSON 各写各的 respawnPos**）；每帧：y<-10 → 复位 + setVelocity(0) + sfx_fall；isGrounded() 下降沿 + velocity().y>0 → sfx_jump。CharacterController 在脚本里经 `gameObject()->getComponent<CharacterController>()` 取（组件类型 ID 通用查询）。
+
+复用既有脚本：SpinningCube（大厅装饰旋转，字段 speed）、CharacterWalk（移动跳跃，字段 speed/jumpSpeed）。**不修改**这两个既有脚本。
+
+### 28.3.12 存档与最佳纪录
+
+- 写：通关瞬间 `SaveGame::save(scene, 0, "assets/scenes/NeonLevel1.nova.json", 用时)`（原子写，saves/slot0.novasave）。
+- 读：大厅 onStart `SaveGame::listSlots()` → slot 0 valid → 取 playTimeSeconds 显示「最佳纪录:x.x 秒」。**不用 SaveGame::load**（会原地重建场景，摧毁大厅——已裁定规避）。
+- 目录：编辑器 = 项目根/saves，Player = exe 目录/saves（引擎默认，无需 setSaveDirectory）。
+
+### 28.3.13 build.novabuild 与打包
+
+build.novabuild scenes 数组**首两项**改为 `{"name":"NeonLobby","path":"assets/scenes/NeonLobby.nova.json"}`、`{"name":"NeonLevel1","path":"assets/scenes/NeonLevel1.nova.json"}`，其余既有条目保持（编辑器中旧 demo 仍可开）。Player 默认启动 = 第一项（大厅）。§27.5 buildRelease 资产收集需确认新资产全部入 pak（音频/图/场景——与 DevOps 对齐，冒烟时在干净目录验证）。冒烟命令：`NovaPlayer.exe --scene assets/scenes/NeonLevel1.nova.json`（直进关卡）与无参（进大厅）双路径。
+
+### 28.3.14 验收清单
+
+**机器可验证**（Levels/Scripter/DevOps 各自跑）：
+1. 编辑器 Play NeonLobby：控制台零 error；点「开始游戏」→ 切到 NeonLevel1（SceneLoaded 日志）；「返回大厅」→ 回大厅。
+2. 大厅 BGM 循环播放；切关卡后换 bgm_level1 无爆音；audio-settings.novaaudio 改 music=0 → BGM 静音（总线音量生效）。
+3. 收集 O1 → HUD 变「能量球 1 / 10」；全收集 → 「能量球 10 / 10」+ 门变亮（shaderGraphPath 切换生效）+ GateAura 粒子发射 + 提示文案变「传送门已激活!冲进传送门!」。
+4. 计时正确：进关卡到触门，胜利「用时」与秒表对照误差 ≤0.5s；「时间」HUD 每帧刷新无卡跳。
+5. 胜利后 saves/slot0.novasave 存在且 JSON 合法；回大厅显示「最佳纪录:x.x 秒」与「上次通关:x.x 秒」；「再玩一次」→ 计数 0/10、计时归零、球全部复位。
+6. 存读档：关掉重开 → 大厅最佳纪录仍在。
+7. 掉落复活：任意平台跳下 5 次 → 每次都回出生点、计数保留、无崩溃。
+8. 数值核对：对照 §28.3.6 表逐台校验坐标/scale/顶面高度；所有水平间距 ≤1.5m、垂直抬升 ≤1.5m；10 球位置偏差 ≤0.01m。
+9. 全收集通关一次（人工跑或脚本自检：每球与出生点连通性由设计表保证 + 实跑验证）。
+10. 打包：buildRelease 干净目录双击 NovaPlayer.exe → 大厅 → 通关闭环（含存档/读档）；5 次通关内存无持续增长。
+11. 脚本合规：grep 新脚本无 engine/src 私有头引用；场景 JSON version=4 且键名全部在上文模板出现过的集合内。
+12. 性能：关卡 1280×720 ≥60FPS（中端集显可玩）。
+
+**人工体验（非技术用户步骤清单）**：
+1. 双击启动 → 大厅标题、开始按钮、操作说明一眼可读；按说明自然学会移动/跳跃。
+2. 第一次游玩 10 分钟内通关；能量球顺序自然引导路线，不迷路。
+3. 跳跃手感：2 处 1.2m 跳跃台与 0.3m 台阶轻松可上，不需要极限操作；能量球经过即拾取。
+4. 视觉：暗背景 + 自发光 + 冷色滤镜风格统一；无全屏泛光刺眼；门激活前后颜色变化明显可辨。
+5. 听觉：拾取/激活/通关音效清晰不刺耳；BGM 循环衔接自然、切场景不炸音。
+6. 掉落复活不挫败：复活位置可辨、已收集不丢失。
+7. 结算页「用时/最佳纪录/再玩一次/返回大厅」信息完整、按钮顺手。
+8. 重玩动机：计时挑战成立（第二次想破纪录）。
+
 ## 28.4 文档化与迁移指南（cC，V1.0-14）
 
 **新文档三件（本契约明确授权新增 md——Architect 角色约束「不新增 md」的例外条款）**：
