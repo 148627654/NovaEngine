@@ -1,6 +1,6 @@
 # NovaEngine 用户指南：已实现功能与操作方法
 
-> 本文档以**实际代码**为准（快照时间 2026-11-15，收官批次后：V0.2 第一批 + 收官批次 Wave 1/Wave 2 全部并入），面向首次使用的用户回答三个问题：**哪些功能已实现、每个功能怎么用、有哪些已知限制**。
+> 本文档以**实际代码**为准（快照时间 2026-11-15，收官批次后：V0.2 第一批 + 收官批次 Wave 1/Wave 2 全部并入；§16 V0.5 汇总章与 §17–§19 V1.0 波 1/2/3 章节于 2026-11-25 追加并随合波校对），面向首次使用的用户回答三个问题：**哪些功能已实现、每个功能怎么用、有哪些已知限制**。
 > 规格说明见 [ARCHITECTURE.md](ARCHITECTURE.md)、[ARCHITECTURE-V0.2.md](ARCHITECTURE-V0.2.md) 与 [ARCHITECTURE-FINAL.md](ARCHITECTURE-FINAL.md)（收官批次设计摘要：透明渲染 / 环境面板 / 多选 / 吸附 / 游戏分辨率 / Play 增强 / .novameta / 二进制缓存 / 打包 exe）。已确认的问题清单见 [KNOWN-ISSUES.md](KNOWN-ISSUES.md)。规格文档里写了但代码尚未实现的内容统一收在 [§9.4 待实现](#94-规格中有但代码尚未实现待实现)，不会混入「已实现」章节。
 
 ---
@@ -605,7 +605,7 @@ NovaPlayer 内快捷键：**Esc** 退出（其余无）。
 | Component::enabled 提升到基类 | KNOWN-ISSUES 改进候选 | 同上配套 |
 | ImGui ViewportsEnable（窗口拖出主窗口） | ARCHITECTURE §11-2 | 明确推迟，当前关闭 |
 | 资产 mtime 自动重载 | ARCHITECTURE §6.4 | 推迟，用 View → Reload Assets 手动刷新 |
-| 三角形级精确拾取 | ARCHITECTURE §6.1 | AABB 拾取有遮挡误判（§9.2-11） |
+| 三角形级精确拾取 | ARCHITECTURE §6.1 | **已实现（V1.0-12，2026-11-25）**：AABB 粗筛 + 逐三角形 Möller–Trumbore + 最近交点（>200k 三角形护栏降级），大平面不再遮挡后方物体（KNOWN-ISSUES #11 闭环） |
 | GameObject::removeComponent(Component*) 按指针移除 | KNOWN-ISSUES 改进候选 | 当前移除脚本走整场景重建（§9.1-7） |
 | .novapak 流式读取（按需加载 entry，不整包进内存） | ARCHITECTURE-FINAL 裁定 §11 | v1 全量读入内存（面向 <100MB 包体） |
 | Add Component 同类型去重 | KNOWN-ISSUES 新增缺口 5 | 当前可重复挂载同类组件（§9.2-5） |
@@ -705,7 +705,7 @@ NovaPlayer 内快捷键：**Esc** 退出（其余无）。
 
 - **组件**：Canvas（UI 子树根，屏幕空间全屏）+ Image（spritePath/color/slice9 九宫格/anchor/offset/size）+ Text（UTF-8 中文/fontSize/color/fontPath）+ Button（三色组 + onClick 脚本回调 + hovered()/pressedThisFrame() 查询）
 - **布局**：点锚 v1（位置 = anchor×屏幕 + offset 像素）；全锚点拉伸列 V0.5-13
-- **字体**：stb_truetype 按需烘焙图集（中文）；默认系统 msyh.ttc，失败降级内置 5x7 ASCII（warn）；Text.fontPath v1 仅序列化保留
+- **字体**：stb_truetype 按需烘焙图集（中文）；**默认字体优先级链 Noto Sans SC（NotoSansSC-VF.ttf）→ 等线 DengXian（Deng.ttf）→ 微软雅黑（msyh.ttc）**（FontAtlas.cpp，2026-11-16 起），全部失败降级内置 5x7 ASCII（warn）；Text.fontPath 可指 assets/fonts/*.ttf（指定字体失败回退默认图集，中文显示 ?）
 - **渲染**：单动态 VBO + per-atlas 批处理 → 每 Canvas 内容走字体图集时 1 draw call（每张精灵贴图 +1）；Edit 预览与 Play 同路径，无 Canvas 零开销
 - **输入**：Play 态 letterbox fit-rect 坐标换算 → Button hover/press/onClick 边沿触发；Edit 态不处理（点击不穿透场景拾取）
 - **时序契约**：Player 主循环在 scene.update **前**调 processInput（脚本 onUpdate 读到本帧按钮状态）；编辑器 SceneView 为渲染期调用（脚本侧滞后一帧，已知取舍）
@@ -816,7 +816,160 @@ NovaPlayer 内快捷键：**Esc** 退出（其余无）。
 
 ---
 
-*本文档由文档 Agent 基于 editor/src 与 engine/src 的实际实现撰写。发现文档与代码不符时，以代码为准并欢迎更新本文件。*
+## 16. V0.5 汇总：输入绑定 / 存档 / UI 增强 / 性能 / 渲染全家桶 / 脚本热重载 / 地形 / 动画 / 2D / CLI（2026-11-17~19 交付并验收）
+
+> V0.5 分两波交付（波 1：2026-11-17；波 2：2026-11-19），本版此前缺独立章节，此为 V1.0-14 补录的汇总章（Architect 裁定）。细节见 KNOWN-ISSUES「2026-11-17/18/19」各段与 ARCHITECTURE §24/§25。
+
+### 16.1 输入绑定 InputMap + 手柄
+
+- **Input Bindings 面板**（File → Input Bindings...）：动作/轴增删、绑定改键（键盘/鼠标/手柄多源并存，任一按下即触发）、Save/Reload、即时生效；持久化 `assets/input/default.novainput`（JSON v1；内置默认 5 动作 Jump/Submit/Cancel/Pause/Dash + 2 轴 Horizontal/Vertical）。
+- **手柄**：自动轮询 1–4 只手柄（GLFW），`Input::isGamepadButtonDown/Pressed/Released`、`gamepadAxis`（死区默认 0.15 可调）；热插拔日志 + 断开清零防粘连。
+
+### 16.2 存档系统 SaveGame
+
+- **File → Save Game / Load Game**（Play 态可用）：槽位式存档 `saves/slot<N>.novasave`（JSON v1，内嵌场景快照），原子写（tmp→rename）；读档经序列化**原地重建同一场景**（对象 ID 保持）；槽列表带元数据（scenePath/时间戳/playTimeSeconds）与浅校验；损坏存档不崩溃。
+- 脚本 API：`SaveGame::save/load/listSlots/deleteSlot/setSaveDirectory`（API-REFERENCE §14）。
+
+### 16.3 UI 控件集增强
+
+- **Slider** 组件：横向滑条（轨道/填充/手柄贴图与颜色、fillThickness/handleSize、min/max/value/wholeNumbers、onValueChanged 回调）。
+- **ScrollView** 组件：滚动容器（内容 = 直接子物体，scissor 裁剪，滚轮滚动，bgColor/border 可视区外框）。
+- **Image fill**：水平/垂直/径向 90/180/360 填充（fillType/fillAmount/fillClockwise）。
+- **Text 换行与对齐**：wrap/wrapWidth（按码点断行，CJK 安全）+ hAlign（Left/Center/Right）。
+- **UI 事件冒泡与射线拦截**：Play 中 UI 优先于场景拾取；Edit 态悬停 ScrollView 可滚轮滚动。
+
+### 16.4 性能优化包
+
+- **Frustum 视锥剔除**：视锥-AABB 相交，场景外物体不进渲染队列。
+- **静态网格实例化**：同 mesh+材质分组 instanced draw（2000 同 mesh 立方体 <20 draw calls）；Stats 面板增 Culled/Instanced draws/Instances 三行。
+
+### 16.5 CLI 批处理
+
+- `NovaEditor.exe --headless [--import] [--build [--release] --scene <路径> --out <目录>] [--quit]`——退出码 0/1/2（参数错误 stderr + Logs 双通道）；`--import` 全量资产导入（失败数>0 → 退出码 1）；`--build` 复用打包（headless 隐含退出）。
+
+### 16.6 渲染全家桶（波 2）
+
+- **LOD 系统**：LODGroup 组件（多级网格 + 切换距离，视距驱动替换）。
+- **IBL 环境光照**：HDR cubemap（equirect/六面）→ 漫反射卷积 + BRDF LUT；Environment 面板 IBL 区（强度/天空旋转）。
+- **SSAO**：屏幕空间环境光遮蔽（GBuffer 法线/深度，半径/强度/采样数可调，Environment 面板）。
+- **粒子系统**：ParticleSystem 组件（发射率/寿命/初速/重力/起止色/起止尺寸/flipbook 纹理条/加性混合/playOnAwake；Edit 态稳态快照预览，Play 态实时模拟）。
+- **地形**：Terrain 组件（16bit 高度图 PNG + 四模式笔刷，TerrainPanel；Jolt 高度场碰撞）。
+- **蒙皮动画**：SkeletalMeshRenderer + Animator 状态机（AnimatorPanel；蒙皮阴影按绑定姿势——v1 已知限制）。
+- **2D 模式**：SpriteRenderer / BoxCollider2D（六事件族 Collision2D/Trigger2D Enter/Stay/Exit）+ Camera 正交投影 + File → New 2D Scene 模板。
+
+### 16.7 脚本 DLL 热重载
+
+- 脚本构建为 `NovaGame.dll`（编辑器/Player 双形态同源）；**Scripts → Reload Scripts（Ctrl+Shift+R）** 卸载旧 DLL → 快照脚本字段 → 加载新 DLL → 按「对象 ID + 组件下标」原位恢复；**Auto Reload** 勾选后 mtime 轮询自动重载；加载失败保留旧 DLL 继续运行。
+
+---
+
+## 17. V1.0 波 1 新增：Profiler 完整版 / 纹理压缩 / 引用完整性 / 音频完善 / 测试+CI（2026-11-20 交付，2026-11-23 人工验收通过）
+
+### 17.1 Profiler 完整版（Window → Profiler）
+
+- **帧时间线**：600 帧环形缓冲（10 秒 @60FPS），点击时间线任意帧定位查看该帧数据。
+- **CPU 分段**：火焰图式分段耗时（脚本级/模块分段）；GPU 六段计时（shadow/sky/opaque/transparent/post/ui，延迟 3 帧回读防管线停顿）。
+- **内存分类**：mesh 顶点/贴图（压缩后按块数据字节计）/音频 PCM/cubemap/材质资产数/场景对象与组件数。
+- 自身开销 < 1ms（面板实时显示）；Clear 清空历史。
+
+### 17.2 纹理压缩与批量导入
+
+- **压缩格式**：BC7（RGBA）/ BC1（RGB）/ BC5（RG 法线）；策略 Auto——法线贴图（NormalMap 勾选）→ BC5，含有效 alpha → BC7，其余 → BC1；GPU 能力查询不支持时逐级回退（BC7→BC1→未压缩）并 warn 一次。实测 40MB→13.3MB。
+- **入口**：Asset Browser 右键贴图 → Texture Import Settings... → Compression 下拉（§7.3 原模态扩展）；批量导入 CLI：`NovaEditor.exe --headless --import`（扫描 assets/ 全部模型/贴图导入并生成缓存，失败数 >0 → 退出码 1）。
+- 压缩字节进二进制缓存键与 Profiler 内存统计。
+
+### 17.3 资产引用完整性（Assets → Reference Checker...）
+
+- **扫描 17 种引用形态**：场景/材质/Shader Graph/音频/贴图 meta/cubemap/高度图/LUT 等全部资产引用关系。
+- **Asset Browser 右键**：选中资产 → 扫描其引用/被引用；**Move Asset 移动重链**（文件级引用自动更新）。
+- **打包预检**：Build Player / buildRelease 遇缺失引用直接失败并列出清单（不产出半成品 pak）。
+
+### 17.4 音频完善（Audio → Mixer...）
+
+- **4 总线混音器**：Master / Music / Sfx / Ui 四滑条，调节**实时生效**；Master 与既有主音量同源；Save 持久化到 `assets/audio/audio-settings.novaaudio`（缺失自动生成默认，重启保持）。
+- **流式 BGM**：AudioSource 新增 `stream` 字段（true = 流式解码不整载 PCM，长音频内存平稳）；新增 `bus`（总线归属）、`fadeInSeconds / fadeOutSeconds`（淡入淡出，Stop 带 fadeOut 时先淡出无爆音）。
+- 脚本侧：`AudioEngine::playStreaming/setBusVolume/fadeIn/fadeOut/setBus`（API-REFERENCE §13）。
+
+### 17.5 测试框架 + CI
+
+- **NovaTests**（Catch2）：`build/tests/Debug/NovaTests.exe` 或 `ctest --test-dir build -C Debug`——波 1 56 项、波 2 合波后 73 项，Debug/Release 双配置全绿。
+- **GitHub Actions CI**：push 触发构建 + 测试（`pip install jinja2` 前置——glad 构建期生成需要）。
+- **冒烟命令**：`NovaEditor.exe --quit`（GUI 启动即退）、`--headless --import`（批处理导入）、Player 限时运行。
+
+---
+
+## 18. V1.0 波 2 新增：多场景工作流 / 物理增强 / 色彩分级 / Shader Graph / 发布流水线（2026-11-23 交付并人工验收通过）
+
+### 18.1 多场景工作流（additive 异步加载）
+
+- **脚本 API**（全部帧末生效）：`SceneManager::loadSceneAsync(name, additive)`（后台资产加载线程，CPU 解码在后台、GPU 上传回主线程，切换无全黑帧）、`unloadScene(name)`（仅 additive 可卸，卸载后内存回落）、`loadedScenes()`（active 在前）、`setSceneParam/getSceneParam(key, json)`（**场景间参数 = JSON 字符串**，加载瞬间快照、新场景 onStart 可读）。
+- **事件**：`subscribeEvent<SceneLoaded/SceneUnloaded>`；进度查询 `AsyncLoader::progress()`（0..1，做进度条 UI）。
+- 加载候选集 = `assets/build.novabuild`（File → Build Settings... 维护；Player 双击默认 = 列表第一项）。
+
+### 18.2 物理增强
+
+- **CharacterController 组件**（Add Component 下拉直接挂）：胶囊 + 楼梯步进 + 坡度限制（radius/height/stepHeight/slopeLimitDeg/mass/gravityScale）；脚本 `move/isGrounded/velocity/setVelocity/setPosition`（物理传送，复活/瞬移用）。与 Rigidbody 互斥（同挂 = warn + CC 优先）。
+- **Physics Layers 面板**（Window → Physics Layers）：16 层命名 + 16×16 对称碰撞矩阵勾选，写场景 `environment.physics` 段；Collider 组件新增 `layer / friction / restitution` 字段（Inspector 编辑）。
+- **查询 API**：`physics()->raycastAll`（全命中按距离升序）/ `overlapSphere` / `overlapBox`，带 `layerMask` 位掩码过滤与 `ignore` 忽略对象。
+- 验收演示场景：`assets/scenes/V10CharacterDemo`（楼梯/阻挡台/斜坡）。
+
+### 18.3 色彩分级与后期完善（Environment 面板 Color Grading 区）
+
+- **LUT 色彩分级**：点「…」选择 `.cube` 文件（附赠 `assets/luts/warm.cube` 暖色 / `cool.cube` 冷色）+ Intensity 滑条（0..1）；**缺省 0 = 关闭**，显式选择才生效（无 LUT 时强制直通，杜绝白屏）。
+- **DOF 简版**：enabled / focusDistance / aperture（线性深度附件，与 SSAO 共用 MRT）。
+- **渐晕**（enabled / intensity 0..1）与**胶片颗粒**（enabled / amount，时间抖动）。
+- 全部随场景序列化（environment.postProcess 段）；RGBA8 直通路径与新链逐像素一致。
+
+### 18.4 可视化着色器编辑器 Shader Graph（Window → Shader Graph）
+
+- **节点编辑器**：17 节点集（纹理采样/数学/UV/混合等），连线生成 GLSL；编译错误**定位到节点**；不支持的特性明确提示而非静默错误。
+- **资产**：`.novashadergraph`（JSON），Asset Browser 可拖放赋给材质（Inspector 材质区 Shader Graph 路径 + 拖放，Detach 解绑）；材质引用图的物体走独立渲染队列。示例图：`assets/shadergraphs/v10demo.novashadergraph`（V10MultiSceneDemo 悬浮球）、neon_cyan/magenta/orange 三张（示例游戏）。
+- 图缓存上限 64（超限淘汰最旧）；坏图资产加载失败 warn + 不崩溃。
+
+### 18.5 发布流水线
+
+- **CLI 发行构建**：`NovaEditor.exe --headless --build --release --out <目录>` → 收集 build.novabuild 全部场景 + 全部引用资产（含 .novashadergraph/.cube/16bit 高度图/字体/脚本 DLL）+ 单 pak → 输出 `<目录>/NovaEngine_1.0.0/`（NovaPlayer.exe + NovaEngine.pak + NovaGame.dll + README.txt + steam 占位目录），双击即玩。
+- **版本信息注入**：两个 exe 带 Windows RC 元数据（文件版本 1.0.0.0/产品名/公司名/图标——资源管理器右键 → 详细信息可见）。
+- **产物可复现**：同一输入两次 buildRelease 字节一致。
+
+---
+
+## 19. V1.0 波 3 新增：示例游戏《霓虹收集者》 + 编辑器细节 + 内存审计 + 文档三件（2026-11-24/25 交付，2026-11-25 验收完成，V1.0 收官）
+
+### 19.1 示例游戏《霓虹收集者》（Neon Collector）
+
+科幻霓虹风 3D 收集闯关，**全部用引擎自带功能实现**，是功能示范与打包回归基准：
+
+- **玩法**：大厅 →（传参切场景）→ 关卡跑跳收集 10 颗能量球（拾取半径 1.8m，全部步行可及）→ 集满激活终点传送门 → 冲进胜利区 → 结算（用时/最佳纪录/评级）→ 再玩/回大厅。掉落自动复活（物理传送），已收集不丢。
+- **V1.1 体验包**：Shift 冲刺（0.25s ×2.5 倍速，冷却 2s）、二段跳、连击 Combo（2.5s 窗口，音效逐级升高）、S/A/B/C 评级（20/30/45s 分档）、维度突破主题（每收集一颗对应灯带点亮、环境渐亮）。
+- **V1.2 竞速包**：幽灵回放（刷新纪录后与最佳轨迹竞速）、分段计时、隐藏晶体、空中捷径、本地排行榜 TOP5（`saves/leaderboard.novaboard`，经 FileUtil 读写）。
+- **资产**：两场景 `assets/scenes/NeonLobby.nova.json` / `NeonLevel1.nova.json`（schema v4）、3 张霓虹 Shader Graph、5 个程序化霓虹模型、8+3 音效（wav，主会话合成）、LUT cool.cube 冷色。
+- **脚本**：`samples/NovaSampleGame/` 11 个玩法脚本（注册进 NovaGame.dll），命名空间 `NovaGame`，中文注释——**最佳实践范本**（单例自愈/距离轮询拾取/协程切场景防爆音/按钮接线/存档只读元数据等模式均在此）。
+- **运行**：编辑器打开 NeonLobby → Ctrl+P；Player 直接 `NovaPlayer.exe --scene assets/scenes/NeonLobby.nova.json`；打包版 `dist_game/NovaEngine_1.0.0/NovaPlayer.exe` 双击即玩（77 项资源 pak，含存档/读档，2026-11-25 用户验收完毕）。
+
+### 19.2 编辑器细节完善（V1.0-12，2026-11-25 交付）
+
+- **三角形级拾取**：AABB 粗筛 + 逐三角形 Möller–Trumbore + 最近交点（KNOWN-ISSUES #11 闭环）——大平面不再遮挡后方物体；>200k 三角形护栏降级（warn 一次）；2000 物体场景拾取 6.6ms。
+- **编辑器偏好持久化**：`%APPDATA%/NovaEngine/editor-settings.json`（version 1）——吸附值/主题（dark/light/classic + 样式自定义）/快捷键重绑（8 核心动作 + 冲突检测）/最近文件（≤10）/多视口开关；重启编辑器全部保持；与音频设置分离。
+- **最近文件**：File → Open Recent（≤10，新在前；被删除文件自动过滤）。
+- **多视口**：默认关闭（评估环境限制，评估结论备案 KNOWN-ISSUES）；Settings 面板可开启 + 重启生效。
+
+### 19.3 内存与泄漏审计（V1.0-13，2026-11-25 交付）
+
+- **releaseUnused 收口**：unloadScene/退出 Play/LoadScene 后联动清理材质旁表等（P3-7 修复）；内存分类统计校准。
+- **自动基线测试**（NovaTests，无 GL）：100 次场景切换回基线 ±5%、Play 100 次、热重载 ×10 注册表稳定。
+- **人工审计步骤**（VS CRT 泄漏报告 / Diagnostic Tools 快照对比 / 内存分类交叉验证）已文档化于 KNOWN-ISSUES 波 3 段。
+
+### 19.4 文档三件（V1.0-14，2026-11-25 交付）
+
+- **[API-REFERENCE.md](API-REFERENCE.md)**：脚本 API 手册——全部签名对照 engine/include 逐条核实（Behaviour/GameObject/Transform/Input/Time/物理/UI/SceneManager/协程/事件/音频/存档/FileUtil/粒子等 + 序列化字段键名表 + 帧内顺序）。
+- **[TUTORIAL.md](TUTORIAL.md)**：新手教程——从零到打包一个小游戏，每步可执行（命令 2026-11-25 实机冒烟通过），目标「新用户 1 天完成打包」。
+- **[UNITY-MIGRATION.md](UNITY-MIGRATION.md)**：Unity→Nova 迁移对照表——GameObject/Transform/Input/Time/Physics/UI/SceneManager/Coroutine/事件/音频/存档 12 组高频 API 对照 + 踩坑清单 + 语义差异（如 UI 子锚点相对屏幕解析）。
+- 另：本版补录 V0.5 汇总章（§16）、§12.3 字体链订正、§9.4 拾取条目更新。
+
+---
+
+*本文档由文档 Agent 基于 editor/src 与 engine/src 的实际实现撰写（V1.0 章节由内容域 Coder 于 2026-11-25 按同一纪律追加）。发现文档与代码不符时，以代码为准并欢迎更新本文件。*
 
 
 

@@ -21,6 +21,10 @@ public:
     void swapBuffers();
     void setVsync(bool enabled);
     void getFramebufferSize(int& outWidth, int& outHeight) const;
+    // 内容缩放（V1.0-12 §28.2.1 追加）：窗口逻辑像素 → 帧缓冲像素比
+    //（glfwGetWindowContentScale 封装；GLFW_SCALE_TO_MONITOR 下 = 显示器缩放比，
+    // 150% = 1.5）。供「窗口逻辑 → 布局空间」统一换算（UIRenderer::layoutFromWindowPoint）。
+    void getContentScale(float& outX, float& outY) const;
     GLFWwindow* nativeHandle() const;
 
     using DropCallback = std::function<void(const std::vector<std::filesystem::path>&)>;

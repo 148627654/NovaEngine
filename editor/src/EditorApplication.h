@@ -20,6 +20,7 @@ namespace NovaEditor {
 
 class BuildSettingsPanel;
 class InputBindingsPanel;
+class SettingsPanel;   // V1.0-12：编辑器设置面板（主题/快捷键/多视口）
 class StatsPanel;
 
 // 应用外壳（§2.9 + §3.1）：主循环编排 / docking 布局 / Play 状态切换 / 外部拖放分发 / 文件菜单 /
@@ -68,6 +69,10 @@ private:
     // ===== 脚本 DLL 热重载（V0.5-7 波 2 2b 合波接线，§25.5 触发流程）=====
     void reloadScriptsFlow();   // spawn 构建 NovaGame → 成功 → ScriptRuntime::reload
     void pollScriptDll();       // mtime 轮询（1s 节流；Edit 触发 / Play 记变化待退出后触发）
+    // ===== 编辑器设置同步（V1.0-12，§28.2）=====
+    void applyEditorSettings();      // init：设置数据 → 运行态（snap/主题/样式/recentFiles）
+    void syncEditorSettings();       // 每帧：运行态 → 设置数据（差异置 dirty）
+    void maybeSaveEditorSettings();  // dirty 且节流到期 → 落盘
 
     std::unique_ptr<NovaEngine::Window> m_window;
     std::unique_ptr<NovaEngine::Scene> m_scene;
@@ -77,6 +82,10 @@ private:
     StatsPanel* m_statsPanel = nullptr;       // F8 开关；View 菜单经 m_panels 循环自动包含
     BuildSettingsPanel* m_buildSettingsPanel = nullptr;  // File → Build Settings… 打开（V0.3-12 波 3）
     InputBindingsPanel* m_inputBindingsPanel = nullptr;  // File → Input Bindings… 打开（V0.5-11）
+    SettingsPanel* m_settingsPanel = nullptr;            // Edit → Editor Settings… 打开（V1.0-12）
+    // 设置落盘节流（V1.0-12）：snap 拖拽等每帧变更场景，dirty 后按 0.5s 节流写盘；
+    // 累计剩余时间（秒）
+    double m_settingsSaveCooldown = 0.0;
     GizmoController m_gizmo;
     std::vector<std::filesystem::path> m_pendingDrops;  // GLFW 拖放回调写入，update 末尾消费
     bool m_firstFrame = true;

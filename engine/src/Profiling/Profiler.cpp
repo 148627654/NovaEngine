@@ -12,9 +12,9 @@
 //     24 个 query（4 帧在飞 × 6 段；结果存于 begin 命名的对象内，每段 1 个）环形复用，
 //     帧末延迟 3 帧回读，未就绪跳过不阻塞（段保持 -1）；
 //     无 GL 上下文 / GL 不支持计时查询 → 不提交，段恒 -1（面板显示 n/a）。
-//  4. memorySnapshot：转发 AssetDatabase::memorySnapshot()（cG 波 1 已落地）+
-//     活动场景统计（objectCount/componentCount 走 Scene::forEachObject，
-//     loadedSceneCount 波 1 恒 1）。
+//  4. memorySnapshot：转发 AssetDatabase::memorySnapshot()（cG 波 1 已落地 +
+//     波 3 cR 收口 meshVertexBytes/audioBytes）+ 活动场景统计（objectCount/componentCount
+//     走 Scene::forEachObject，loadedSceneCount = 实际已加载场景数（V1.0-13 收口））。
 //  5. lastOverheadMs：beginFrame/endFrame/pushSection/GpuScope 各入口 CPU 耗时
 //     逐帧累计（验收 <1ms 证据）。
 //
@@ -323,7 +323,9 @@ MemorySnapshot Profiler::memorySnapshot() {
         snap.objectCount = objects;
         snap.componentCount = components;
     }
-    snap.loadedSceneCount = 1;   // 波 1 恒 1（V1.0-2 additive 落地后改为实际已加载场景数）
+    // V1.0-13 收口（Architect 裁定 Q1，§26.2 注释合波日回写）：实际已加载场景数
+    // = activeScene 在前视图（active + additive；无活动场景 = 0——退出 Play 语义正确）
+    snap.loadedSceneCount = SceneManager::loadedScenes().size();
     return snap;
 }
 

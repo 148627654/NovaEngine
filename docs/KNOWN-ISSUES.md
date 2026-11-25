@@ -85,7 +85,7 @@ Wave 2 只读审查结论：**无 P0**；两条 P1 均已修复（meta 的 pak �
 8. Pause 整帧跳过 scene->update()（含 flush；Play 禁结构修改故无实际影响）——**存在**；收官批次新增 F10/Edit→Step 单步推进一帧（仅 Paused 时），实现仍是整帧跳过 + 单次 update
 9. ~~场景环境参数（skyColor/ambientColor/showGrid）无编辑器 UI~~ **已修复（V0.2-5）**：独立 Environment 面板全覆盖（含 fogColor + Reset Fog to Sky）
 10. 脚本 C++ 运行时成员（如 OrbitCamera 的 m_angle）不随快照恢复（规格 §7.2 已知）——设计取舍
-11. 拾取 AABB 粗测：大平面遮挡后方物体（规格 §6.1 已知）——**存在**
+11. 拾取 AABB 粗测：大平面遮挡后方物体（规格 §6.1 已知）——**已闭环（V1.0-12，2026-11-25）**：拾取升级为「AABB 粗筛 + 逐三角形 Möller–Trumbore（CPU）+ 最近交点」（SceneViewPanel.cpp pickObject 内部替换）；护栏：单网格 >200k 三角形跳过精确测试（AABB 降级 + warn 一次）、数据缺失同样降级；验收：斜墙（0.4×8×14、45° yaw）+ 墙侧小物体真实点击直接命中；2000 物体场景拾取 6.6ms（AABB 粗筛主导，精确测试经下界剪枝零额外开销）。gizmo/选择行为不变（hit 语义变化仅「大平面不再遮挡后方」）。
 12. ~~Hierarchy Ctrl+单击是 toggle（可减选），SceneView Ctrl+单击未命中时保留选择——两处 Ctrl 语义不一致~~ **已修复**：Hierarchy 点击空白在 Ctrl 按住时保留选择，两面板语义统一
 
 ## 2026-11-15 V0.2 第一批审查（Reviewer）——已修复项
@@ -117,7 +117,7 @@ Wave 2 审查无 P0；两条 P1 已修复（见下段「已修复项」）。以
 4. **LDR equirect 的 meta 为死重**（P3）：Packager 为 LDR equirect（如 png 全景图）收集 .novameta 进 pak，但 createFromEquirect 的 LDR 路径不读 meta（直接解码为 sRGB），pak 内多出的 meta 文件不产生任何作用。
 5. **meta 模态 Save 把 "NormalMap" 重写为 "Linear"**（P3）：Texture Import Settings 模态的颜色空间下拉只有 sRGB/Linear（无 NormalMap 选项）；meta 里手写的 type "NormalMap" 经模态打开后读为 Linear，点 Save 落盘即被改写。语义等价（NormalMap 本就按 Linear 采样），但往返有损。
 6. **二进制缓存读失败误删好缓存**（P3）：readCacheFile 的读错误（瞬时 IO/文件锁等，非文件损坏）也走 corrupt() 删除路径——好缓存可能被误删一次，下次自动重导。
-7. **m_materialCache 无 releaseUnused**（P3）：releaseUnused 只清理网格/贴图/cubemap 三个 weak_ptr 缓存，材质旁表与贴图路径旁表随模型键增长，仅 Reload Assets（clearCache）可清。
+7. **m_materialCache 无 releaseUnused**（P3）——**已修复（V1.0-13，2026-11-25）**：releaseUnused 清扫网格弱引用失效条目时联动删除同键材质旁表/贴图路径旁表/网格字节旁表，另加孤儿兜底全清（std::erase_if 反查网格缓存），防长跑（反复导入不同模型）旁表单调增长。此前旁表仅 clearCache 可清。
 8. **getTexture 未命中时源文件读两遍**（P3，纯效率）：先 AssetStream::readAllBytes 读一遍算缓存键，未命中后 TextureLoader::loadRgba8 再读一遍解码（Cubemap 六面 LDR 同理）。
 9. **透明排序为 AABB 中心近似**（Wave 1 设计已知）：透明队列按视空间 **AABB 中心**深度后→前排序（画家算法），非逐像素/逐三角形——大体积或互相穿插的透明物体可能排序错误（无 OIT 计划）。
 10. **多选非均匀缩放 shear**（Wave 1 设计已知，v1 限制）：多选 gizmo 把同一 delta 矩阵作用于全部对象，非均匀缩放叠加旋转差异会产生剪切变形，decompose 写回时丢弃 skew 分量（ARCHITECTURE-FINAL 风险节已注明）。
@@ -380,3 +380,50 @@ Wave 2 审查无 P0；两条 P1 已修复（见下段「已修复项」）。以
 - **高帧率吞跳（用户反馈「按键不支持 W+空格一起按」）**：CharacterWalk 每渲染帧 setVelocity 覆盖 pending override——跳跃边沿帧注入的 vel.y 若在同一步进周期内被下一渲染帧覆盖（vel.y 从物理读回=起跳前值）→ 跳被吞。移动时每帧覆盖，跑+跳必现；帧率越高越频繁（60fps 下渲染帧与固定步交替则偶发）。修复：起跳锁存（m_jumpLatched）——边沿触发后持续注入起跳速度直到物理步消费离地（isGrounded=false）才解锁。NOVA_DBG_KEYS 注入实测两键同时注册正常（引擎输入层无组合键问题）。
 - **最大化窗口 UI 命中错位（用户反馈「不能返回大厅」）**：Player 用 GLFW_SCALE_TO_MONITOR，鼠标坐标 × fb/win 换算在最大化（窗口逻辑尺寸/帧缓冲/内容缩放三者错位）后双重缩放，点击落点与 UI 布局失配——网格扫点实测仅 1/25 命中（反推命中区为预期 ~1/10）。**临时方案**：Player 窗口 GLFW_RESIZABLE=FALSE（示例游戏按 1280×720 设计基准布局）；**波 3 #12 修复方向**：resize/DPI 下鼠标→布局空间映射统一（Input::mousePosition 语义与 UIRenderer 布局空间对齐 + 内容缩放参与换算）。
 - **胜利面板按钮标签**：已修复（上一节：标签改同偏移兄弟节点）。
+
+## 2026-11-25 V1.0 波 3 交付与审查记录（示例游戏 / 编辑器细节 / 内存审计 / 文档化，收官）
+
+波 3 四线收官：示例游戏《霓虹收集者》2026-11-25 人工验收完成（含 V1.1/V1.2，见上两节）；#12 编辑器细节（拾取闭环/设置持久化/最近文件/多视口评估）、#13 内存审计（releaseUnused 收口 + 三组基线 + 人工审计步骤）、#14 文档三件（API-REFERENCE/TUTORIAL/UNITY-MIGRATION，含 57 处签名机器比对 + 教程命令实机冒烟）全部交付。机器级验证：NovaTests 双配置全绿、双 exe 冒烟、打包冒烟。
+
+### 波 3 #12 编辑器细节
+
+- **三角形级拾取（#11 闭环，验收通过）**：AABB 粗筛（保留，先剔除）→ Möller–Trumbore 逐三角形（CPU，世界空间变换缓存）→ 最近交点；候选按 AABB t 升序 + 下界剪枝（AABB t 是精确 t 下界）。护栏：单网格 >200k 三角形跳过精确测试（AABB 降级 + warn 一次）、数据缺失同样降级。拾取数据缓存（Mesh* 键 + weak_ptr 属主 + 插入时清扫过期条目，O(会话内存活网格数)）；builtin: 图元拾取侧本地生成同形 MeshData。验收：斜墙（0.4×8×14、45° yaw）+ 墙侧小物体真实点击直接命中（真拖真看）；2000 物体场景拾取 6.6ms（AABB 粗筛主导，精确测试零额外开销）。gizmo/选择行为不变。
+- **编辑器偏好持久化（V1.0-12）**：`%APPDATA%/NovaEngine/editor-settings.json`（version 1）——吸附值（移动 0.5/旋转 15°/缩放 0.5，与 Snap Settings 面板同源）、主题（dark/light/classic + ImGuiStyle 自定义：颜色全表 + 圆角）、快捷键（8 个核心动作静态表不可移除——Play/Stop、Save、Undo、Redo、New、Open、Step、Reload Scripts；chord 可重绑 + 冲突检测）、最近文件（≤10、新在前、绝对路径、加载时文件存在性过滤）、多视口开关。与音频设置严格分离（音频随 assets/ 走，编辑器偏好归用户目录）；dirty 标记 + 0.5s 节流落盘、shutdown 强制落盘（tmp+rename 原子写）；缺失/损坏 → 默认值 + warn 不崩溃。
+- **最近文件**：File → Open Recent 菜单——显示时再做存在性过滤（被删除文件不列出），点击加载（未保存先走确认流）。
+- **多视口（ViewportsEnable）评估结论——保持默认关闭，Settings 面板可开启 + 重启生效（契约允许的交付形态）**：面板拖出主窗口的平台窗口路径在评估环境（远程会话窗口管理器持续移动/缩放/最小化窗口、抑制新顶层窗口显示）无法自动化验证——重停靠正常、独立窗口未出现；gizmo/拖放脱离视口回归未覆盖。已具备：main 按设置开 ViewportsEnable（ImGui 配置期）、主循环 UpdatePlatformWindows + RenderPlatformWindowsDefault + GL 上下文备份、SceneViewPanel windowGlobalPos 全局坐标适配；开多视口实测渲染/拾取/重停靠正常。人工复核步骤：multiViewport=true → 重启 → 拖 dock 标签出主窗口 → 脱离面板内拾取 + gizmo 拖拽 + AssetBrowser 拖放 → 拖回。
+
+### 波 3 #13 内存审计
+
+- **releaseUnused 自动化收口（P3-7 修复，见 Wave 1/2 段）**：调用点 = unloadScene 后、退出 Play 后、LoadScene 同步路径后；网格缓存清扫联动材质/贴图路径/网格字节三旁表 + 孤儿兜底全清；memorySnapshot 网格段改按导入字节汇总（收口校准）。
+- **泄漏检测自动化（NovaTests 新用例，全部无 GL）**：①100 次 LoadScene 同步切换 + unload 循环 → memorySnapshot 回到基线（±5%，三次平均防分配器抖动，失败重跑一次）；②Play 100 次循环 → 基线对比；③热重载：ScriptRuntime reload×10 → ScriptRegistry 名称集不变 + memorySnapshot 稳定（FreeLibrary 语义验证以 exe 钩子初始化计数为权威判据，见下方备案）。
+- **人工审计步骤（与自动基线双证据）**：
+  - A. **CRT 泄漏报告**：VS 打开 build/NovaEngine.sln（Debug）F5 启动 NovaEditor；执行代表性操作序列（打开示例场景 → Play/退出 Play ×10 → 场景切换 ×10 → 热重载 ×5 → Reload Assets → 正常退出）；进程退出后看 VS 输出「Detected memory leaks!」应为零；非零时 `_CrtSetBreakAlloc(分配号)` 重跑定位。
+  - B. **快照对比**：Debug → Windows → Diagnostic Tools → Memory Usage → Take Snapshot（快照 1）→ 执行目标段（100 次场景切换 / Play 100 次）→ 回空闲态快照 2 → Heap diff ≈ 0（允许 KB 级噪声）；NovaTests [memory-v13] 已把同口径自动化（_CrtMemCheckpoint/Difference + 三次平均 + 失败重跑一次）——人工与自动双证据。
+  - C. **引擎内存分类交叉验证**：导入 1024² RGBA8 贴图 → textureBytes +4MB；0.1s wav → audioBytes ≈ 时长×采样率×4；反复加载→卸载后分类数字回落基线。
+
+### 波 3 新增 P3 备案（不阻塞）
+
+1. **AssetStream 磁盘相对读按 CWD 锚定**：编辑器/Player 启动 chdir 项目根故可用；测试/工具进程无此语义（相对路径调用前需自行锚定）。
+2. **Catch2 INFO/UNSCOPED_INFO 在 NovaTests 不打印且按条分配常驻堆串**：内存测量用例禁用（改 fprintf）。
+3. **Windows DLL 重载基址复用合法（ASLR 槽位复用）**：FreeLibrary 语义验证不得以模块句柄不等为判据；本项目以 exe 钩子初始化计数为权威判据。
+4. **构建目录残留 NovaTestScripts.dll.old**：热重载备份（与 NovaGame.dll.old 同机制——新 DLL 加载失败时保留旧副本），无害。
+
+### 波 3 拾取语义备案（v1 取舍，已文档化）
+
+1. 降级分支（>200k 三角形/数据缺失）把 AABB 入口 t 当作命中 t 参与剪枝——大网格降级时可能遮蔽其后真命中（近似，备案）。
+2. skinned 网格按绑定姿态拾取，动画角色选中位置与视觉偏移（v1 取舍）。
+3. <100% 自定义 DPI 下 layoutFromWindowPoint 换算与原 fb/win 公式不再恒等（max(cs,1.0) 钳制）；固定 1280×720 + 常规 DPI 下逐位等价。
+
+### 波 3 复审微残留（P3，备案不阻塞）
+
+1. SettingsPanel m_chordEditing 在「点击输入框未修改即离开」时卡 true（显示层，影响≈零）。
+2. 工具键冲突仅挡无修饰精确 chord（F8 面板开关无修饰要求 → "Ctrl+F8" 可绑且双触发；"F" 视口聚焦不在工具键集合）。
+3. TestMemoryV13 用例③重跑条件不含漂移、无三轮平均（漂移型抖动直接红）。
+4. ARCHITECTURE §28.2.1 引 UIRenderer.cpp 行号漂移 +11（文档 nit）。
+5. CI 容差澄清：GitHub Actions 默认注入 CI=true，leakTolerancePct 接受任意非空 → CI 上 10% 分支生效，无需改。
+
+### 波 3 #14 文档化
+
+- **文档三件交付**：API-REFERENCE.md（脚本 API 手册，57 处签名/默认值机器比对全一致）、TUTORIAL.md（1 天打包教程，全部命令实机冒烟：--quit/--headless --import/--headless --build/--headless --build --release/Player 大厅运行）、UNITY-MIGRATION.md（12 组高频 API 对照 + 踩坑清单）。
+- **FEATURES 文档欠账已补**：缺 V0.5 章节（§15 后直接跳 V1.0）→ 本轮补 V0.5 汇总章（Architect 裁定授权）；§12.3 默认字体表述订正（实际优先级链 Noto Sans SC → 等线 DengXian → 微软雅黑 msyh，以 FontAtlas.cpp:178-186 为准）；§9.4「三角形级精确拾取」待实现条目 → 已实现（V1.0-12）。
+- 已知限制（见上文）：UI 子锚点相对屏幕解析（波 3 24 日段）、lambda 协程闭包捕获（MSVC 工具链，同段）、自由台面可步进高度 > stepHeight（波 2 验收第三日段）。

@@ -1,6 +1,7 @@
 #include "EditorApplication.h"
 
 #include "DragDrop.h"
+#include "EditorSettings.h"
 #include "Packager.h"
 #include "PrefabManager.h"
 #include "panels/AnimatorPanel.h"
@@ -17,6 +18,7 @@
 #include "panels/ReferenceCheckerPanel.h"  // V1.0-7 波 1 合波接线
 #include "panels/ShaderGraphPanel.h"       // V1.0-5 波 2 合波接线
 #include "panels/SceneViewPanel.h"
+#include "panels/SettingsPanel.h"          // V1.0-12 编辑器设置面板
 #include "panels/StatsPanel.h"
 #include "panels/TerrainPanel.h"
 
@@ -267,6 +269,17 @@ void EditorApplication::init() {
     auto shaderGraphPanel = std::make_unique<ShaderGraphPanel>();
     shaderGraphPanel->open = false;
     m_panels.push_back(std::move(shaderGraphPanel));
+    // Settings（V1.0-12，第 17 面板）：默认关，Edit → Editor Settings… 打开；dock 底部 Tab
+    auto settingsPanel = std::make_unique<SettingsPanel>();
+    settingsPanel->open = false;
+    m_settingsPanel = settingsPanel.get();
+    m_panels.push_back(std::move(settingsPanel));
+
+    // 编辑器设置（V1.0-12，§28.2）：main 已在 ImGui 配置期 load（多视口标志）；
+    // 此处把其余数据应用到运行态（snap/主题/样式/最近文件）。
+    // 注意顺序：必须早于默认场景加载——loadSceneInternal 会登记最近文件，
+    // 后应用会覆盖掉刚登记的条目
+    applyEditorSettings();
 
     // 脚本 DLL 初始加载（V0.5-7 波 2 2b 合波修复：此前漏接，编辑器启动即加载——
     // 必须在场景加载之前，脚本组件反序列化才能命中注册表；失败仅 warn，场景其余正常）
@@ -296,6 +309,68 @@ void EditorApplication::init() {
     Logger::info("NovaEditor 初始化完成");
 }
 
+void EditorApplication::applyEditorSettings() {
+    using namespace NovaEngine;
+    EditorSettings& settings = EditorSettings::instance();
+    const EditorSettings::Data& data = settings.data;
+
+    // 吸附值 → Snap Settings 运行态（Inspector 面板同源读写）
+    m_context.snapSettings.position = glm::vec3(data.snapMove);
+    m_context.snapSettings.rotationDeg = data.snapRotate;
+    m_context.snapSettings.scale = data.snapScale;
+
+    // 主题 + ImGuiStyle 自定义覆盖（ImGui 上下文已建）
+    EditorSettings::applyTheme(data.theme);
+    EditorSettings::applyStyleCustom(data);
+
+    // 最近文件（加载时已做存在性过滤；此处转换为运行态路径列表）
+    m_context.recentFiles.clear();
+    for (const std::string& s : data.recentFiles)
+        if (m_context.recentFiles.size() < 10)
+            m_context.recentFiles.emplace_back(std::filesystem::path(s));
+
+    Logger::info("编辑器设置已应用（snap {}/{}/{}，主题 {}，最近文件 {} 个）", data.snapMove,
+                 data.snapRotate, data.snapScale, data.theme, m_context.recentFiles.size());
+}
+
+void EditorApplication::syncEditorSettings() {
+    EditorSettings& settings = EditorSettings::instance();
+    EditorSettings::Data& data = settings.data;
+
+    // 吸附值（Inspector Snap Settings 拖拽每帧变化 → 差异即 dirty）
+    if (data.snapMove != m_context.snapSettings.position.x ||
+        data.snapRotate != m_context.snapSettings.rotationDeg ||
+        data.snapScale != m_context.snapSettings.scale) {
+        data.snapMove = m_context.snapSettings.position.x;
+        data.snapRotate = m_context.snapSettings.rotationDeg;
+        data.snapScale = m_context.snapSettings.scale;
+        settings.markDirty();
+    }
+
+    // 最近文件（场景打开/另存后 ctx 更新 → 回写）
+    bool recentDiff = data.recentFiles.size() != m_context.recentFiles.size();
+    if (!recentDiff) {
+        for (size_t i = 0; i < m_context.recentFiles.size(); ++i)
+            if (data.recentFiles[i] != m_context.recentFiles[i].string()) { recentDiff = true; break; }
+    }
+    if (recentDiff) {
+        data.recentFiles.clear();
+        for (const auto& p : m_context.recentFiles) data.recentFiles.push_back(p.string());
+        settings.markDirty();
+    }
+}
+
+void EditorApplication::maybeSaveEditorSettings() {
+    using namespace NovaEngine;
+    EditorSettings& settings = EditorSettings::instance();
+    if (!settings.dirty()) return;
+    m_settingsSaveCooldown -= Time::deltaTime();
+    if (m_settingsSaveCooldown > 0.0) return;   // 节流：拖拽等高频变更合并写盘
+    settings.save();
+    settings.clearDirty();
+    m_settingsSaveCooldown = 0.5;   // 0.5s 节流窗口
+}
+
 void EditorApplication::shutdown() {
     using namespace NovaEngine;
     // 音频引擎最先关闭（V0.3-2）：不依赖 GL，先停掉设备线程与全部声音，
@@ -317,6 +392,9 @@ void EditorApplication::shutdown() {
                                   // 缺失时静态缓存内的 shared_ptr<Mesh> 在上下文死后析构 → 退出崩溃，
                                   // 2026-11-19 harness 复现）
     Renderer::shutdown();
+    // 编辑器设置强制落盘（V1.0-12：节流窗口内退出也不丢变更）
+    syncEditorSettings();
+    if (EditorSettings::instance().dirty()) EditorSettings::instance().save();
     Logger::info("NovaEditor 退出");
     Logger::shutdown();  // 关闭日志文件（逐行已落盘）
 }
@@ -457,7 +535,20 @@ void EditorApplication::update(float dt) {
 
     updateWindowTitle();  // 每帧：场景名 + 脏标记 *
 
+    // 编辑器设置同步（V1.0-12）：运行态差异 → 数据 + dirty；节流落盘
+    syncEditorSettings();
+    maybeSaveEditorSettings();
+
     ImGui::Render();
+    // 多视口（V1.0-12）：ImGui::Render 不自动 UpdatePlatformWindows（1.93），
+    // 平台窗口（拖出的面板）需主循环显式渲染；RenderPlatformWindowsDefault 内部
+    // 切换各视口 GL 上下文，包一层备份恢复与 main 视图继续自有 GL 调用互不干扰。
+    if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+        GLFWwindow* backup = glfwGetCurrentContext();
+        ImGui::UpdatePlatformWindows();
+        ImGui::RenderPlatformWindowsDefault();
+        glfwMakeContextCurrent(backup);
+    }
 }
 
 void EditorApplication::render() {
@@ -504,6 +595,7 @@ void EditorApplication::buildDockLayout(ImGuiID dockspaceId) {
     ImGui::DockBuilderDockWindow("Mixer", dockBottom);             // V1.0-8 波 1 合波接线
     ImGui::DockBuilderDockWindow("Physics Layers", dockBottom);    // V1.0-3 波 2 合波接线
     ImGui::DockBuilderDockWindow("Shader Graph", dockBottom);      // V1.0-5 波 2 合波接线
+    ImGui::DockBuilderDockWindow("Settings", dockBottom);          // V1.0-12 编辑器设置
     ImGui::DockBuilderDockWindow("Scene", dockMain);
     ImGui::DockBuilderFinish(dockspaceId);
 }
@@ -518,15 +610,36 @@ void EditorApplication::showMainMenu() {
     };
 
     if (ImGui::BeginMainMenuBar()) {
+        // 快捷键提示按当前绑定显示（V1.0-12；未重绑时与硬编码文案一致）
+        const std::string kbNew = EditorSettings::chordFor("New Scene");
+        const std::string kbOpen = EditorSettings::chordFor("Open Scene");
+        const std::string kbSave = EditorSettings::chordFor("Save Scene");
+        const std::string kbUndo = EditorSettings::chordFor("Undo");
+        const std::string kbRedo = EditorSettings::chordFor("Redo");
+        const std::string kbPlay = EditorSettings::chordFor("Play/Stop");
         if (ImGui::BeginMenu("File")) {
-            if (ImGui::MenuItem("New Scene", "Ctrl+N", false, editMode)) newScene();
+            if (ImGui::MenuItem("New Scene", kbNew.c_str(), false, editMode)) newScene();
             // 2D 模板（V0.5-10 波 2 2b 合波接线）：从 assets/scenes/2DTemplate.nova.json 创建
             // （与 Open Scene 同流：判脏确认；打开后 Ctrl+S 会存回模板路径——与打开任意资产场景一致）
             if (ImGui::MenuItem("New 2D Scene", nullptr, false, editMode))
                 openScene(std::filesystem::path("assets/scenes/2DTemplate.nova.json"));
-            if (ImGui::MenuItem("Open Scene...", "Ctrl+O", false, editMode)) openSceneDialog();
+            if (ImGui::MenuItem("Open Scene...", kbOpen.c_str(), false, editMode)) openSceneDialog();
+            // 最近文件（V1.0-12，§28.2）：≤10，显示时做文件存在性过滤——被删除文件不列出；
+            // 菜单构建后文件被删的竞态由 loadSceneInternal 的失败路径兜底（不崩溃）
+            if (ImGui::BeginMenu("Open Recent", editMode)) {
+                bool anyListed = false;
+                for (const auto& r : m_context.recentFiles) {
+                    std::error_code ec;
+                    if (!std::filesystem::exists(r, ec)) continue;   // 存在性过滤
+                    anyListed = true;
+                    if (ImGui::MenuItem(r.filename().string().c_str(), r.string().c_str()))
+                        openScene(r);
+                }
+                if (!anyListed) ImGui::MenuItem("(空)", nullptr, false, false);
+                ImGui::EndMenu();
+            }
             ImGui::Separator();
-            if (ImGui::MenuItem("Save Scene", "Ctrl+S", false, editMode)) saveScene();
+            if (ImGui::MenuItem("Save Scene", kbSave.c_str(), false, editMode)) saveScene();
             if (ImGui::MenuItem("Save Scene As...", nullptr, false, editMode)) saveSceneAs();
             ImGui::Separator();
             // Build Settings（V0.3-12 波 3）：第 8 面板开关（Edit 态可编辑；Play 态经 SceneManager 消费）
@@ -559,22 +672,27 @@ void EditorApplication::showMainMenu() {
         if (ImGui::BeginMenu("Edit")) {
             // Undo/Redo（V0.2-1）：Edit 态 + 栈深度允许 + gizmo 未拖拽时可用
             const bool gizmoFree = !m_gizmo.isUsing();
-            if (ImGui::MenuItem("Undo", "Ctrl+Z", false,
+            if (ImGui::MenuItem("Undo", kbUndo.c_str(), false,
                                 editMode && gizmoFree && m_context.undoRedo.canUndo()))
                 undoScene();
-            if (ImGui::MenuItem("Redo", "Ctrl+Y", false,
+            if (ImGui::MenuItem("Redo", kbRedo.c_str(), false,
                                 editMode && gizmoFree && m_context.undoRedo.canRedo()))
                 redoScene();
             ImGui::Separator();
-            if (ImGui::MenuItem(editMode ? "Play" : "Stop", "Ctrl+P", false, true)) {
+            if (ImGui::MenuItem(editMode ? "Play" : "Stop", kbPlay.c_str(), false, true)) {
                 if (editMode) enterPlayMode();
                 else exitPlayMode();
             }
             if (ImGui::MenuItem("Pause", nullptr, m_context.paused, !editMode))
                 m_context.paused = !m_context.paused;
             // V0.3-10 子集：仅 Play 且 Paused 时可点，推进一帧
-            if (ImGui::MenuItem("Step", "F10", false, !editMode && m_context.paused))
+            if (ImGui::MenuItem("Step", EditorSettings::chordFor("Step").c_str(), false,
+                                !editMode && m_context.paused))
                 m_context.stepRequested = true;
+            ImGui::Separator();
+            // 编辑器设置面板（V1.0-12）：主题/快捷键/多视口（吸附值在 Inspector Snap Settings）
+            if (ImGui::MenuItem("Editor Settings...", nullptr, false, editMode))
+                if (m_settingsPanel) m_settingsPanel->open = true;
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("View")) {
@@ -608,7 +726,9 @@ void EditorApplication::showMainMenu() {
         // 脚本热重载（V0.5-7 波 2 2b 合波接线）：Edit 态可用；Play 态灰显（快照含旧类型）
 #ifdef NOVA_SCRIPTS_DLL
         if (ImGui::BeginMenu("Scripts")) {
-            if (ImGui::MenuItem("Reload Scripts", "Ctrl+Shift+R", false,
+            // P2-5：快捷键提示走设置表（与其它菜单 chordFor 显示一致）
+            if (ImGui::MenuItem("Reload Scripts",
+                                EditorSettings::chordFor("Reload Scripts").c_str(), false,
                                 editMode && ScriptRuntime::isLoaded()))
                 reloadScriptsFlow();
             if (ImGui::MenuItem("Auto Reload", nullptr, &m_autoReloadScripts)) {}
@@ -624,43 +744,48 @@ void EditorApplication::handleGlobalShortcuts() {
     if (ImGui::GetIO().WantCaptureKeyboard) return;  // 输入框/重命名时抑制快捷键
     if (m_showSaveConfirm) return;                   // 未保存确认模态期间抑制全部快捷键
 
-    const bool ctrl = Input::isKeyDown(Key::LeftControl) || Input::isKeyDown(Key::RightControl);
-    const bool shift = Input::isKeyDown(Key::LeftShift) || Input::isKeyDown(Key::RightShift);
+    // V1.0-12（§28.2）：核心快捷键走设置表（chordFor 恒有值——默认表兜底；
+    // 未重绑时与既有硬编码行为逐键一致）
+    const bool editMode = m_context.state == EditorContext::EditorState::Edit;
 
-    if (ctrl && Input::isKeyPressed(Key::P)) {
-        if (m_context.state == EditorContext::EditorState::Edit) enterPlayMode();
+    if (EditorSettings::chordMatches(EditorSettings::chordFor("Play/Stop"))) {
+        if (editMode) enterPlayMode();
         else exitPlayMode();
     }
-    if (ctrl && Input::isKeyPressed(Key::S)) saveScene();
-    if (ctrl && Input::isKeyPressed(Key::N)) newScene();
-    if (ctrl && Input::isKeyPressed(Key::O)) openSceneDialog();
+    if (EditorSettings::chordMatches(EditorSettings::chordFor("Save Scene"))) saveScene();
+    if (EditorSettings::chordMatches(EditorSettings::chordFor("New Scene"))) newScene();
+    if (EditorSettings::chordMatches(EditorSettings::chordFor("Open Scene"))) openSceneDialog();
 #ifdef NOVA_SCRIPTS_DLL
-    // Ctrl+Shift+R：脚本热重载（V0.5-7；仅 Edit 态——Play 快照含旧类型）
-    if (ctrl && shift && Input::isKeyPressed(Key::R) &&
-        m_context.state == EditorContext::EditorState::Edit)
+    // 脚本热重载（V0.5-7；仅 Edit 态——Play 快照含旧类型）
+    if (EditorSettings::chordMatches(EditorSettings::chordFor("Reload Scripts")) && editMode)
         reloadScriptsFlow();
 #endif
+    // 单步推进一帧（V0.3-10 子集；Play+Paused）
+    if (EditorSettings::chordMatches(EditorSettings::chordFor("Step")) &&
+        m_context.state == EditorContext::EditorState::Play && m_context.paused)
+        m_context.stepRequested = true;
 
-    // F8：Stats 面板开关（V0.2-11）
+    // F8：Stats 面板开关（V0.2-11；编辑器工具键，不进核心设置表）
     if (Input::isKeyPressed(Key::F8) && m_statsPanel)
         m_statsPanel->open = !m_statsPanel->open;
 
-    // F10：Play+Paused 单步推进一帧（V0.3-10 子集）
-    if (m_context.state == EditorContext::EditorState::Play && m_context.paused &&
-        Input::isKeyPressed(Key::F10))
-        m_context.stepRequested = true;
-
-    // Undo/Redo（V0.2-1）：仅 Edit 态且 gizmo 未拖拽；Ctrl+Z=undo、Ctrl+Shift+Z/Ctrl+Y=redo
-    if (m_context.state == EditorContext::EditorState::Edit && !m_gizmo.isUsing()) {
-        if (ctrl && Input::isKeyPressed(Key::Z)) {
-            if (shift) redoScene();
-            else undoScene();
+    // Undo/Redo（V0.2-1）：仅 Edit 态且 gizmo 未拖拽
+    if (editMode && !m_gizmo.isUsing()) {
+        if (EditorSettings::chordMatches(EditorSettings::chordFor("Undo"))) undoScene();
+        if (EditorSettings::chordMatches(EditorSettings::chordFor("Redo"))) redoScene();
+        // 兼容别名 Ctrl+Shift+Z = Redo（仅默认绑定未重绑时保留，与旧行为一致）
+        if (EditorSettings::chordFor("Undo") == "Ctrl+Z" &&
+            EditorSettings::chordFor("Redo") == "Ctrl+Y") {
+            const bool ctrl =
+                Input::isKeyDown(Key::LeftControl) || Input::isKeyDown(Key::RightControl);
+            const bool shift =
+                Input::isKeyDown(Key::LeftShift) || Input::isKeyDown(Key::RightShift);
+            if (ctrl && shift && Input::isKeyPressed(Key::Z)) redoScene();
         }
-        if (ctrl && Input::isKeyPressed(Key::Y)) redoScene();
     }
 
-    // gizmo 快捷键（W/E/R 切换操作，X 切换坐标空间）
-    if (m_context.state == EditorContext::EditorState::Edit) {
+    // gizmo 快捷键（W/E/R 切换操作，X 切换坐标空间；编辑器工具键，不进设置表）
+    if (editMode) {
         if (Input::isKeyPressed(Key::W)) m_gizmo.setOperation(GizmoController::Operation::Translate);
         if (Input::isKeyPressed(Key::E)) m_gizmo.setOperation(GizmoController::Operation::Rotate);
         if (Input::isKeyPressed(Key::R)) m_gizmo.setOperation(GizmoController::Operation::Scale);
@@ -814,6 +939,7 @@ void EditorApplication::loadSceneInternal(const std::filesystem::path& p) {
     m_context.clearSelection();
     applyEditorCameraFromScene();  // 编辑器相机位置随场景恢复（§5 editorCamera 段）
     m_context.undoRedo.clear(SceneSerializer::serialize(*m_scene, -1));  // 压新基线
+    m_context.addRecentFile(p);    // 最近文件登记（V1.0-12；去重/上限由 addRecentFile 保证）
     Logger::info("场景已打开: {}", p.string());
 }
 
@@ -847,6 +973,7 @@ bool EditorApplication::saveSceneAs() {
     if (SceneSerializer::saveToFile(*m_scene, p)) {
         m_context.currentScenePath = p;
         m_context.sceneDirty = false;
+        m_context.addRecentFile(p);  // 另存场景同样进最近文件（V1.0-12）
         Logger::info("场景已保存: {}", p.string());
         return true;
     }

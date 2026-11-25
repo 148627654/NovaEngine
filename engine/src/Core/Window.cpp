@@ -140,6 +140,16 @@ void Window::getFramebufferSize(int& outWidth, int& outHeight) const {
     }
 }
 
+void Window::getContentScale(float& outX, float& outY) const {
+    // V1.0-12 §28.2.1：内容缩放查询封装——player 侧不再裸调 glfwGetWindowContentScale
+    if (m_handle) {
+        glfwGetWindowContentScale(m_handle, &outX, &outY);
+    } else {
+        outX = 1.0f;
+        outY = 1.0f;
+    }
+}
+
 GLFWwindow* Window::nativeHandle() const {
     return m_handle;
 }

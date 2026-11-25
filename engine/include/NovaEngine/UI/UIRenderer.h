@@ -30,6 +30,18 @@ public:
     // 窗口逻辑→帧缓冲像素比（150% 显示器 = 1.5）。调用方每帧在 render 之前设置
     //（编辑器 SceneView 用 ImGui FramebufferScale；播放器用 fbW/winW）。默认 1.0。
     static void setDpiScale(float scale);
+    // ===== V1.0-12 §28.2.1 追加（resize/DPI 鼠标映射统一）=====
+    // 窗口逻辑坐标（GLFW 光标坐标，左上原点；调用方已减去视口偏移/letterbox 起点）
+    // → 布局空间（逻辑像素 = 物理 FBO / setDpiScale）的一次性换算，内容缩放参与：
+    //   layout = windowPoint × contentScale / dpiScale。
+    // contentScale = 窗口内容缩放（Window::getContentScale / glfwGetWindowContentScale；
+    // GLFW_SCALE_TO_MONITOR 下与 ImGui 帧缓冲缩放比、fb/win 比值同源）。
+    // 缺省（≤0）取内部 dpiScale——调用方每帧先 setDpiScale(contentScale) 时两者
+    // 一致、换算恒等（布局空间 = 窗口逻辑像素）；不一致（如 dpi 设置滞后一帧）时
+    // 公式自动补偿，保证与本模块内部 ÷dpiScale 的输入契约自洽。
+    // 追加式：既有 processInput/processWheelInput/hitTest 签名与行为不变。
+    static glm::vec2 layoutFromWindowPoint(const glm::vec2& windowPoint,
+                                           float contentScale = -1.0f);
 
     // ---- V0.5-13 追加（命中 / 冒泡 /「Play 中 UI 优先于场景拾取」）----
     // 最上层命中：全部 UI 元素 rect（与 render 同一布局公式）中 DFS 画家序最后命中者

@@ -41,7 +41,9 @@ public:
     static bool isMouseDown(MouseButton button);
     static bool isMousePressed(MouseButton button);
     static bool isMouseReleased(MouseButton button);
-    static glm::vec2 mousePosition();               // 窗口逻辑坐标（左上原点）
+    static glm::vec2 mousePosition();   // 窗口逻辑坐标（左上原点；beginFrame 内 glfwGetCursorPos
+                                        // 每帧轮询刷新，非回调缓存——V1.0-12 §28.2.1 语义对齐：
+                                        // 与 UIRenderer 布局空间的统一换算入口 = UIRenderer::layoutFromWindowPoint）
     static glm::vec2 mouseDelta();
     static glm::vec2 scrollDelta();
 

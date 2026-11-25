@@ -23,7 +23,7 @@
 #endif
 
 #include <glad/gl.h>                    // glViewport
-#include <GLFW/glfw3.h>                  // glfwGetWindowSize（窗口逻辑尺寸；GLFW_INCLUDE_NONE 已定义）
+#include <GLFW/glfw3.h>                  // glfwSetWindowAttrib（固定窗口；GLFW_INCLUDE_NONE 已定义）
 #include <glm/gtc/matrix_transform.hpp> // lookAt / perspective / radians
 
 #include <chrono>      // V1.0-1 波 1 合波接线：Profiler 模块档计时
@@ -243,19 +243,21 @@ int main(int argc, char** argv) {
         glViewport(0, 0, fbW, fbH);
 
         // UI 输入（V0.3-3 契约：Scene::update 之前调用 → 脚本 onUpdate 读到本帧按钮状态）。
-        // HiDPI：Input 鼠标为窗口逻辑坐标，UI 渲染按帧缓冲尺寸——按缩放比换算（评审 P2-5）
-        int winW = args.width, winH = args.height;
-        glfwGetWindowSize(window->nativeHandle(), &winW, &winH);
         // HiDPI（2026-11-16）：UI 全局缩放 = 显示器内容缩放（150% = 1.5）——GLFW
         // SCALE_TO_MONITOR 下窗口/帧缓冲同倍放大，比值恒 1，须用内容缩放才能
         // 把 fontSize 等逻辑尺寸映射到物理像素（文字按 1.5 倍物理分辨率渲染不发虚）
+        // V1.0-12 §28.2.1：鼠标换算收敛——窗口逻辑 → 布局空间统一走
+        // UIRenderer::layoutFromWindowPoint（内容缩放参与）；processInput 期望物理 FBO
+        // 坐标 → 布局 ×contentScale 还原物理。固定 1280×720 + SCALE_TO_MONITOR 下
+        // contentScale == fb/win（恒等），与旧公式逐位等价（评审 P2-5 语义不变；
+        // 旧 winW/winH>0 守卫在固定窗口下不可达，随公式一并收敛）。
         float csx = 1.0f, csy = 1.0f;
-        glfwGetWindowContentScale(window->nativeHandle(), &csx, &csy);
-        UIRenderer::setDpiScale(std::max(csx, 1.0f));
-        glm::vec2 uiMouse = Input::mousePosition();
-        if (winW > 0 && winH > 0)
-            uiMouse = glm::vec2(uiMouse.x * static_cast<float>(fbW) / static_cast<float>(winW),
-                                uiMouse.y * static_cast<float>(fbH) / static_cast<float>(winH));
+        window->getContentScale(csx, csy);
+        const float contentScale = std::max(csx, 1.0f);
+        UIRenderer::setDpiScale(contentScale);
+        glm::vec2 uiMouse =
+            UIRenderer::layoutFromWindowPoint(Input::mousePosition(), contentScale);
+        uiMouse *= contentScale;   // 布局 → 物理 FBO（processInput 契约：内部 ÷dpiScale）
         UIRenderer::processInput(scene, uiMouse, Input::isMouseDown(MouseButton::Left),
                                  Input::isMousePressed(MouseButton::Left));
 

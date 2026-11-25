@@ -23,7 +23,7 @@ public:
     glm::vec3 m_respawnPos{0.0f, 0.9f, 10.0f};    // 出生点（两场景 JSON 各写各的：大厅 (0,0.9,2)、关卡 (0,0.9,10)）
 
     void onStart() override;
-    void onUpdate(float dt) override;
+    void onUpdate(float /*dt*/) override;
     void onSerialize(nlohmann::json& out) const override;
     void onDeserialize(const nlohmann::json& in) override;
 

@@ -2,7 +2,20 @@
 
 #include <NovaEngine/Serialization/SceneSerializer.h>
 
+#include <algorithm>
+#include <system_error>
+
 namespace NovaEditor {
+
+// 最近文件登记（V1.0-12）：绝对路径规范化 → 去重移到最前 → 上限 10
+void EditorContext::addRecentFile(const std::filesystem::path& p) {
+    if (p.empty()) return;
+    std::error_code ec;
+    const std::filesystem::path abs = std::filesystem::absolute(p, ec).lexically_normal();
+    std::erase(recentFiles, abs);  // 去重（同路径移最前）
+    recentFiles.insert(recentFiles.begin(), abs);
+    if (recentFiles.size() > 10) recentFiles.resize(10);
+}
 
 NovaEngine::GameObject* EditorContext::activeObject() {
     if (selectedIds.size() != 1) return nullptr;

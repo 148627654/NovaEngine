@@ -19,7 +19,7 @@ struct MemorySnapshot {
     size_t cubemapBytes = 0;
     size_t materialAssetCount = 0;
     size_t objectCount = 0, componentCount = 0;   // 活动场景统计
-    size_t loadedSceneCount = 0;    // V1.0-2 落地后生效（波 1 恒 1）
+    size_t loadedSceneCount = 0;    // V1.0-13 已收口：= SceneManager::loadedScenes().size()（活动+叠加场景数；无活动场景 = 0）
 };
 
 // 帧记录（环形缓冲）

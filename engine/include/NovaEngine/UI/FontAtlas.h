@@ -13,7 +13,8 @@ struct Glyph {
 };
 
 // stb_truetype 字体图集（V0.3-3）：按需烘焙（新字形追加，满则扩容重建）；
-// 默认系统字体 msyh.ttc，失败降级内置 ASCII；含 1x1 白块（纯色 Image 共用同批）
+// 默认字体优先级链 Noto Sans SC → 等线 DengXian → 微软雅黑 msyh，失败降级内置 ASCII；
+// 含 1x1 白块（纯色 Image 共用同批）
 class FontAtlas {
 public:
     // 字形参考像素高（唯一出处）：UIRenderer 排版缩放 = fontSize/kRefPx，

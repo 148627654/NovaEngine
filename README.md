@@ -91,7 +91,7 @@ Release 构建:`cmake --build build --config Release`。
 **编辑器**
 
 - `Ctrl+N` / `Ctrl+O` / `Ctrl+S` 新建 / 打开 / 保存场景(`.nova.json`,JSON 文本可读)
-- 场景视口右键创建物体(Cube/Sphere/Plane/Camera/Light/UI 等),拖拽成父子层级
+- Hierarchy 面板右键创建物体(Create Empty / Cube / Plane / Directional Light / Camera),拖拽成父子层级;球体等其它内置图元在 MeshRenderer 的 mesh 字段用 `builtin:` 路径,UI 经 Add Component 挂载
 - `W` 位移 / `E` 旋转 / `R` 缩放 / `X` 切换 Local/World;按住 Ctrl 拖动 = 吸附
 - 右键拖拽旋转视角、中键拖拽平移、滚轮缩放;按住右键 + WASD 飞行(Shift 加速)
 - `Ctrl+P` Play / Stop

@@ -38,7 +38,7 @@ void NeonPlayerWatcher::onStart() {
                              m_pads.size(), m_cc ? "已连接" : "未找到!");
 }
 
-void NeonPlayerWatcher::onUpdate(float dt) {
+void NeonPlayerWatcher::onUpdate(float /*dt*/) {
     if (!enabled)
         return;
 

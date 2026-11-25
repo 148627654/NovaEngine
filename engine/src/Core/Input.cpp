@@ -321,6 +321,9 @@ void Input::beginFrame() {
         for (int b = 0; b < 3; ++b) {
             g_mouseDown[b] = glfwGetMouseButton(win, b) == GLFW_PRESS;
         }
+        // 光标位置每帧轮询（非回调缓存）——光标静止时窗口被移动/缩放也不脱节
+        //（V1.0-12 §28.2.1 语义对齐：mousePosition = 窗口逻辑坐标，左上原点；
+        // 与 UIRenderer 布局空间的统一换算入口 = UIRenderer::layoutFromWindowPoint）
         double mx = 0.0, my = 0.0;
         glfwGetCursorPos(win, &mx, &my);
         g_prevMousePos = g_mousePos;

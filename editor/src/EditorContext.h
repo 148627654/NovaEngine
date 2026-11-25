@@ -41,6 +41,12 @@ public:
     bool sceneDirty = false;
     std::string playSnapshot;                // 进入 Play 时的 JSON 快照
 
+    // 最近文件（V1.0-12，§28.2）：≤10、新在前、绝对路径；File → Open Recent 菜单消费。
+    // 持久化随 EditorSettings（%APPDATA%/NovaEngine/editor-settings.json），加载时存在性过滤
+    std::vector<std::filesystem::path> recentFiles;
+    // 场景成功打开/另存后登记（去重：同路径移到最前；超 10 丢最旧）
+    void addRecentFile(const std::filesystem::path& p);
+
     UndoRedoManager undoRedo;                // 快照式撤销栈（V0.2-1）
 
     // 脏标记漏斗（V0.2-2 裁定 4）：

@@ -22,6 +22,7 @@
 #include <NovaEngine/NovaEngine.h>
 
 #include "EditorApplication.h"
+#include "EditorSettings.h"
 #include "Packager.h"
 
 #include <imgui.h>
@@ -288,7 +289,12 @@ int main(int argc, char** argv) {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;  // ViewportsEnable 默认关（§11）
+    // 编辑器设置（V1.0-12，§28.2）：须在 ImGui 配置期（首个 NewFrame 之前）加载——
+    // 多视口标志在此生效；其余数据（snap/主题/最近文件）由 EditorApplication::init 应用。
+    NovaEditor::EditorSettings::instance().load();
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;  // ViewportsEnable 按设置开关（默认关）
+    if (NovaEditor::EditorSettings::instance().data.multiViewport)
+        io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;  // V1.0-12：多视口（重启生效）
     ImGui::StyleColorsDark();
 
     // 默认字体 + 合并中文字体（msyh.ttc 不存在时回退纯默认字体，§11.9）

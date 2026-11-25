@@ -2997,7 +2997,7 @@ struct MemorySnapshot {
     size_t cubemapBytes = 0;
     size_t materialAssetCount = 0;
     size_t objectCount = 0, componentCount = 0;   // 活动场景统计
-    size_t loadedSceneCount = 0;    // V1.0-2 落地后生效（波 1 恒 1）
+    size_t loadedSceneCount = 0;    // V1.0-13 已收口：= SceneManager::loadedScenes().size()（活动+叠加场景数；无活动场景 = 0）
 };
 
 // 帧记录（环形缓冲）
@@ -3604,12 +3604,12 @@ static bool buildRelease(const std::filesystem::path& outputDir);
 
 ## 28.2 编辑器细节完善（cT，V1.0-12）
 
-**文件落点**：editor/src/EditorSettings.h/.cpp（新）、editor/src/panels/SettingsPanel.h/.cpp（新）、EditorApplication.h/.cpp（最近文件/设置加载）、SceneViewPanel.cpp（三角形拾取）、main.cpp（ViewportsEnable 按设置）。
+**文件落点**：editor/src/EditorSettings.h/.cpp（新）、editor/src/panels/SettingsPanel.h/.cpp（新）、EditorApplication.h/.cpp（最近文件/设置加载）、SceneViewPanel.cpp（三角形拾取）、main.cpp（ViewportsEnable 按设置）。（2026-11-25 追加：resize/DPI 鼠标映射统一的引擎侧修复裁定见 §28.2.1，含引擎文件所有权授予。）
 
-- **多视口（ImGui ViewportsEnable）评估**：开启前必须回归——gizmo 拖拽（drawlist owner 语义变化，KNOWN-ISSUES #11 同族）、拖放（SceneView/AssetBrowser payload）、HiDPI 150%、面板拖出/拖回。**评估失败 → 保持关闭 + KNOWN-ISSUES 备案理由（允许的交付形态，不硬开）**。
+- **多视口（ImGui ViewportsEnable）评估**：开启前必须回归——gizmo 拖拽（drawlist owner 语义变化，KNOWN-ISSUES #11 同族）、拖放（SceneView/AssetBrowser payload）、HiDPI 150%、面板拖出/拖回。**评估失败 → 保持关闭 + KNOWN-ISSUES 备案理由（允许的交付形态，不硬开）**。**评估结论（2026-11-25 追认）**：默认关闭（multiViewport=false，Settings 面板可开启、重启生效）+ KNOWN-ISSUES 备案人工复核步骤——理由：远程会话窗口管理器抑制平台窗口显示，「面板拖出主窗口」路径无法自动化验证，走验收 1 二选一的回退分支。开启路径代码已交付（cT：windowGlobalPos 全局坐标适配 + Edit 滚轮 fbScale 换算），人工复核照备案步骤执行。
 - **最近文件**：EditorContext +recentFiles（≤10，文件存在性过滤）→ File→Open Recent 菜单。
-- **编辑器设置持久化**：%APPDATA%/NovaEngine/editor-settings.json（version 1）——`{"version":1,"snap":{"move":0.5,"rotate":15.0,"scale":0.5},"theme":"dark","keybindings":{...},"recentFiles":[...],"multiViewport":false}`。吸附值并入既有 Snap Settings 面板（读写换存储）；主题 v1 = 2–3 套预置 + ImGuiStyle 自定义；快捷键 v1 = 静态映射表（核心快捷键 Ctrl+Z/Ctrl+S/Ctrl+P 等保留不可移除，自定义项冲突检测）。
-- **三角形级拾取（替代 AABB 粗测，KNOWN-ISSUES #11 闭环）**：SceneViewPanel 拾取路径替换——保留 AABB 粗筛（先剔除）→ 逐三角形 Möller–Trumbore（CPU，世界空间变换缓存）→ 最近交点；护栏：单网格 >200k 三角形跳过精确测试（AABB 结果降级 + warn 一次，防大模型卡顿）；gizmo/选择行为不变（hit 语义变化仅「大平面不再遮挡后方」）。
+- **编辑器设置持久化**：%APPDATA%/NovaEngine/editor-settings.json（version 1）——`{"version":1,"snap":{"move":0.5,"rotate":15.0,"scale":0.5},"theme":"dark","keybindings":{...},"recentFiles":[...],"multiViewport":false}`。吸附值并入既有 Snap Settings 面板（读写换存储）；主题 v1 = 2–3 套预置 + ImGuiStyle 自定义；快捷键 v1 = 静态映射表（核心快捷键 Ctrl+Z/Ctrl+S/Ctrl+P 等保留不可移除，自定义项冲突检测）。**裁定记录（2026-11-25 追认 cT 实现）**：动作集合 = 8 动作固定表（Play/Stop、Save、Undo、Redo、New、Open、Reload Scripts、Step），可重绑不可删（defaultKeybindings 恒为全量；EditorSettings.h:41-42、62）；W/E/R/X 等工具键不进表——符合契约「核心快捷键保留不可移除」意图。
+- **三角形级拾取（替代 AABB 粗测，KNOWN-ISSUES #11 闭环）**：SceneViewPanel 拾取路径替换——保留 AABB 粗筛（先剔除）→ 逐三角形 Möller–Trumbore（CPU，世界空间变换缓存）→ 最近交点；护栏：单网格 >200k 三角形跳过精确测试（AABB 结果降级 + warn 一次，防大模型卡顿）；gizmo/选择行为不变（hit 语义变化仅「大平面不再遮挡后方」）。**裁定记录（2026-11-25 追认 cT 实现；同日 P1-2 终审修订）**：「世界空间变换缓存」= 每次拾取内逐候选（GameObject）变换一次、该候选三角形复用（SceneViewPanel.cpp:272、289-290）；不做跨帧世界顶点缓存——理由：gizmo 拖拽矩阵帧帧可变，持久缓存无收益且会无限增长。拾取数据缓存（局部空间 MeshData）= 键 Mesh* + 条目内 weak_ptr&lt;Mesh&gt; 同源校验（lock()==mesh 才命中；解析失败缓存 nullptr 防每击重试）+ 插入时清扫过期条目——**P1-2 终审（Reviewer 上报）**：裸指针键不感知 Mesh 析构（AssetDatabase 网格缓存为 weak，场景卸载/Reload Assets 后 Mesh 真实析构）→ 死条目既驻留 CPU 几何（马拉松内存常驻）又可能被堆地址复用错配（新 Mesh 命中旧 MeshData）；weak_ptr 同源校验 + 过期清扫闭环后，缓存生命周期与 Mesh 真实生命周期绑定。符合契约本意。
 
 **验收要点（cT，照抄细化 ROADMAP §7-12）**：
 1. 面板可拖出主窗口（或评估失败 → 备案回退，二选一，理由写入 KNOWN-ISSUES）。
@@ -3618,7 +3618,39 @@ static bool buildRelease(const std::filesystem::path& outputDir);
 4. 大平面不再遮挡后方物体拾取：demo 地面 + 地面后小物体 → 点击小物体直接选中（#11 闭环）；gizmo 真拖真看（2026-11-17 教训：交互验收必须真拖）。
 5. 多视口开启后（若开）：gizmo 拖拽/拖放/字体三处回归通过。
 
-**风险：中。回滚**：设置文件独立、拾取函数内部替换——回退 AABB 路径即旧行为。**审重点**：拾取性能（2000 物体场景拾取帧耗时统计层回归）、多视口 GL 上下文切换（imgui_impl_opengl3 原生支持，但 gizmo/拖放/字体三处必测）。
+**风险：中。回滚**：设置文件独立、拾取函数内部替换——回退 AABB 路径即旧行为。**审重点**：拾取性能（2000 物体场景拾取帧耗时统计层回归）、拾取缓存生命周期（P1-2：weak_ptr 同源校验 + 过期清扫，长会话导入/卸载循环后进程内存回落）、多视口 GL 上下文切换（imgui_impl_opengl3 原生支持，但 gizmo/拖放/字体三处必测）。
+
+### 28.2.1 resize/DPI 鼠标映射统一（2026-11-25 Architect 追加裁定）
+
+**背景**：KNOWN-ISSUES 2026-11-24 段（波 3 示例游戏验收期备案）原文指向：
+> 临时方案：Player 窗口 GLFW_RESIZABLE=FALSE（示例游戏按 1280×720 设计基准布局）；**波 3 #12 修复方向**：resize/DPI 下鼠标→布局空间映射统一（Input::mousePosition 语义与 UIRenderer 布局空间对齐 + 内容缩放参与换算）。
+
+用户对 #12 的预期含此项。cT 已交付编辑器侧适配（SceneViewPanel Edit 态滚轮输入补 ×fbScale——150% HiDPI 命中修正、100% 行为不变；windowGlobalPos 多视口全局坐标适配），并上报引擎侧需求清单（cT 报告 §4）。§28.0 声明「波 3 无新引擎冻结头」且所有权表未含引擎文件——本节为准修裁定 + 引擎文件所有权追加授予。
+
+**现状核实（2026-11-25 通读）**：
+1. Input::beginFrame 已用 glfwGetCursorPos 每帧轮询刷新（Input.cpp:324-328，f794671 落地）——cT 报告所述「光标回调最后值、光标静止时窗口被移动/缩放会脱节」与现状不符（无光标位置回调，轮询已就位）；该项无需功能改动，仅需确认 Input.h:44 语义注释（窗口逻辑坐标，左上原点）与 UIRenderer 新契约一致。
+2. UIRenderer 布局空间契约（§24.3.5-8）：processInput/processWheelInput/hitTest 入口 = 物理 FBO 坐标，内部 ÷s_dpiScale 转布局空间（UIRenderer.cpp:1268/1375/1392）；setDpiScale = 窗口逻辑→帧缓冲像素比（UIRenderer.h:29-32）。
+3. 换算责任分散现状：编辑器 SceneViewPanel（Play：letterbox fit-rect ×(w/dstSize)；Edit 滚轮：(io.MousePos−vpPosG)×fbScale）；player（Input::mousePosition × fb/win；setDpiScale 已取 glfwGetWindowContentScale）。口径不一（编辑器取 ImGui 帧缓冲缩放比，player 取 fb/win 比值）。
+4. Window 层无 contentScale 查询——player 现以 nativeHandle 裸调 glfwGetWindowContentScale（main.cpp:252-253）。
+
+**裁定（准修，落地形态「追加式」）**：
+1. UIRenderer 新增公开静态方法（命名建议 layoutFromWindowPoint 或等价）：入口 = 窗口逻辑坐标（GLFW 光标坐标，左上原点），内部一次性完成「窗口逻辑 → 布局空间」换算（内容缩放参与，换算所需参数自取或追加传入——UIRenderer 为无窗口依赖模块，设计细节由 cT 在追加式约束内自选，合波日 Architect 核定）；现有 processInput/processWheelInput/hitTest 签名与行为不变（内部继续 ÷s_dpiScale）。新增公开方法属追加式、不冻结、向后兼容——不违反 §28.0「波 3 无新引擎冻结头」纪律（该纪律约束冻结头签名变更与新冻结模块，不约束追加兼容方法）。
+2. Player 窗口保持固定 1280×720（GLFW_RESIZABLE=FALSE）不动：示例游戏已按 1280×720 基准设计并人工验收，不重新打开 resize。player 侧若做换算收敛重构必须字节级行为不变（游戏点击冒烟兜底；main.cpp:255-258 的 ×fb/win 公式在固定窗口 + SCALE_TO_MONITOR 下为恒等，重构仅换实现不换结果）。
+3. 默认路径零回归：编辑器 100% DPI 与 player 固定窗口路径行为必须与修复前一致；150% DPI 编辑器为本次修复主要受益面。
+4. **文件所有权授予（本节为追加授予，cT 独占；§28.0 所有权表不含引擎文件，以本节为准）**：
+   - engine/src/Core/Input.cpp（仅语义注释/文档对齐；现状核实无功能缺口）
+   - engine/src/UI/UIRenderer.h/.cpp + engine/include/NovaEngine/UI/UIRenderer.h（仅追加新公开方法；既有签名与行为冻结）
+   - engine/include/NovaEngine/Core/Window.h + engine/src/Core/Window.cpp（追加 contentScale 查询，如 getContentScale(float&, float&) const）
+   - player/src/main.cpp（仅换算收敛重构，字节级行为不变）
+   - 其余引擎文件不碰；editor/src 既有 cT 波 3 所有权不变。代码风格（PascalCase/camelCase/m_/中文注释）照 CLAUDE.md。
+
+**验收要点**：
+1. 150% DPI 编辑器：Edit 态滚轮、Play 态 UI 点击命中、SceneView 拾取与 UIRenderer 布局空间一致（滚轮/拾取/UI 命中三处逐点校验）。
+2. 100% DPI 编辑器行为与修复前不变。
+3. player 固定 1280×720 游戏点击冒烟不变（UI 按钮 hover/press/onClick 全链路）。
+4. NovaTests 全绿（Debug/Release 双配置）。
+
+**风险：低。回滚**：追加方法无调用方即死代码，删除即回滚；player 重构回退原 ×fb/win 公式即旧行为。**审重点**：追加方法换算公式与三处既有换算逐一核对分母来源（fbScale / fb/win / contentScale 三种口径）；player 重构 diff 审字节级行为等价。
 
 ## 28.3 示例游戏项目（cC，V1.0-10）
 

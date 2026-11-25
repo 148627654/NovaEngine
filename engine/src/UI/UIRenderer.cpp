@@ -1072,6 +1072,17 @@ void UIRenderer::setDpiScale(float scale) {
     s_dpiScale = std::clamp(scale, 0.1f, 10.0f);
 }
 
+glm::vec2 UIRenderer::layoutFromWindowPoint(const glm::vec2& windowPoint, float contentScale) {
+    // V1.0-12 §28.2.1：布局空间 = 物理 FBO / dpiScale；窗口逻辑 × contentScale = 物理 FBO。
+    // 分母来源收敛说明（评审核对点）：三处既有换算的三种口径（编辑器 fbScale=ImGui 帧缓冲
+    // 缩放比 / 播放器 fb/win / setDpiScale=GLFW 内容缩放）在 GLFW_SCALE_TO_MONITOR +
+    // 固定窗口下同为 glfwGetWindowContentScale——本公式以 contentScale/dpiScale 统一。
+    // 调用方每帧先 setDpiScale(contentScale) → 比值恒 1.0（恒等）；滞后一帧时公式
+    // 自动补偿（layout 与内部 ÷dpiScale 自洽，最终命中坐标仍正确）。
+    const float cs = contentScale > 0.0f ? contentScale : s_dpiScale;
+    return windowPoint * (cs / s_dpiScale);
+}
+
 void UIRenderer::shutdown() {
     s_activeDrag = {};
     s_lastPointerConsumed = false;

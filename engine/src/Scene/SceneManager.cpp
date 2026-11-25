@@ -95,9 +95,13 @@ bool readSceneTextRobust(const std::filesystem::path& path, std::string& out) {
 
 // 卸载全部 additive 场景（主场景切换/退出 Play 用；DDOL 子树已先收集）
 void unloadAllAdditive() {
+    const size_t count = s_additiveScenes.size();
     s_additiveScenes.clear();   // Scene 析构 → 全部对象销毁 → 物理 body 拆除
     rebuildLoadedView();
     AssetDatabase::instance().releaseUnused();   // §27.1 内存回落：卸载后显式释放无引用资产
+    // V1.0-13（§28.1）：调用点日志证据——退出 Play/主场景切换路径的 releaseUnused 均可追踪
+    if (count > 0)
+        Logger::info("SceneManager: 已卸载 {} 个 additive 场景（releaseUnused 已调用）", count);
 }
 
 // 执行延迟卸载队列（flushPendingLoad 内调用——帧序晚于 updateAll，P1-1）
@@ -295,7 +299,11 @@ void SceneManager::flushPendingLoad() {
         s_activeScene->start();
     }
     Events::post(SceneLoaded{name});
-    Logger::info("SceneManager: 场景切换完成: {}（DDOL 迁移 {} 棵子树）", name, ddolSubtrees.size());
+    // V1.0-13（§28.1 调用点补齐）：同步 LoadScene 路径后收口——旧主场景对象已在
+    // deserialize 中销毁，此刻其独占资产无引用可回收；DDOL 子树与新场景资产仍存活不受影响。
+    AssetDatabase::instance().releaseUnused();
+    Logger::info("SceneManager: 场景切换完成: {}（DDOL 迁移 {} 棵子树，releaseUnused 已调用）",
+                 name, ddolSubtrees.size());
 }
 
 Scene* SceneManager::activeScene() {
@@ -457,6 +465,9 @@ bool SceneManager::mountAsyncScene(
                 s_activeScene->start();
             }
             Events::post(SceneLoaded{name});
+            // V1.0-13（§28.1）：异步非 additive 替换主场景与同步 LoadScene 同语义——
+            // 旧主场景对象已销毁，此处收口释放其独占资产（与 flushPendingLoad 同步路径一致）
+            AssetDatabase::instance().releaseUnused();
         }
     } catch (const std::exception& e) {
         Logger::error("SceneManager: 异步场景 \"{}\" 挂载异常（{}）——该场景加载失败", name,

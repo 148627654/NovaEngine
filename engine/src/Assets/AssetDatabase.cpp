@@ -40,6 +40,17 @@ std::string subMeshKey(const std::string& baseKey, size_t index) {
 // AssetDatabase 为单例，故实现为文件内 static，语义与成员缓存等价（clearCache 一并清空）。
 std::unordered_map<std::string, std::filesystem::path> s_albedoPathCache;
 
+// V1.0-13 旁表缓存：导入成功时记录的顶点+索引字节（键同网格缓存，§28.1 memorySnapshot 校准）。
+// 冻结头无该表成员 → 文件内 static（clearCache/releaseUnused 与网格缓存联动清空）。
+std::unordered_map<std::string, size_t> s_meshBytesCache;
+
+// MeshData 的 GPU 上传字节估算：顶点（含蒙皮顶点）+ 索引（§26.2「顶点+索引字节」）
+size_t meshDataBytes(const MeshData& data) {
+    return data.vertices.size() * sizeof(Vertex) +
+           data.skinnedVertices.size() * sizeof(SkinnedVertex) +
+           data.indices.size() * sizeof(uint32_t);
+}
+
 // 解析模型引用的贴图路径为项目内相对路径（沿用编辑器 resolveTextureAndPath 的候选逻辑）：
 //   绝对路径 → 直接校验；否则 模型目录/贴图路径 → 项目根/贴图路径。
 // 存在且位于项目内 → 相对项目根的相对路径；解析失败 → 空路径（纯色）。
@@ -268,6 +279,7 @@ AssetImportResult AssetDatabase::importModel(const std::filesystem::path& relati
             }
             const std::string key = subMeshKey(baseKey, i);
             m_meshCache[key] = mesh;
+            s_meshBytesCache[key] = meshDataBytes(cachedDatas[i]);   // V1.0-13：字节旁表
             out.meshes.push_back(mesh);
             auto mit = m_materialCache.find(key);
             out.materials.push_back(mit != m_materialCache.end() ? mit->second : Material{});
@@ -297,6 +309,7 @@ AssetImportResult AssetDatabase::importModel(const std::filesystem::path& relati
         }
         const std::string key = subMeshKey(baseKey, i);
         m_meshCache[key] = mesh;
+        s_meshBytesCache[key] = meshDataBytes(parsed.meshes[i]);   // V1.0-13：字节旁表
         out.meshes.push_back(mesh);
 
         // 二进制缓存：逐子网格落盘（下次启动免 Assimp）
@@ -591,14 +604,34 @@ void AssetDatabase::clearCache() {
     m_cubemapCache.clear();
     m_materialAssetCache.clear();
     m_audioClipCache.clear();   // V0.3-2：音频缓存随 Reload Assets 一并清空
-    // 旁表缓存一并清空（改文件后 Reload Assets 重取材质/贴图路径）
+    // 旁表缓存一并清空（改文件后 Reload Assets 重取材质/贴图路径/网格字节）
     m_materialCache.clear();
     s_albedoPathCache.clear();
+    s_meshBytesCache.clear();
     Logger::info("AssetDatabase: 缓存已清空（Reload Assets）");
 }
 
 void AssetDatabase::releaseUnused() {
-    std::erase_if(m_meshCache, [](const auto& kv) { return kv.second.expired(); });
+    // V1.0-13（KNOWN-ISSUES P3-7 修复，§28.1）：网格缓存清扫联动旁表——
+    // 旁表键与网格缓存同构（baseKey#序号），网格弱引用失效的条目一并删除，
+    // 防长跑（反复导入不同模型）旁表单调增长。此前旁表仅 clearCache 可清。
+    for (auto it = m_meshCache.begin(); it != m_meshCache.end();) {
+        if (it->second.expired()) {
+            const std::string key = it->first;
+            it = m_meshCache.erase(it);
+            m_materialCache.erase(key);
+            s_albedoPathCache.erase(key);
+            s_meshBytesCache.erase(key);
+        } else {
+            ++it;
+        }
+    }
+    // 防御双保险：旁表残留孤儿条目（理论上与网格缓存逐键配对，此处兜底全清）
+    std::erase_if(m_materialCache, [&](const auto& kv) { return !m_meshCache.contains(kv.first); });
+    std::erase_if(s_albedoPathCache,
+                  [&](const auto& kv) { return !m_meshCache.contains(kv.first); });
+    std::erase_if(s_meshBytesCache,
+                  [&](const auto& kv) { return !m_meshCache.contains(kv.first); });
     std::erase_if(m_textureCache, [](const auto& kv) { return kv.second.expired(); });
     // cubemap 为强引用缓存（2026-11-19）：releaseUnused 不清——由 clearCache 显式清空
     std::erase_if(m_materialAssetCache, [](const auto& kv) { return kv.second.expired(); });
@@ -622,7 +655,23 @@ MemorySnapshot AssetDatabase::memorySnapshot() {
     // 材质资产：存活计数
     for (const auto& [key, weak] : db.m_materialAssetCache)
         if (weak.lock()) ++snap.materialAssetCount;
-    // meshVertexBytes/audioBytes/objectCount/componentCount/loadedSceneCount 归波 3 cR 收口（§26.3）
+    // ===== V1.0-13 收口校准（§28.1）=====
+    // 网格：存活条目按导入时记录的顶点+索引字节汇总（内置图元不进 m_meshCache 不计入——
+    // 静态单例非资产缓存语义；字节 = MeshData 上传前统计，与 GPU VBO/EBO 上传一致）
+    for (const auto& [key, weak] : db.m_meshCache) {
+        if (!weak.lock())
+            continue;
+        const auto it = s_meshBytesCache.find(key);
+        if (it != s_meshBytesCache.end())
+            snap.meshVertexBytes += it->second;
+    }
+    // 音频：解码 PCM 字节（f32 样本全量；stream=true 流式源不进缓存不计入，§26.2）
+    for (const auto& [key, weak] : db.m_audioClipCache)
+        if (auto clip = weak.lock())
+            snap.audioBytes += clip->pcmF32().size() * sizeof(float);
+    // objectCount/componentCount/loadedSceneCount 为活动场景统计，由 Profiler::memorySnapshot
+    // 转发层填充（§26.2）；loadedSceneCount 波 1 恒 1 占位——V1.0-2 additive 落地后
+    // 应改为实际已加载场景数，改动落在 Profiler.cpp（本文件无该统计的数据源）
     return snap;
 }
 

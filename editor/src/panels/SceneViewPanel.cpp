@@ -9,6 +9,9 @@
 
 #include <imgui.h>
 
+#include <NovaEngine/Assets/AssetDatabase.h>  // importModel（三角形拾取子网格定位，V1.0-12）
+#include <NovaEngine/Assets/AssetStream.h>    // 模型字节读取（pak/磁盘统一入口，V1.0-12）
+#include <NovaEngine/Assets/BinaryCache.h>    // 局部空间 MeshData 二进制缓存（V1.0-12）
 #include <NovaEngine/Core/Input.h>
 #include <NovaEngine/Core/Logger.h>
 #include <NovaEngine/Core/Stats.h>
@@ -38,7 +41,12 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <limits>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace NovaEditor {
@@ -81,21 +89,265 @@ bool rayAabb(const glm::vec3& origin, const glm::vec3& dir, const NovaEngine::AA
     return true;
 }
 
-// 拾取：遍历全部 MeshRenderer，取 t 最小者
-uint64_t pickObject(NovaEngine::Scene* scene, const glm::vec3& origin, const glm::vec3& dir) {
-    float bestT = std::numeric_limits<float>::max();
-    uint64_t bestId = NovaEngine::UUID::kInvalid;
-    scene->forEachObject([&](NovaEngine::GameObject* go) {
-        if (!go->activeInHierarchy()) return;
-        auto* mr = go->getComponent<NovaEngine::MeshRenderer>();
-        if (!mr || !mr->mesh) return;
-        const NovaEngine::AABB world = transformAabb(mr->mesh->aabb(), go->transform()->worldMatrix());
-        float t = 0.0f;
-        if (rayAabb(origin, dir, world, t) && t < bestT) {
-            bestT = t;
-            bestId = go->id();
+// V1.0-12 多视口：ImGui 多视口模式下全部坐标为 OS 绝对坐标（io.MousePos 同源——
+// GLFW 后端把窗口位置并入鼠标事件），而 GetWindowPos/GetCursorScreenPos 返回「所在
+// 视口内」局部坐标——跨视口运算（射线拾取/gizmo/相机/外部拖放区域）必须加视口原点。
+// 单视口模式 io.MousePos = 客户端坐标，视口原点不参与（主视口 Pos 是 OS 窗口位置，
+// 加了反而错）。
+ImVec2 windowGlobalPos(const ImVec2& local) {
+    if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+        const ImVec2 vp = ImGui::GetWindowViewport()->Pos;
+        return ImVec2(local.x + vp.x, local.y + vp.y);
+    }
+    return local;
+}
+
+// ===== 三角形级精确拾取（V1.0-12，#11 闭环，§28.2）=====
+// 数据链：MeshRenderer.meshPath →（builtin: 图元本地生成 / 资产经 AssetStream + BinaryCache
+// 取局部空间 MeshData，免 Assimp 重解析）→ 每次拾取按 worldMatrix 变换到世界空间 →
+// Möller–Trumbore 逐三角形求最近交点。护栏：单网格 >200k 三角形跳过精确测试
+//（AABB 结果降级 + warn 一次）；数据缺失同样 AABB 降级。gizmo/选择行为不变
+//（hit 语义变化仅「大平面不再遮挡后方物体」）。
+constexpr size_t kMaxPickTriangles = 200000;
+
+// 拾取数据缓存条目（P1-2 终审裁定，§28.2）：Mesh* 键 + weak_ptr 属主——
+// 命中判定 = owner.lock() == mesh。Mesh 析构后 weak_ptr 过期（lock()=nullptr ≠ 新 mesh），
+// 堆地址复用也不会错配几何；解析失败缓存 nullptr 防每击重试。
+struct PickDataEntry {
+    std::weak_ptr<const NovaEngine::Mesh> owner;
+    std::shared_ptr<const NovaEngine::MeshData> data;
+};
+
+std::unordered_map<const NovaEngine::Mesh*, PickDataEntry>& pickLocalDataCache() {
+    static std::unordered_map<const NovaEngine::Mesh*, PickDataEntry> s;
+    return s;
+}
+
+// warn 一次集合（>200k 三角形 / 数据缺失）
+std::unordered_set<const NovaEngine::Mesh*>& pickWarnedSet() {
+    static std::unordered_set<const NovaEngine::Mesh*> s;
+    return s;
+}
+
+// P1-2：清扫过期条目（属主已析构）——插入时全表扫一次（插入频率 = 点击级、每 Mesh 一次），
+// 死条目不再持有 MeshData → CPU 几何驻留闭环；缓存内存 = O(会话内同时存活网格数）。
+// 顺手清 warn 一次集合同键（非必须，裁定允许）。
+void sweepPickCache() {
+    auto& cache = pickLocalDataCache();
+    auto& warned = pickWarnedSet();
+    size_t removed = 0;
+    for (auto it = cache.begin(); it != cache.end();) {
+        if (it->second.owner.expired()) {
+            warned.erase(it->first);
+            it = cache.erase(it);
+            ++removed;
+        } else {
+            ++it;
         }
+    }
+    if (removed > 0)
+        NovaEngine::Logger::debug("[PickCache] 清扫过期条目 {} 条（存活 {} 条）", removed,
+                                  cache.size());
+}
+
+// builtin: 图元局部几何（与 Primitives 逐顶点一致：cube ±0.5 / plane 10x10 于 y=0 /
+// sphere 32 段 16 环——Mesh 不保留 CPU 数据，拾取侧本地生成同形 MeshData）
+std::shared_ptr<NovaEngine::MeshData> builtinPickData(const std::string& name) {
+    using namespace NovaEngine;
+    auto d = std::make_shared<MeshData>();
+    if (name == "cube") {
+        const auto addFace = [&d](const glm::vec3& n, const glm::vec3& t) {
+            const glm::vec3 b = glm::cross(n, t);
+            const glm::vec3 c = n * 0.5f;
+            const glm::vec3 corners[4] = {c - t * 0.5f - b * 0.5f, c + t * 0.5f - b * 0.5f,
+                                          c + t * 0.5f + b * 0.5f, c - t * 0.5f + b * 0.5f};
+            const uint32_t base = static_cast<uint32_t>(d->vertices.size());
+            for (const glm::vec3& p : corners)
+                d->vertices.push_back(Vertex{p, n, glm::vec2(0.0f), t});
+            const uint32_t idx[6] = {base, base + 1, base + 2, base, base + 2, base + 3};
+            d->indices.insert(d->indices.end(), idx, idx + 6);
+        };
+        addFace(glm::vec3( 1.0f, 0.0f, 0.0f), glm::vec3( 0.0f, 0.0f, -1.0f));
+        addFace(glm::vec3(-1.0f, 0.0f, 0.0f), glm::vec3( 0.0f, 0.0f,  1.0f));
+        addFace(glm::vec3( 0.0f, 1.0f, 0.0f), glm::vec3( 1.0f, 0.0f,  0.0f));
+        addFace(glm::vec3( 0.0f,-1.0f, 0.0f), glm::vec3( 1.0f, 0.0f,  0.0f));
+        addFace(glm::vec3( 0.0f, 0.0f, 1.0f), glm::vec3( 1.0f, 0.0f,  0.0f));
+        addFace(glm::vec3( 0.0f, 0.0f,-1.0f), glm::vec3(-1.0f, 0.0f,  0.0f));
+        return d;
+    }
+    if (name == "plane") {
+        const float h = 5.0f;  // 与 Primitives::plane 默认 size=10 一致
+        const glm::vec3 n(0.0f, 1.0f, 0.0f), t(1.0f, 0.0f, 0.0f);
+        d->vertices = {Vertex{glm::vec3(-h, 0.0f, -h), n, glm::vec2(0.0f, 0.0f), t},
+                       Vertex{glm::vec3( h, 0.0f, -h), n, glm::vec2(1.0f, 0.0f), t},
+                       Vertex{glm::vec3( h, 0.0f,  h), n, glm::vec2(1.0f, 1.0f), t},
+                       Vertex{glm::vec3(-h, 0.0f,  h), n, glm::vec2(0.0f, 1.0f), t}};
+        d->indices = {0, 2, 1, 0, 3, 2};
+        return d;
+    }
+    if (name == "sphere") {
+        const int segments = 32, rings = 16;  // Primitives::sphere 默认
+        const int cols = segments + 1;
+        for (int ring = 0; ring <= rings; ++ring) {
+            const float phi = glm::pi<float>() * static_cast<float>(ring) / rings;
+            const float y = std::cos(phi), r = std::sin(phi);
+            for (int seg = 0; seg <= segments; ++seg) {
+                const float theta = glm::two_pi<float>() * seg / segments;
+                const glm::vec3 pos(r * std::cos(theta), y, r * std::sin(theta));
+                d->vertices.push_back(Vertex{pos, glm::normalize(pos), glm::vec2(0.0f),
+                                             glm::vec3(-std::sin(theta), 0.0f, std::cos(theta))});
+            }
+        }
+        for (int ring = 0; ring < rings; ++ring)
+            for (int seg = 0; seg < segments; ++seg) {
+                const uint32_t a = static_cast<uint32_t>(ring * cols + seg);
+                const uint32_t b = static_cast<uint32_t>((ring + 1) * cols + seg);
+                d->indices.insert(d->indices.end(), {a, a + 1, b, a + 1, b + 1, b});
+            }
+        return d;
+    }
+    return nullptr;
+}
+
+// 资产网格拾取数据：importModel（内存缓存命中——场景已持有同一批 shared_ptr）按指针
+// 定位子网格序号，再从二进制缓存取局部空间 MeshData（免 Assimp 重解析）。
+// 失败 → nullptr（调用方按 AABB 降级 + warn 一次）。
+std::shared_ptr<const NovaEngine::MeshData> resolvePickData(std::shared_ptr<const NovaEngine::Mesh> mesh,
+                                                            const std::string& meshPath) {
+    using namespace NovaEngine;
+    if (!mesh) return nullptr;   // 调用方已守卫非空，防御兜底
+    auto& cache = pickLocalDataCache();
+    if (auto it = cache.find(mesh.get()); it != cache.end()) {
+        // P1-2：属主命中判定——weak_ptr 锁回同一 Mesh 才命中（含 nullptr 失败记录）；
+        // 过期条目（Mesh 已析构/地址复用）擦除重算
+        if (it->second.owner.lock() == mesh) return it->second.data;
+        cache.erase(it);
+        pickWarnedSet().erase(mesh.get());
+    }
+
+    std::shared_ptr<const MeshData> out;
+    if (meshPath.starts_with("builtin:")) {
+        out = builtinPickData(meshPath.substr(8));
+    } else if (!meshPath.empty()) {
+        const AssetImportResult imported = AssetDatabase::instance().importModel(meshPath);
+        size_t idx = std::numeric_limits<size_t>::max();
+        for (size_t i = 0; i < imported.meshes.size(); ++i)
+            if (imported.meshes[i].get() == mesh.get()) { idx = i; break; }
+        if (idx != std::numeric_limits<size_t>::max()) {
+            std::vector<uint8_t> bytes;
+            const std::filesystem::path abs = AssetDatabase::projectRoot() / meshPath;
+            if (AssetStream::readAllBytes(abs, bytes)) {
+                const std::string key =
+                    BinaryCache::makeKey(bytes) + "#" + std::to_string(idx);
+                auto data = std::make_shared<MeshData>();
+                if (BinaryCache::loadMeshData(key, *data)) out = data;
+            }
+        }
+    }
+    if (!out && pickWarnedSet().insert(mesh.get()).second)
+        Logger::warn("三角形拾取数据不可用，AABB 降级: {}（mesh={:p}）",
+                     meshPath.empty() ? std::string("(空路径)") : meshPath,
+                     static_cast<const void*>(mesh.get()));
+    sweepPickCache();   // P1-2：插入前全表清扫过期条目
+    cache[mesh.get()] = PickDataEntry{mesh, out};  // 失败同样缓存 nullptr，防每击重试
+    return out;
+}
+
+// Möller–Trumbore（无背面剔除——平面背面/内表面同样可点选；退化三角形剔除）
+bool rayTriangle(const glm::vec3& o, const glm::vec3& d, const glm::vec3& a,
+                 const glm::vec3& b, const glm::vec3& c, float& outT) {
+    const glm::vec3 e1 = b - a, e2 = c - a;
+    const glm::vec3 p = glm::cross(d, e2);
+    const float det = glm::dot(e1, p);
+    if (std::abs(det) < 1e-9f) return false;
+    const float inv = 1.0f / det;
+    const glm::vec3 s = o - a;
+    const float u = glm::dot(s, p) * inv;
+    if (u < 0.0f || u > 1.0f) return false;
+    const glm::vec3 q = glm::cross(s, e1);
+    const float v = glm::dot(d, q) * inv;
+    if (v < 0.0f || u + v > 1.0f) return false;
+    const float t = glm::dot(e2, q) * inv;
+    if (t <= 1e-6f) return false;
+    outT = t;
+    return true;
+}
+
+// 拾取：AABB 粗筛（保留，先剔除）→ 逐三角形精确测试 → 最近交点。
+// 候选按 AABB t 升序处理；AABB t 是精确命中 t 的下界，候选 AABB t ≥ 当前最优
+// 精确 t 时其后候选不可能更近 → 剪枝（大场景拾取关键优化）。
+uint64_t pickObject(NovaEngine::Scene* scene, const glm::vec3& origin, const glm::vec3& dir) {
+    using namespace NovaEngine;
+    const auto pickT0 = std::chrono::steady_clock::now();
+
+    // 1. AABB 粗筛
+    struct Candidate {
+        float t;  // AABB 命中 t
+        MeshRenderer* mr;
+        GameObject* go;
+    };
+    std::vector<Candidate> cands;
+    scene->forEachObject([&](GameObject* go) {
+        if (!go->activeInHierarchy()) return;
+        auto* mr = go->getComponent<MeshRenderer>();
+        if (!mr || !mr->mesh) return;
+        const AABB world = transformAabb(mr->mesh->aabb(), go->transform()->worldMatrix());
+        float t = 0.0f;
+        if (rayAabb(origin, dir, world, t)) cands.push_back({t, mr, go});
     });
+    std::sort(cands.begin(), cands.end(),
+              [](const Candidate& a, const Candidate& b) { return a.t < b.t; });
+
+    // 2. 逐候选精确测试（bestT = 精确 t 与降级 AABB t 的并集最优）
+    float bestT = std::numeric_limits<float>::max();
+    uint64_t bestId = UUID::kInvalid;
+    size_t exactTested = 0, degraded = 0;
+    std::vector<glm::vec3> worldPos;  // 世界空间顶点（拾取内逐候选复用；每候选变换一次）
+    for (const Candidate& c : cands) {
+        if (c.t >= bestT) break;  // 下界剪枝
+        const auto data = resolvePickData(c.mr->mesh, c.mr->meshPath);
+        const bool hasTris =
+            data && !data->indices.empty() && data->indices.size() % 3 == 0 &&
+            (!data->vertices.empty() || !data->skinnedVertices.empty());
+        const size_t triCount = hasTris ? data->indices.size() / 3 : 0;
+        if (!hasTris || triCount > kMaxPickTriangles) {
+            // AABB 结果降级：>200k 三角形（防大模型卡顿，warn 一次）或数据缺失
+            if (hasTris && pickWarnedSet().insert(c.mr->mesh.get()).second)
+                Logger::warn("网格三角形数 {} 超过护栏 {}，拾取按 AABB 降级: {}", triCount,
+                             kMaxPickTriangles, c.go->name());
+            if (c.t < bestT) { bestT = c.t; bestId = c.go->id(); }
+            ++degraded;
+            continue;
+        }
+        // 世界空间变换缓存语义：每候选（GameObject）变换一次、其全部三角形复用
+        //（矩阵每帧可变——gizmo 拖拽中帧帧不同，持久缓存无收益且会无限增长）
+        const bool skinned = !data->skinnedVertices.empty();
+        const size_t vCount = skinned ? data->skinnedVertices.size() : data->vertices.size();
+        worldPos.resize(vCount);
+        const glm::mat4 world = c.go->transform()->worldMatrix();
+        for (size_t i = 0; i < vCount; ++i) {
+            const glm::vec3& lp =
+                skinned ? data->skinnedVertices[i].position : data->vertices[i].position;
+            worldPos[i] = glm::vec3(world * glm::vec4(lp, 1.0f));
+        }
+        float t = 0.0f;
+        for (size_t i = 0; i + 2 < data->indices.size(); i += 3) {
+            if (rayTriangle(origin, dir, worldPos[data->indices[i]],
+                            worldPos[data->indices[i + 1]], worldPos[data->indices[i + 2]], t) &&
+                t < bestT) {
+                bestT = t;
+                bestId = c.go->id();
+            }
+        }
+        ++exactTested;
+    }
+
+    const auto pickMs = std::chrono::duration<float, std::milli>(
+                            std::chrono::steady_clock::now() - pickT0).count();
+    // P2-6：debug 级（每次点击一条 info 会刷屏 Console）
+    Logger::debug("拾取完成: 候选 {}（精确 {} / 降级 {}）/ 命中 {} / 耗时 {:.2f} ms",
+                  cands.size(), exactTested, degraded,
+                  bestId == UUID::kInvalid ? std::string("无") : std::to_string(bestId), pickMs);
     return bestId;
 }
 
@@ -139,9 +391,10 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
 
     ImGui::Begin(m_name.c_str(), &open);
 
-    // 上报屏幕区域（外部拖放目标判定用）
-    ctx.viewportScreenMin = ImGui::GetWindowPos();
-    ctx.viewportScreenMax = ImGui::GetWindowPos() + ImGui::GetWindowSize();
+    // 上报屏幕区域（外部拖放目标判定用；V1.0-12 多视口：全局坐标，与 io.MousePos 同源）
+    const ImVec2 winPosGlobal = windowGlobalPos(ImGui::GetWindowPos());
+    ctx.viewportScreenMin = winPosGlobal;
+    ctx.viewportScreenMax = winPosGlobal + ImGui::GetWindowSize();
 
     // Play 态顶部工具栏（V0.2-13/V0.3-10 子集）：分辨率预设 / Render Scale / Follow Selected。
     // Edit 态工具栏（V0.5-8，c6）：「Terrain Brush」开关（场景含 Terrain 时可用）。
@@ -149,6 +402,8 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
     else drawEditToolbar(ctx);
 
     const ImVec2 vpPos = ImGui::GetCursorScreenPos();
+    // V1.0-12 多视口：全局坐标（面板被拖出主窗口时 io.MousePos 与视口局部坐标不同源）
+    const ImVec2 vpPosG = windowGlobalPos(vpPos);
     const ImVec2 vpSize = ImGui::GetContentRegionAvail();
     if (vpSize.x <= 1.0f || vpSize.y <= 1.0f || !scene) {
         // 折叠/最小化时尺寸为 0：跳过整个 FBO 渲染路径，避免 GL 报错（§11.8）
@@ -300,7 +555,16 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
         m_uiConsumedWheel = false;
         if (hovered) {
             const ImGuiIO& mio = ImGui::GetIO();
-            const glm::vec2 mouseFbo(mio.MousePos.x - vpPos.x, mio.MousePos.y - vpPos.y);
+            // V1.0-12 §28.2.1：窗口逻辑（多视口下 io.MousePos 为 OS 绝对坐标，vpPosG 为
+            // 视口全局起点）→ 布局空间统一走 UIRenderer::layoutFromWindowPoint（内容缩放
+            // 参与）；processWheelInput 期望物理 FBO 坐标 → 布局 ×contentScale 还原物理
+            //（与本模块内部 ÷dpiScale 逐点自洽）。分母收敛：原用 ImGui fbScale（帧缓冲
+            // 缩放比），现用 displayContentScale（GLFW 内容缩放）——SCALE_TO_MONITOR 下
+            // 两者同源相等，且与每帧 setDpiScale 同值（helper 恒等）。150% HiDPI 命中
+            // 修正（原实现直接传逻辑坐标偏 1/1.5）；100% 下 cs=1 行为不变。
+            const float cs = std::max(ctx.displayContentScale, 1.0f);
+            const glm::vec2 rel(mio.MousePos.x - vpPosG.x, mio.MousePos.y - vpPosG.y);
+            const glm::vec2 mouseFbo = UIRenderer::layoutFromWindowPoint(rel, cs) * cs;
             m_uiConsumedWheel = UIRenderer::processWheelInput(*scene, mouseFbo);
         }
         // Edit 态 UI 预览提示（V0.5-13 验收体验）：场景含 Canvas 时提示点击/存档需进 Play
@@ -323,17 +587,21 @@ void SceneViewPanel::onGui(EditorContext& ctx, EditorCamera& camera) {
         // FBO 渲染分辨率坐标（w/h 即 UIRenderer::render 的布局空间；HiDPI 下
         // 逻辑鼠标 × dpi 与物理 FBO 的换算在 w/dstSize 中自然抵消，公式不变）；
         // Edit 态不处理。仅悬停在游戏画面内时投递（工具栏/letterbox 黑边不算命中）。
+        // V1.0-12 §28.2.1 分母口径说明：w 内嵌 fbScale（ImGui 帧缓冲缩放比），
+        // SCALE_TO_MONITOR 下 == contentScale == setDpiScale（GLFW 内容缩放），三种
+        // 口径同源；统一换算入口 UIRenderer::layoutFromWindowPoint 见 Edit 滚轮路径。
         if (hovered) {
             const ImGuiIO& mio = ImGui::GetIO();
             const glm::vec2 mouseFbo(
-                (mio.MousePos.x - (vpPos.x + offset.x)) * (static_cast<float>(w) / dstSize.x),
-                (mio.MousePos.y - (vpPos.y + offset.y)) * (static_cast<float>(h) / dstSize.y));
+                (mio.MousePos.x - (vpPosG.x + offset.x)) * (static_cast<float>(w) / dstSize.x),
+                (mio.MousePos.y - (vpPosG.y + offset.y)) * (static_cast<float>(h) / dstSize.y));
             UIRenderer::processInput(*scene, mouseFbo, Input::isMouseDown(MouseButton::Left),
                                      Input::isMousePressed(MouseButton::Left));
         }
     }
     const bool windowHovered = ImGui::IsWindowHovered();
-    const glm::vec2 vpPosF(vpPos.x, vpPos.y), vpSizeF(vpSize.x, vpSize.y);
+    // V1.0-12 多视口：跨视口运算（射线/gizmo/相机）统一用全局坐标
+    const glm::vec2 vpPosF(vpPosG.x, vpPosG.y), vpSizeF(vpSize.x, vpSize.y);
 
     // Play 中 UI 优先于场景拾取（§24.5 接线守护）：UIRenderer::lastPointerConsumed()
     // 为真（本帧 UI 交互组件消费了指针——onClick/拖拽/滚动）时，跳过其余任何指针处理。
