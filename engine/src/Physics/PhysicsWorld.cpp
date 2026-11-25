@@ -397,6 +397,11 @@ struct PhysicsWorld::Impl {
         bool pendingVelocityOverride = false;  // setVelocity 覆盖标志
         glm::vec3 pendingVelocity{0.0f};
         int layer = 0;   // 角色碰撞层：GO 首个 Collider 的 layer（无 Collider = 0）
+        // ===== V1.3 §28.3.15.4 地面携带记账（kinematic 平台；路线 B 位置级叠加）=====
+        JPH::BodyID lastGroundBody{};                  // 上一固定步末的 kinematic 支撑 body
+                                                      //（默认构造 = invalid；空中/初态恒 invalid）
+        JPH::RVec3 lastGroundBodyPos = JPH::RVec3::sZero();   // 该 body 上一固定步末的世界位置
+        glm::vec3 carryVelocity{0.0f};                 // 离地步注入的水平惯性（空中持续、落地清零）
     };
     std::unordered_map<CharacterController*, CharacterEntry> characters;
     JPH::CharacterVsCharacterCollisionSimple characterCollision;   // 角色互撞（全部注册于此）
@@ -1274,6 +1279,7 @@ void PhysicsWorld::Impl::stepCharacters(float dt) {
             continue;
         // 目标速度：setVelocity 覆盖 > move 缓冲 > 既有速度
         glm::vec3 v;
+        bool fromScriptInput = true;   // 覆盖/move 缓冲 = 脚本输入源；读回 = 物理积分值
         if (entry.pendingVelocityOverride) {
             v = entry.pendingVelocity;
             entry.pendingVelocityOverride = false;
@@ -1282,6 +1288,7 @@ void PhysicsWorld::Impl::stepCharacters(float dt) {
             entry.pendingDisplacement = glm::vec3(0.0f);
         } else {
             v = toGlm(cv->GetLinearVelocity());
+            fromScriptInput = false;   // 读回：离地步注入已写入物理速度，自带惯性
         }
         // 重力积分（CharacterVirtual 不自积分；gravityScale 缩放）
         const glm::vec3 g = gravity * std::max(cc->gravityScale, 0.0f);
@@ -1290,6 +1297,11 @@ void PhysicsWorld::Impl::stepCharacters(float dt) {
         } else if (v.y < 0.0f) {
             v.y = 0.0f;   // 地面：清下行速度（StickToFloor 贴地；跳跃上行速度保留）
         }
+        // V1.3 §28.3.15.4 ENG-2（P1-1 终审）：空中惯性仅对脚本来源速度（override/move）叠加；
+        // 读回路径不叠加——离地步注入已在物理速度内，再叠加会在 30FPS 双固定步或纯 CC
+        // 读回路径逐步累积成 2×/3×。carryVelocity 着台恒 0 → 台上叠加为 no-op。
+        if (fromScriptInput)
+            v += entry.carryVelocity;
         cv->SetLinearVelocity(toJolt(v));
 
         // 楼梯步进/贴地参数（stepHeight ≤ 0 = 关闭楼梯步进，Jolt 语义）
@@ -1300,6 +1312,56 @@ void PhysicsWorld::Impl::stepCharacters(float dt) {
         layerFilter.row = &collisionMatrix[entry.layer * 16];
         cv->ExtendedUpdate(dt, toJolt(g), ups, JPH::BroadPhaseLayerFilter{}, layerFilter,
                            JPH::BodyFilter{}, JPH::ShapeFilter{}, tempAllocator);
+
+        // ===== V1.3 §28.3.15.4 地面携带与离地检测（路线 B 位置级叠加；实现规格 3）=====
+        // 固定步顺序：writeKinematics 已把本步平台 Transform 写入 body（:1145-1151），
+        // 位移差分直接可取；位置叠加在 ExtendedUpdate 之后、writeBackCharacters 之前生效，
+        // 对脚本 setVelocity(0,0) 覆盖免疫（ENG-5）。
+        const JPH::BodyID gid = cv->GetGroundBodyID();
+        // P2-1 终审门控：仅 OnGround 判支撑（禁用 IsSupported = OnGround|OnSteepGround——
+        // GetGroundBodyID 在非支撑侧面接触时也会经 deepest_contact 兜底写值
+        // （CharacterVirtual.cpp:1170/1190-1197），仅凭 body 判 kinematic 会把侧贴 CC 拖行）
+        const bool supported =
+            cv->GetGroundState() == JPH::CharacterBase::EGroundState::OnGround;
+        bool kinematicGround = false;
+        if (supported && !gid.IsInvalid()) {
+            const auto git = goByBodyId.find(gid.GetIndexAndSequenceNumber());
+            if (git != goByBodyId.end() && git->second != nullptr) {
+                const Rigidbody* rb = git->second->getComponent<Rigidbody>();
+                kinematicGround = (rb != nullptr && rb->isKinematic);
+            }
+        }
+        if (kinematicGround) {
+            // ENG-1/ENG-3：支撑于 kinematic 体 → 叠加 body 本步位移（水平+垂直精确跟随）
+            if (gid == entry.lastGroundBody) {
+                const JPH::RVec3 cur = bodyInterface.GetPosition(gid);
+                cv->SetPosition(cv->GetPosition() + (cur - entry.lastGroundBodyPos));
+                entry.lastGroundBodyPos = cur;
+            } else {
+                // 刚落地/换台/传送后首步：仅记位置不叠加（防落地瞬间吸附；结果 = 与台面
+                // 差一个本步位移量，峰值 ≤1.75cm，恒定非漂移，在验收容差内）
+                entry.lastGroundBodyPos = bodyInterface.GetPosition(gid);
+            }
+            entry.lastGroundBody = gid;
+            entry.carryVelocity = glm::vec3(0.0f);   // ENG-2：着台清除惯性
+        } else {
+            // 空中 / 非 kinematic 支撑（static、dynamic、角色互踩均不改行为——ENG-4）。
+            // 注：支撑 body 已销毁（goByBodyId 无此 ID）时跳过离地注入（位移差分不可估，
+            // 防读回垃圾；carryVelocity 着台恒 0，跳过即保持 0）——空中步不清 carry：
+            // 惯性由速度阶段每步叠加、落地/传送才清零（ENG-2）。
+            if (!entry.lastGroundBody.IsInvalid() &&
+                goByBodyId.contains(entry.lastGroundBody.GetIndexAndSequenceNumber())) {
+                // 本步为离地步：按位移差分估算平台水平速度 → 注入空中惯性（仅水平分量）
+                const JPH::RVec3 platformVel =
+                    (bodyInterface.GetPosition(entry.lastGroundBody) - entry.lastGroundBodyPos) /
+                    dt;
+                entry.carryVelocity = glm::vec3(platformVel.GetX(), 0.0f, platformVel.GetZ());
+                cv->SetLinearVelocity(toJolt(toGlm(cv->GetLinearVelocity()) + entry.carryVelocity));
+            }
+            if (!gid.IsInvalid())
+                entry.carryVelocity = glm::vec3(0.0f);   // 非 kinematic 支撑（static 落地）：清惯性
+            entry.lastGroundBody = JPH::BodyID();        // 空中复位，防重复注入
+        }
     }
 }
 
@@ -1563,6 +1625,9 @@ void PhysicsWorld::characterSetPosition(CharacterController* cc, const glm::vec3
     it->second.pendingDisplacement = glm::vec3(0.0f);
     it->second.pendingVelocity = glm::vec3(0.0f);
     it->second.pendingVelocityOverride = true;
+    // V1.3 §28.3.15.4 传送硬化：断开地面携带记账（防传送后首步叠加吸附 + 空中惯性残留）
+    it->second.lastGroundBody = JPH::BodyID();
+    it->second.carryVelocity = glm::vec3(0.0f);
 }
 
 bool PhysicsWorld::characterGrounded(const CharacterController* cc) const {

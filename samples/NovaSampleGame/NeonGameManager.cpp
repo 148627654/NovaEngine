@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <nlohmann/json.hpp>
 
 namespace NovaGame {
@@ -49,12 +50,21 @@ void NeonGameManager::onStart() {
     m_strips.clear();
     m_envSnapped = false;
     m_hiddenCollected = 0;
+    m_hiddenTotal = 2;   // 兜底值（场景统计 ≥1 时下方覆盖）
     m_bestSplit = 0.0f;
     m_recAccum = 0.0f;
     m_recording.clear();
     m_splitTimes.clear();
+    // ===== V1.3 挑战/成就状态重置 =====
+    m_mode = "classic";
+    m_remaining = 60.0f;
+    m_failed = false;
+    m_maxCombo = 0;
+    m_fallsRun = 0;
+    m_dashRun = 0;
+    m_bestRemaining = 0.0f;
 
-    // 读关卡参数（§28.3.10：缺失/坏 JSON → 默认 index=1、orbTotal=10）
+    // 读关卡参数（§28.3.10：缺失/坏 JSON → 默认 index=1、orbTotal=10；§28.3.15.5：mode 仅 "challenge" 生效）
     const std::string raw = NovaEngine::SceneManager::getSceneParam("level");
     if (!raw.empty()) {
         try {
@@ -63,6 +73,8 @@ void NeonGameManager::onStart() {
                 m_levelIndex = j["index"].get<int>();
             if (j.contains("orbTotal") && j["orbTotal"].is_number_integer())
                 m_orbTotal = j["orbTotal"].get<int>();
+            if (j.contains("mode") && j["mode"].is_string() && j["mode"] == "challenge")
+                m_mode = "challenge";
         } catch (const std::exception& e) {
             NovaEngine::Logger::warn("NeonGameManager: level 参数解析失败({})，回退默认 index=1、orbTotal=10",
                                      e.what());
@@ -82,9 +94,20 @@ void NeonGameManager::onStart() {
         m_baseAmbient = scene->ambientColor;
         m_baseFog = scene->fogColor;
         m_envSnapped = true;
+        // ===== V1.3 隐藏晶体总数场景统计（§28.3.15.2 裁定 7）：名称前缀 "HiddenOrb" 计数，
+        // 统计 ≥1 才覆盖，否则兜底 2（大厅无 HiddenOrb 时保持默认）=====
+        int hiddenCount = 0;
+        scene->forEachObject([&hiddenCount](NovaEngine::GameObject* go) {
+            if (go->name().rfind("HiddenOrb", 0) == 0)
+                ++hiddenCount;
+        });
+        if (hiddenCount >= 1)
+            m_hiddenTotal = hiddenCount;
     }
-    NovaEngine::Logger::info("NeonGameManager: 单例已注册，关卡 index={} orbTotal={}（计时起点 {:.2f}s），灯带 {} 根",
-                             m_levelIndex, m_orbTotal, m_startTime, m_strips.size());
+    NovaEngine::Logger::info("NeonGameManager: 单例已注册，关卡 index={} orbTotal={} mode={}（计时起点 {:.2f}s），"
+                             "灯带 {} 根，隐藏晶体总数 {}",
+                             m_levelIndex, m_orbTotal, m_mode, m_startTime, m_strips.size(),
+                             m_hiddenTotal);
 }
 
 void NeonGameManager::onUpdate(float dt) {
@@ -104,8 +127,21 @@ void NeonGameManager::onUpdate(float dt) {
     // ===== V1.1 维度突破：世界随收集渐亮 =====
     updateDimensionLight(dt);
 
-    // ===== V1.2 幽灵轨迹录制（0.1s 采样；胜利后停）=====
-    if (!m_won) {
+    // ===== V1.3 限时挑战倒计时（§28.3.15.5）：挑战且未胜未败 → 扣时间；耗尽 → 失败 =====
+    if (m_mode == "challenge" && !m_won && !m_failed) {
+        m_remaining -= dt;
+        if (m_remaining <= 0.0f) {
+            m_remaining = 0.0f;
+            m_failed = true;
+            playSfx("assets/audio/sfx_fail.wav", 1.0f);
+            stopBgm();
+            NovaEngine::Logger::info("NeonGameManager: 时间耗尽 → 挑战失败（剩余 {:.1f}s），已停表",
+                                     m_remaining);
+        }
+    }
+
+    // ===== V1.2 幽灵轨迹录制（0.1s 采样；胜利/失败后停）=====
+    if (!m_won && !m_failed) {
         m_recAccum += dt;
         if (m_recAccum >= 0.1f) {
             m_recAccum = 0.0f;
@@ -120,9 +156,29 @@ void NeonGameManager::onUpdate(float dt) {
 }
 
 void NeonGameManager::notifyHiddenCollected() {
+    // ===== V1.3 结算后状态冻结（Reviewer P2-2）：won/failed 后一切玩法状态不再变更 =====
+    if (m_won || m_failed)
+        return;
     ++m_hiddenCollected;
+    if (m_mode == "challenge")
+        m_remaining += 6.0f;   // §28.3.15.5：隐藏晶体 +6s
     playSfx("assets/audio/sfx_pickup3.wav", 1.0f);
-    NovaEngine::Logger::info("NeonGameManager: 隐藏晶体 {}/{}", m_hiddenCollected, m_hiddenTotal);
+    NovaEngine::Logger::info("NeonGameManager: 隐藏晶体 {}/{}（剩余 {:.1f}s）", m_hiddenCollected,
+                             m_hiddenTotal, m_remaining);
+}
+
+void NeonGameManager::notifyFall() {
+    // ===== V1.3 结算后状态冻结（Reviewer P2-2）：结算后掉落不计入本局统计 =====
+    if (m_won || m_failed)
+        return;
+    ++m_fallsRun;
+}
+
+void NeonGameManager::notifyDash() {
+    // ===== V1.3 结算后状态冻结（Reviewer P2-2）：结算后冲刺不计入累计统计 =====
+    if (m_won || m_failed)
+        return;
+    ++m_dashRun;
 }
 
 void NeonGameManager::updateDimensionLight(float dt) {
@@ -143,14 +199,22 @@ void NeonGameManager::updateDimensionLight(float dt) {
 }
 
 void NeonGameManager::notifyCollected() {
+    // ===== V1.3 结算后状态冻结（Reviewer P2-2）：won/failed 后不再计数/加时/亮灯带/激活门 =====
+    if (m_won || m_failed)
+        return;
     ++m_collected;
 
     // ===== V1.2 分段计时：记录每颗晶体收集时刻 =====
     m_splitTimes.push_back(elapsedTime());
 
+    // ===== V1.3 限时挑战：普通球 +4s（§28.3.15.5；上方守卫保证 !won && !failed 才可达）=====
+    if (m_mode == "challenge")
+        m_remaining += 4.0f;
+
     // ===== V1.1 Combo：2.5s 窗口内连续收集，音效逐级升高（3 档音高变体）=====
     ++m_combo;
     m_comboTimer = 2.5f;
+    m_maxCombo = std::max(m_maxCombo, m_combo);   // V1.3 本局最高连击（成就 combo_5 用）
     const int variant = std::min(m_combo - 1, 2);
     const char* pickupSfx = variant == 0 ? "assets/audio/sfx_pickup.wav"
                             : variant == 1 ? "assets/audio/sfx_pickup2.wav"
@@ -177,85 +241,143 @@ float NeonGameManager::elapsedTime() const {
 float NeonGameManager::finishRun() {
     if (m_won)
         return elapsedTime();   // 幂等：重复触发直接返回结算值
+    if (m_failed)
+        return elapsedTime();   // V1.3 失败守卫：时间耗尽后误入胜利区不结算（与 NeonGate 双保险）
 
     m_won = true;
     m_endTime = NovaEngine::Time::totalTime();
     const float elapsed = m_endTime - m_startTime;
 
-    // 最佳纪录 = min(旧最佳, 本次)（§28.3.12：写档前先读槽 0 只读元数据）
-    float oldBest = elapsed;
-    for (const auto& slot : NovaEngine::SaveGame::listSlots()) {
-        if (slot.slot == 0 && slot.valid) {
-            oldBest = slot.playTimeSeconds;
-            break;
-        }
-    }
-    m_bestTime = std::min(oldBest, elapsed);
-
-    // ===== V1.2 最佳分段（相邻晶体间隔的最小值）=====
+    // ===== V1.2 最佳分段（相邻晶体间隔的最小值；两模式通用）=====
     for (size_t i = 0; i + 1 < m_splitTimes.size(); ++i) {
         const float seg = m_splitTimes[i + 1] - m_splitTimes[i];
         if (m_bestSplit <= 0.0f || seg < m_bestSplit)
             m_bestSplit = seg;
     }
 
-    // ===== V1.2 幽灵落盘：刷新纪录才写（保留最快一局的轨迹）+ 本地排行榜 TOP5 =====
-    if (elapsed < oldBest) {
-        nlohmann::json ghost;
-        ghost["best"] = elapsed;
-        nlohmann::json samples = nlohmann::json::array();
-        for (const auto& [t, p] : m_recording)
-            samples.push_back({t, p.x, p.y, p.z});
-        ghost["samples"] = std::move(samples);
-        if (!NovaEngine::FileUtil::writeText("saves/ghost.novaghost", ghost.dump()))
-            NovaEngine::Logger::warn("NeonGameManager: 幽灵轨迹写入失败");
-    }
-    {
-        // 排行榜：读旧表 → 追加本次 → 排序取 TOP5 → 原子写回
+    if (m_mode == "challenge") {
+        // ===== V1.3 限时挑战结算（§28.3.15.5）：不写 slot 0；评级按剩余；独立榜单/幽灵 =====
+        const float remaining = m_remaining;
+
+        // 评级按剩余时间：S ≥40 / A ≥25 / B ≥10 / C >0（§28.3.15.2 裁定 5）
+        if (remaining >= 40.0f) {
+            m_rankName = "S";
+            m_rankColor = glm::vec4(1.0f, 0.85f, 0.3f, 1.0f);   // 金
+        } else if (remaining >= 25.0f) {
+            m_rankName = "A";
+            m_rankColor = glm::vec4(0.4f, 1.0f, 1.0f, 1.0f);    // 青
+        } else if (remaining >= 10.0f) {
+            m_rankName = "B";
+            m_rankColor = glm::vec4(0.5f, 1.0f, 0.5f, 1.0f);    // 绿
+        } else {
+            m_rankName = "C";
+            m_rankColor = glm::vec4(0.75f, 0.78f, 0.85f, 1.0f); // 灰
+        }
+
+        // 独立榜单 leaderboard_challenge（剩余降序 TOP5；§28.3.15.2 裁定 4）
         std::vector<float> board;
         std::string old;
-        if (NovaEngine::FileUtil::readText("saves/leaderboard.novaboard", old)) {
+        if (NovaEngine::FileUtil::readText("saves/leaderboard_challenge.novaboard", old)) {
             try {
                 for (const auto& v : nlohmann::json::parse(old))
                     if (v.is_number())
                         board.push_back(v.get<float>());
             } catch (...) { board.clear(); }
         }
-        board.push_back(elapsed);
-        std::sort(board.begin(), board.end());
+        const float oldBest = board.empty() ? -1.0f : board[0];
+        // 幽灵 ghost_challenge：刷新纪录才写（剩余 > 旧首项或文件空，同 V1.2 语义）
+        if (board.empty() || remaining > oldBest) {
+            nlohmann::json ghost;
+            ghost["best"] = remaining;
+            nlohmann::json samples = nlohmann::json::array();
+            for (const auto& [t, p] : m_recording)
+                samples.push_back({t, p.x, p.y, p.z});
+            ghost["samples"] = std::move(samples);
+            if (!NovaEngine::FileUtil::writeText("saves/ghost_challenge.novaghost", ghost.dump()))
+                NovaEngine::Logger::warn("NeonGameManager: 限时幽灵轨迹写入失败");
+        }
+        board.push_back(remaining);
+        std::sort(board.begin(), board.end(), std::greater<float>());   // 剩余降序
         if (board.size() > 5)
             board.resize(5);
         nlohmann::json out = board;
-        NovaEngine::FileUtil::writeText("saves/leaderboard.novaboard", out.dump());
-    }
-
-    // ===== V1.1 评级（S < 20s / A < 30s / B < 45s / C 其余）=====
-    if (elapsed < 20.0f) {
-        m_rankName = "S";
-        m_rankColor = glm::vec4(1.0f, 0.85f, 0.3f, 1.0f);   // 金
-    } else if (elapsed < 30.0f) {
-        m_rankName = "A";
-        m_rankColor = glm::vec4(0.4f, 1.0f, 1.0f, 1.0f);    // 青
-    } else if (elapsed < 45.0f) {
-        m_rankName = "B";
-        m_rankColor = glm::vec4(0.5f, 1.0f, 0.5f, 1.0f);    // 绿
+        NovaEngine::FileUtil::writeText("saves/leaderboard_challenge.novaboard", out.dump());
+        m_bestRemaining = std::max(oldBest, remaining);
     } else {
-        m_rankName = "C";
-        m_rankColor = glm::vec4(0.75f, 0.78f, 0.85f, 1.0f); // 灰
+        // ===== 经典分支完全照旧（§28.3.15.7 分工 1）=====
+        // 最佳纪录 = min(旧最佳, 本次)（§28.3.12：写档前先读槽 0 只读元数据）
+        float oldBest = elapsed;
+        for (const auto& slot : NovaEngine::SaveGame::listSlots()) {
+            if (slot.slot == 0 && slot.valid) {
+                oldBest = slot.playTimeSeconds;
+                break;
+            }
+        }
+        m_bestTime = std::min(oldBest, elapsed);
+
+        // ===== V1.2 幽灵落盘：刷新纪录才写（保留最快一局的轨迹）+ 本地排行榜 TOP5 =====
+        if (elapsed < oldBest) {
+            nlohmann::json ghost;
+            ghost["best"] = elapsed;
+            nlohmann::json samples = nlohmann::json::array();
+            for (const auto& [t, p] : m_recording)
+                samples.push_back({t, p.x, p.y, p.z});
+            ghost["samples"] = std::move(samples);
+            if (!NovaEngine::FileUtil::writeText("saves/ghost.novaghost", ghost.dump()))
+                NovaEngine::Logger::warn("NeonGameManager: 幽灵轨迹写入失败");
+        }
+        {
+            // 排行榜：读旧表 → 追加本次 → 排序取 TOP5 → 原子写回
+            std::vector<float> board;
+            std::string old;
+            if (NovaEngine::FileUtil::readText("saves/leaderboard.novaboard", old)) {
+                try {
+                    for (const auto& v : nlohmann::json::parse(old))
+                        if (v.is_number())
+                            board.push_back(v.get<float>());
+                } catch (...) { board.clear(); }
+            }
+            board.push_back(elapsed);
+            std::sort(board.begin(), board.end());
+            if (board.size() > 5)
+                board.resize(5);
+            nlohmann::json out = board;
+            NovaEngine::FileUtil::writeText("saves/leaderboard.novaboard", out.dump());
+        }
+
+        // ===== V1.1 评级（S < 20s / A < 30s / B < 45s / C 其余）=====
+        if (elapsed < 20.0f) {
+            m_rankName = "S";
+            m_rankColor = glm::vec4(1.0f, 0.85f, 0.3f, 1.0f);   // 金
+        } else if (elapsed < 30.0f) {
+            m_rankName = "A";
+            m_rankColor = glm::vec4(0.4f, 1.0f, 1.0f, 1.0f);    // 青
+        } else if (elapsed < 45.0f) {
+            m_rankName = "B";
+            m_rankColor = glm::vec4(0.5f, 1.0f, 0.5f, 1.0f);    // 绿
+        } else {
+            m_rankName = "C";
+            m_rankColor = glm::vec4(0.75f, 0.78f, 0.85f, 1.0f); // 灰
+        }
+
+        // 通关写档 slot 0（§28.3.12：原子写 saves/slot0.novasave；限时挑战不写——§28.3.15.2 裁定 6）
+        if (NovaEngine::Scene* scene = gameObject()->scene())
+            NovaEngine::SaveGame::save(*scene, 0, "assets/scenes/NeonLevel1.nova.json", elapsed);
     }
 
     // ===== V1.1 维度突破：通关瞬间全部灯带点亮（世界修复完成）=====
     for (NovaEngine::MeshRenderer* mr : m_strips)
         mr->material.emissionIntensity = 2.0f;
 
-    // 通关写档 slot 0（§28.3.12：原子写 saves/slot0.novasave）
-    if (NovaEngine::Scene* scene = gameObject()->scene())
-        NovaEngine::SaveGame::save(*scene, 0, "assets/scenes/NeonLevel1.nova.json", elapsed);
-
     playSfx("assets/audio/sfx_win.wav", 1.0f);
     stopBgm();   // 胜利画面：BGM 按 fadeOutSeconds 淡出
-    NovaEngine::Logger::info("NeonGameManager: 通关! 用时 {:.1f} 秒，最佳纪录 {:.1f} 秒（已写存档 slot 0）",
-                             elapsed, m_bestTime);
+    if (m_mode == "challenge")
+        NovaEngine::Logger::info(
+            "NeonGameManager: 挑战通关! 用时 {:.1f} 秒，剩余 {:.1f} 秒，评级 {}，限时最佳 {:.1f} 秒（不写 slot 0）",
+            elapsed, m_remaining, m_rankName, m_bestRemaining);
+    else
+        NovaEngine::Logger::info("NeonGameManager: 通关! 用时 {:.1f} 秒，最佳纪录 {:.1f} 秒（已写存档 slot 0）",
+                                 elapsed, m_bestTime);
     return elapsed;
 }
 

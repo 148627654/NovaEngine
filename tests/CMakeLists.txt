@@ -13,6 +13,8 @@
 
 enable_testing()
 
+# V1.3 追加 TestKinematicCarry.cpp（§28.3.15.4 CC 地面携带验收）——经下方 GLOB
+# CONFIGURE_DEPENDS 自动收录，无需显式列出（显式追加会与 GLOB 重复编译）。
 file(GLOB NOVA_TEST_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
 
 add_executable(NovaTests ${NOVA_TEST_SOURCES})

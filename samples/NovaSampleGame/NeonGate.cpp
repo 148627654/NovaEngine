@@ -65,8 +65,8 @@ void NeonGate::onUpdate(float /*dt*/) {
         NovaEngine::Logger::info("NeonGate: 传送门已激活（材质切换 neon_magenta + GateAura 粒子 + sfx）");
     }
 
-    // ===== 胜利区判定（激活后；§28.3.6）=====
-    if (!m_activated || mgr->won())
+    // ===== 胜利区判定（激活后；§28.3.6 + V1.3 失败守卫：时间耗尽后不结算，与 finishRun 双保险）=====
+    if (!m_activated || mgr->won() || mgr->failed())
         return;
     NovaEngine::Scene* scene = gameObject()->scene();
     if (!scene)

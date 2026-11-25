@@ -16,9 +16,14 @@ void NeonGhost::onStart() {
     // 读取最佳纪录轨迹；无文件 → 自行隐藏（本局无幽灵可赛）。
     // 注：GO 在场景里必须 active=true——引擎不会给未激活对象跑 onStart，
     // 隐藏动作只能由脚本在 onStart 里执行（V1.2 场景约定）。
+    // ===== V1.3 按模式选文件（§28.3.15.5）：经典 ghost / 限时 ghost_challenge =====
+    NeonGameManager* mgr = NeonGameManager::instance();
+    const std::string path = (mgr && mgr->mode() == "challenge")
+                                 ? "saves/ghost_challenge.novaghost"
+                                 : "saves/ghost.novaghost";
     std::string text;
-    if (!NovaEngine::FileUtil::readText("saves/ghost.novaghost", text)) {
-        NovaEngine::Logger::info("NeonGhost: 无幽灵回放文件，本局隐藏");
+    if (!NovaEngine::FileUtil::readText(path, text)) {
+        NovaEngine::Logger::info("NeonGhost: 无幽灵回放文件（{}），本局隐藏", path);
         gameObject()->setActiveSelf(false);
         return;
     }

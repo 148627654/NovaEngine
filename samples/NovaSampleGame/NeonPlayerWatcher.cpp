@@ -53,8 +53,10 @@ void NeonPlayerWatcher::onUpdate(float /*dt*/) {
             m_cc->setVelocity(glm::vec3(0.0f));
         }
         gameObject()->transform()->setLocalPosition(m_respawnPos);   // 视觉立即同步（Player 为根节点，local==world）
-        if (auto* mgr = NeonGameManager::instance())
+        if (auto* mgr = NeonGameManager::instance()) {
             mgr->playSfx("assets/audio/sfx_fall.wav", 1.0f);
+            mgr->notifyFall();   // V1.3 本局掉落计数（成就 deathless/fall_5 + stats.fall）
+        }
         NovaEngine::Logger::info("NeonPlayerWatcher: 玩家掉落 y={:.2f} < {:.1f}，已复活到检查点 ({:.1f},{:.1f},{:.1f})（计数保留）",
                                  pos.y, m_respawnY, m_respawnPos.x, m_respawnPos.y, m_respawnPos.z);
         m_wasGrounded = false;
@@ -98,8 +100,10 @@ void NeonPlayerWatcher::onUpdate(float /*dt*/) {
 
     // ===== V1.1 Dash 反馈：水平速度 >8 上升沿（冲刺 = 4×2.5=10 m/s）→ 音效 + 拖尾粒子 =====
     if (horizSpeed > 8.0f && m_prevHorizSpeed <= 8.0f) {
-        if (auto* mgr = NeonGameManager::instance())
+        if (auto* mgr = NeonGameManager::instance()) {
             mgr->playSfx("assets/audio/sfx_dash.wav", 0.8f);
+            mgr->notifyDash();   // V1.3 本局冲刺计数（成就 stats.dash）
+        }
         if (m_dashTrail) {
             if (auto* ps = m_dashTrail->getComponent<NovaEngine::ParticleSystem>())
                 ps->play();

@@ -12,11 +12,11 @@
 
 ## 🎮 示例游戏:霓虹收集者(Neon Collector)
 
-科幻霓虹风 3D 收集闯关——大厅选关 → 关卡内跑跳收集能量晶体 → 集满激活终点拱门 → 通关计时评级。核心玩法:**Shift 冲刺**、**二段跳**、**连击 Combo**(2.5s 窗口,音效逐级升高)、**S/A/B/C 通关评级**、**检查点复活**、**幽灵回放**(刷新纪录后与自己的最佳轨迹竞速)、**隐藏晶体**、**空中捷径**、**本地排行榜**;主题「维度突破」——每收集一颗晶体,对应路线灯带点亮、世界随进度渐亮,集满后整个关卡恢复霓虹能量。展示引擎全功能:多场景异步切换、角色控制器、Shader Graph 自发光材质、LUT 冷色调、粒子、运行时 UI 计分、BGM 与拾取音效、场景参数传递、发布打包。
+科幻霓虹风 3D 收集闯关——大厅选关 → 关卡内跑跳收集能量晶体 → 集满激活终点拱门 → 通关计时评级。核心玩法:**Shift 冲刺**、**二段跳**、**连击 Combo**(2.5s 窗口,音效逐级升高)、**S/A/B/C 通关评级**、**检查点复活**、**幽灵回放**(刷新纪录后与自己的最佳轨迹竞速)、**隐藏晶体**、**空中捷径**、**本地排行榜**、**移动平台捷径**（站上自动随平台移动）、**限时挑战模式**（倒计时+拾取加时，独立榜单）、**本地成就系统**（12 项成就+大厅成就墙）；主题「维度突破」——每收集一颗晶体,对应路线灯带点亮、世界随进度渐亮,集满后整个关卡恢复霓虹能量。展示引擎全功能:多场景异步切换、角色控制器、Shader Graph 自发光材质、LUT 冷色调、粒子、运行时 UI 计分、BGM 与拾取音效、场景参数传递、发布打包。
 
 - 大厅场景:`assets/scenes/NeonLobby.nova.json`
 - 关卡场景:`assets/scenes/NeonLevel1.nova.json`
-- 玩法脚本:`samples/NovaSampleGame/`(NeonGameManager / NeonLobbyUI / NeonLevelHud / NeonCollectible / NeonGate / NeonPlayerWatcher)
+- 玩法脚本:`samples/NovaSampleGame/`(NeonGameManager / NeonLobbyUI / NeonLevelHud / NeonCollectible / NeonGate / NeonPlayerWatcher / NeonMovingPlatform / NeonAchievements)
 
 ## ✨ 特性
 

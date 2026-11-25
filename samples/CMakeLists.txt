@@ -28,6 +28,8 @@ set(NOVA_GAME_SOURCES
     NovaSampleGame/NeonPlayerWatcher.cpp    # 示例游戏：玩家看守（掉落复活 + 跳跃音效）
     NovaSampleGame/NeonCameraShake.cpp      # V1.1：收集镜头震动（挂 Main Camera）
     NovaSampleGame/NeonGhost.cpp            # V1.2：幽灵回放（最佳纪录轨迹重放）
+    NovaSampleGame/NeonMovingPlatform.cpp   # V1.3：移动平台（sin 周期位置脚本，无物理调用）
+    NovaSampleGame/NeonAchievements.cpp     # V1.3：本地成就（12 成就边沿检测 + toast 队列 + 存档）
 )
 
 if(NOVA_SCRIPTS_DLL)

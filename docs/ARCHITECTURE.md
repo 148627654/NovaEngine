@@ -3903,6 +3903,276 @@ build.novabuild scenes 数组**首两项**改为 `{"name":"NeonLobby","path":"as
 7. 结算页「用时/最佳纪录/再玩一次/返回大厅」信息完整、按钮顺手。
 8. 重玩动机：计时挑战成立（第二次想破纪录）。
 
+## 28.3.15 落地设计 V1.3（2026-11-25，GameDesigner）
+
+> 《霓虹收集者》V1.3 更新包：移动平台捷径 + 限时挑战模式 + 本地成就系统。Scripter/Levels 两 agent 按本节无歧义照做，禁止自行发挥。**引擎需求条款（§28.3.15.4）由 Architect 裁定、cR 实现；游戏 agent 不碰 engine/src（硬约束）**。事实依据（2026-11-25 通读）：§28.3 全部、samples/NovaSampleGame/ 全部 9 脚本（V1.1/V1.2 现状）、NeonLobby/NeonLevel1.nova.json（schema v4）、PhysicsWorld.cpp（stepCharacters 1270-1304 / writeKinematics 1043-1064）、CharacterController.h/Rigidbody.h/FileUtil.h/Scene.h、vendored Jolt CharacterVirtual.h（ground velocity 机制）、KNOWN-ISSUES 波 3 段。
+
+### 28.3.15.1 定位与总览
+
+- **V1.3 一句话**：在 V1.2 竞速体验之上，补三块「重复游玩动机」——会动的平台（空间趣味 + 新捷径 + 2 颗新隐藏晶体）、倒计时模式（时间压力）、成就墙（长期目标）。
+- **硬约束（沿用 §28.3 总则）**：纯脚本 + 场景资产；引擎 26 组件不变；无新第三方；场景 schema v4 不手写未来字段；资产增量极小（移动平台用 builtin:cube + 既有材质/灯带样式 + 既有 neon_pyramid.obj/neon_crystal.obj；成就零新资产；新音效 2 个由主会话合成）。
+- **文件所有权**：samples/NovaSampleGame/ 新改脚本归 GameScripter；assets/scenes/NeonLobby.nova.json、NeonLevel1.nova.json 归 GameLevels；engine/ 归 cR（仅 §28.3.15.4 条款，经 Architect 裁定）；音效合成归主会话。
+
+### 28.3.15.2 全局裁定（含理由）
+
+1. **移动平台 = 新增可选捷径段，不改造既有 13 平台**。理由：既有 13 平台中 10 台承载能量球（§28.3.6），改造任意一台都会牵动「10 球步行可及」原则或迫使球随平台移动（拾取判定复杂化）；新增捷径段零风险、纯增量，且天然满足「改动不得破坏既有通关路线」。新增 2 颗隐藏晶体（X1/X2，名称 HiddenOrb3/HiddenOrb4）仅移动平台可及，**注明新增**。
+2. **移动平台需要引擎增强（§28.3.15.4）**——Architect 已裁定批准（2026-11-25，路线 B 位置级叠加），A 计划生效；B 计划（三台平台改静态摆件，§28.3.15.4 兜底）保留备查、不再触发。游戏其余部分不受影响。
+3. **模式协议**：level 参数加 `mode` 字段（"classic"/"challenge"），缺失/坏值 → "classic"（向后兼容，V1.2 存档与既有按钮传参照旧可玩；Player 直启无参 = 经典）。
+4. **限时挑战独立榜单 + 独立幽灵**。理由：两模式分数含义不同——经典 = 用时越小越好；限时 = 剩余时间越大越好（加时机制使「通关用时」不可比）。共用文件会破坏排序语义与大厅 TOP3 显示。经典沿用既有 saves/leaderboard.novaboard 与 saves/ghost.novaghost（零迁移、不破坏 V1.2 数据）；限时新增 saves/leaderboard_challenge.novaboard（剩余降序 TOP5）与 saves/ghost_challenge.novaghost。
+5. **限时通关评级按「剩余时间」**：剩余 ≥40s = S、≥25s = A、≥10s = B、>0 = C。理由：剩余时间是限时模式的核心分数，天然综合了「路线速度」与「加时管理」（多绕路拿球既加时又耗时，净效果体现在剩余）；经典模式评级不变（用时 <20/30/45s）。
+6. **限时通关不写 slot 0**（SaveGame::save）。理由：slot 0 是大厅「最佳纪录」的权威来源，挑战用时不可比，写入会毒化经典破纪录动机；且 SaveGame::save 会写整场景快照，对挑战模式无意义。限时最佳从 leaderboard_challenge 首项读取（不另建 best 文件）。
+7. **隐藏晶体总数从「硬编码 2」改为「场景统计」**：NeonGameManager::onStart 用 `scene->forEachObject` 统计名称以 "HiddenOrb" 开头的对象数（Scene.h 公开 API 已核实）；统计 0 → 兜底 2。V1.3 场景共 4 颗（HiddenOrb1-4），HiddenText 自动显示 0/4。
+8. **关卡内成就解锁提示 = 要（toast）**。理由：成就解锁时刻几乎全在关卡中（全收集/评级/连击/通关），无提示玩家不会感知「刚才发生了什么」；大厅成就墙只覆盖「回来看」的场景。成本：1 个 Text + HUD 轮询几行。规格见 §28.3.15.6。
+9. **成就累计 stats 写盘时机** = 解锁时 + won/failed 上升沿。理由：每次拾取/冲刺都原子写文件属无谓 IO；中途强退（Alt+F4）丢当局未写累计，影响轻微（休闲级成就），写明取舍。
+10. **复活点不设在移动平台上**（NeonPlayerWatcher 的 kPadNames 不加 MPA/MPB/MPC）。理由：平台离开后出生点悬空，复活会无限坠落；检查点语义保持在静止平台。
+
+### 28.3.15.3 移动平台关卡元素（JSON 级）
+
+**放置方案**：主路线 PadB2（−2,−0.3,−10.5，顶面 0.0）东侧空域新增「移动平台捷径段」，3 台平台接力，终点落在 PadC1（−1,−0.3,−22.5，顶面 0.0）——跳过 PadB3 跳台 + PadB4 段，沿途 2 颗新隐藏晶体。主路线 13 平台与 10 球坐标零改动。
+
+**平台行为表**（运动 = `位置 = 基准 + sin(totalTime×2π/周期 + 相位)×振幅×轴向`，峰值速度 = 振幅×2π/周期）：
+
+| 名称 | 基准 center (x,y,z) | scale | 轴 | 振幅(m) | 周期(s) | 相位 | 峰值速度 | 路径范围 |
+|---|---|---|---|---|---|---|---|---|
+| MPA | (2.0, 0.95, −14.0) | (2.2,0.5,2.2) | X | 1.0 | 6.0 | 0° | 1.05 m/s | x∈[1,3]（顶面恒定 1.2） |
+| MPB | (3.0, 0.85, −16.5) | (2.2,0.5,2.2) | Y | 0.65 | 6.0 | 90° | 0.68 m/s | 中心 y∈[0.2,1.5]（顶面 y∈[0.45,1.75]） |
+| MPC | (2.0, 0.95, −19.0) | (2.2,0.5,2.2) | X | 1.0 | 6.0 | 180° | 1.05 m/s | x∈[1,3]（顶面恒定 1.2） |
+
+**路线可达性核对**（全部 ≤ 设计安全线；跳跃顶点 1.84m，水平安全间距 1.5m）：
+- 上板：PadB2 东南角（−0.25, 0.0, −12.25）→ MPA 西端点（x=1 时北缘 x=−0.1、z=−12.9、顶面 1.2）：水平 0.65m + 抬 1.2m ✓（需等平台摆到西端，等待 ≤3s = 时间要素）。
+- 接力：MPA 南缘 z=−15.1 → MPB 北缘 z=−15.4：0.3m 平跳（MPB 顶面 0.45..1.75，上/下差 ≤0.75）✓；MPB 南缘 z=−17.6 → MPC 北缘 z=−17.9：0.3m ✓；MPC 南缘 z=−20.1 → PadC1 北缘 z=−20.5：0.4m + 降 1.2m（步行落下）✓。
+- 碰撞隔离核对：MPA z∈[−15.1,−12.9] 与 PadB2 南缘 −12.25 不相交（0.65m 净空，平台不扫过站人区）；MPB/MPC 与主路线各平台 x/z 均不相交；三平台互不相交；MPC 底面 0.7 高于 PadC1 顶面 0.0，不碾过站人区。
+- 新隐藏晶体仅平台可及（拾取半径 1.8m，玩家中心 = 台顶 +0.9）：X1 = HiddenOrb3 @ (4.3, 2.8, −14.0)——MPA 东端（x=3，玩家 x≤4.0）时 dx≤1.3、dy=0.7 → 距离 ≤1.48 ✓；从主路线任一台/其余平台距离均 >2.5 ✗。X2 = HiddenOrb4 @ (3.2, 2.8, −19.0)——MPC 东端 dx≤0.8、dy=0.7 ✓；从 PadC1 最近角距离 2.96 ✗。
+
+**平台 GameObject 结构**（每台一个根对象，parent 0；JSON 键名照抄 §28.3.6 与 PhysicsTest.nova.json 的 Rigidbody 键）：
+
+| 组件/子对象 | 字段 |
+|---|---|
+| Transform | position = 基准 center（上表），rotation [0,0,0,1]，scale [2.2,0.5,2.2] |
+| MeshRenderer | mesh "builtin:cube"；material：albedo (0.06,0.07,0.10)、metallic 0.6、roughness 0.45、emissionColor (0.12,0.02,0.28)、emissionIntensity 1.5（暗品红着色，<0.8 不泛光）、blendMode "Opaque"、其余键同 §28.3.4 平台通用材质 |
+| BoxCollider | isTrigger false、center [0,0,0]、halfExtents [0.5,0.5,0.5] |
+| Rigidbody | mass 1.0、linearDamping 0.0、angularDamping 0.05、useGravity false、isKinematic **true** |
+| NeonMovingPlatform | enabled true、axis 0（MPA/MPC）/ 1（MPB）、amplitude 1.0（MPB 0.65）、periodSec 6.0、phaseDeg 0（MPA）/ 90（MPB）/ 180（MPC） |
+| 子对象 EdgeStrip1..4（4 条顶缘灯带，无碰撞体） | local (±1.06,0.27,0)/(0,0.27,±1.06)、scale (0.08,0.06,2.2)/(2.2,0.06,0.08)；材质 albedo (0.05,0.05,0.08)、emissionColor (0.05,0.8,0.9)、emissionIntensity 2.0、metallic 0.3、roughness 0.5（与路线导向灯带同款，随平台移动） |
+| 子对象 MoveTrail（尾迹粒子，提示移动） | local (0,−0.1,0)；ParticleSystem{billboard true、blendAdditive true、emissionRate 14、startColor (0.95,0.45,1.0,0.7)、endColor (0.95,0.45,1.0,0.0)、startSize 0.07、endSize 0.02、lifetime 0.6、initialSpeed 0.2、gravity 0.0、loop true、maxParticles 50、playOnAwake true、tileX 1、tileY 1} |
+
+**路径端点信标 ×6**（提示移动范围；主场景根对象，非平台子对象；mesh "assets/models/neon/neon_pyramid.obj" 复用 V1.2 Beacon 样式，scale (0.4,0.4,0.4)，材质 albedo (0.05,0.05,0.08)、emissionColor (1.0,0.35,0.05)、emissionIntensity 2.0、metallic 0.3、roughness 0.5）：
+
+| 名称 | position |
+|---|---|
+| BeaconMPA1 / BeaconMPA2 | (1.0,0.95,−14.0) / (3.0,0.95,−14.0) |
+| BeaconMPB1 / BeaconMPB2 | (3.0,0.2,−16.5) / (3.0,1.5,−16.5) |
+| BeaconMPC1 / BeaconMPC2 | (1.0,0.95,−19.0) / (3.0,0.95,−19.0) |
+
+**新增球表**（2 颗，均 hidden=true，材质/脚本与 HiddenOrb1/2 完全相同——mesh neon_crystal.obj、shaderGraphPath neon_orange、spinSpeedDeg 90、pickupRadius 1.8）：
+
+| 名称 | position | 可及条件 |
+|---|---|---|
+| HiddenOrb3（X1） | (4.3, 2.8, −14.0) | MPA 摆至东段（x≥2.7）时站台拾取 |
+| HiddenOrb4（X2） | (3.2, 2.8, −19.0) | MPC 摆至东段时站台拾取 |
+
+**已知观感备案**：幽灵回放无碰撞体——最快一局若走了移动平台捷径，回放时幽灵会在空域悬空经过（平台已移位），与 V1.2 跳跃段幽灵同族观感，不处理。
+
+### 28.3.15.4 引擎需求条款：CC 地面携带（Architect 已裁定 2026-11-25：批准，路线 B 位置级叠加）
+
+**背景事实（2026-11-25 核实，裁定依据）**：
+- stepCharacters（PhysicsWorld.cpp:1270-1304）只积分 CC 自身速度（来源优先级：setVelocity 覆盖 > move 缓冲 > cv->GetLinearVelocity，:1277-1285）。
+- **关键更正（设计稿路线 A 的前提不成立）**：Jolt CharacterVirtual 不会自动把地面速度并入角色运动——Update 以 mLinearVelocity 驱动 MoveShape（CharacterVirtual.cpp:1466），ExtendedUpdate（:1801-1817）只做斜坡消速 + Update + StickToFloor + WalkStairs；头注释（CharacterVirtual.h:440-442）明确要求**调用方**自行组合「速度 = GetGroundVelocity() + 输入」。按路线 A 原文实现（只写 body 线速度、不组合）不会产生携带。
+- 地面速度 API 已核实可用（vendored Jolt）：GetGroundState/IsSupported/GetGroundVelocity/GetGroundBodyID（CharacterBase.h:87-156）、SetPosition（CharacterVirtual.h:309）、UpdateGroundVelocity（:458）、CalculateCharacterGroundVelocity（:650）。注意 IsSupported() = OnGround | OnSteepGround（CharacterBase.h:104）。
+- writeKinematics（PhysicsWorld.cpp:1043-1064）每固定步 SetPositionAndRotation(DontActivate) 直设 kinematic body → 线速度恒 0。**本裁定不改这一路径**。
+- 固定步顺序（PhysicsWorld.cpp:1145-1151）：writeKinematics → system.Update → stepCharacters → writeBackActive → writeBackCharacters。同一步内 body 位置先于角色更新，位移差分可直接取。
+
+**Architect 裁定：批准引擎增强，采用路线 B（位置级叠加 + 离地步惯性注入），不采用路线 A。**理由：
+
+1. **ENG-5 结构安全（决定性）**：CharacterWalk 每渲染帧 setVelocity 覆盖水平速度（CharacterWalk.cpp:79-81，静止时写 0,0），经 pendingVelocityOverride 在固定步消费；且每帧 `vel = cc->velocity()` 读回物理速度（CharacterWalk.cpp:46；velocity() = cv->GetLinearVelocity，PhysicsWorld.cpp:1543）——纯速度注入的携带必须叠加在「override 消费后、SetLinearVelocity 前」才不被下一帧覆盖，而读回会把上一步已叠加的地面速度带回下一次 override，垂直分量逐帧累计（升台工况），需额外记账且易错。位置级叠加在 ExtendedUpdate 之后直接改位置，对 setVelocity(0,0) 免疫，无读回污染、无重复累计。
+2. **零回归**：不写 kinematic body 速度 → 动态体接触/摩擦/既有用例全部不变（ENG-4 天然满足）；全仓当前无任何 kinematic=true 的 Rigidbody（V1.3 三台平台为首例），writeKinematics 零改动。路线 A 需 writeKinematics 改 MoveKinematic + stepCharacters 速度组合记账，风险面大得多。
+3. **垂直贴面精确**：位移差分直接叠加，升/降台均精确跟随；StickToFloor step-down（0.5m）不介入；不依赖 stepCharacters 的地面下行钳位（PhysicsWorld.cpp:1290-1291）。
+4. **实现面最小**：全部在 PhysicsWorld.cpp 的 CharacterEntry + stepCharacters 内；CC 公开接口（CharacterController.h：isGrounded/velocity/setVelocity/move/setPosition）零变更；回滚 = 还原单文件。
+5. 起跳惯性按 ENG-2 允许的「位移差分估算」注入，无需真实 body 速度。
+
+（备注：路线 A 记为**未来增强**——若日后需要动态体站上移动平台被携带，可把 writeKinematics 改为 MoveKinematic 写入真实速度，并按 Jolt 头注释在 stepCharacters 组合地面速度；不在 V1.3 范围。）
+
+**条款（行为规格，原文照准；括注 = 路线 B 实现映射）**：
+
+- **ENG-1 携带**：每个固定步，当 CC `IsSupported` 且支撑 body 属 kinematic Rigidbody 时，CC 位置须叠加该 body 自上一固定步以来的位移（水平+垂直分量均携带），使「平台顶面 → 胶囊底部」相对几何在本步内保持；除合法碰撞解算外，每步相对漂移 <2mm，60s 静立累计漂移 <0.2m。（实现 = ExtendedUpdate 后按「GetGroundState()==OnGround 且支撑 body 属 kinematic」门控（P2-1 终审口径），位置叠加 body 位移差分。）
+- **ENG-2 起跳惯性**：CC 起跳离地的固定步，水平速度 = 脚本设定水平速度 + 支撑 kinematic body 的当前水平速度（body 速度 = 每步位移/固定步长，直设位置无真实速度时按位移差分估算）；落地后不再额外继承。（实现 = 离地步注入水平差分速度入 entry.carryVelocity，空中**仅对脚本来源速度（override/move）叠加**、读回路径不叠加（P1-1 终审口径）、落地清零；惯性自离地步次一步生效，单步延迟 ≤1.75cm @1.05m/s，符合验收容差。）
+- **ENG-3 垂直平台**：平台上升时顶面携带 CC 上行；平台下降时 CC 贴面下行（不悬浮、不因 StickToFloor step-down 0.5m 拉脱）。本设计平台峰值加速度 ≈1.10 m/s²（振幅 1.0m、周期 6s）≪ 重力，无「向上压扁/向下甩脱」工况；条款按一般情形实现即可。（实现 = 位移差分含垂直分量，升降均精确跟随。）
+- **ENG-4 隔离**：携带仅在「支撑于 kinematic 体」成立；static 平台、dynamic 体支撑、空中、侧面接触一律不改行为（既有物理用例零回归）。dynamic body 与 kinematic body 的既有碰撞行为不得改变。（实现 = 触发条件仅「GetGroundState()==OnGround 且 对应 Rigidbody::isKinematic」——Jolt 的 GetGroundBodyID 在侧面接触时也会写值（CharacterVirtual.cpp:1170/1190-1197 deepest_contact 兜底），仅判 body 会把侧贴 CC 拖行（P2-1 终审口径）；writeKinematics/system.Update/writeBack 零改动。）
+- **ENG-5 顺序与冲突**：携带叠加在 writeBackCharacters 之前生效；不改变脚本 setVelocity/move/setPosition 语义——玩家输入水平速度每帧覆盖仍生效，携带是位置级叠加，不得被下一帧 setVelocity(0,0) 取消（静立玩家必须仍被携带）。（实现 = 位置叠加在 stepCharacters 内、ExtendedUpdate 之后执行，先于 writeBackCharacters；脚本速度覆盖照旧走 override 通道，互不干涉。）
+
+**实现规格（cR 照做；结构与验收按此口径）**：
+
+1. CharacterEntry（PhysicsWorld.cpp:394-400）新增三个字段：
+   - `JPH::BodyID lastGroundBody`（初始 invalid；上一固定步末 CC 的支撑 body，仅记录 kinematic 者）
+   - `JPH::RVec3 lastGroundBodyPos`（该 body 上一固定步末的世界位置）
+   - `glm::vec3 carryVelocity{0.0f}`（离地步注入的惯性，空中持续、落地清零）
+2. 速度阶段（stepCharacters 速度消费与重力钳位之后、SetLinearVelocity 之前）：**仅当速度来源为 override 或 move 缓冲时**叠加 `v += entry.carryVelocity;`；来源为读回（cv->GetLinearVelocity）时**不叠加**（离地步注入已写入物理速度，读回自带；再叠加会在 30FPS 双固定步或纯 CC 读回路径逐步累积成 2×/3×，违反 ENG-2——终审修正 P1-1，2026-11-25）。实现 = 三源分支处记 `bool fromScriptInput`（override/move 为 true），`if (fromScriptInput) v += entry.carryVelocity;`。（注：脚本若把 cc->velocity() 读回值原样写回 setVelocity，惯性会随回写叠加——CharacterWalk 不属此类，其 x/z 每帧由输入重写；契约不承诺对读回-回写型脚本去重。）
+3. 携带与离地检测（stepCharacters 内、cv->ExtendedUpdate 之后）：
+   - 门控（终审口径 2026-11-25，P2-1）：`supported = (cv->GetGroundState() == JPH::CharacterBase::EGroundState::OnGround)`——**不得用 IsSupported()**（= OnGround | OnSteepGround，CharacterBase.h:104）；Jolt 的 GetGroundBodyID 在非支撑侧面接触时也会写值（CharacterVirtual.cpp:1170/1190-1197 best_contact 兜底 deepest_contact），仅凭 body 判 kinematic 会把侧贴 CC 整位移差拖行（违反 ENG-4）。`gid = cv->GetGroundBodyID()`；经 goByBodyId（PhysicsWorld.cpp:389）→ GameObject → getComponent<Rigidbody>()，`kinematicGround = supported && (rb != nullptr && rb->isKinematic)`。
+   - kinematicGround 为真：
+     - `gid == entry.lastGroundBody`：`delta = GetPosition(gid) − entry.lastGroundBodyPos`；`cv->SetPosition(cv->GetPosition() + delta)`；`entry.lastGroundBodyPos = GetPosition(gid)`；
+     - `gid != entry.lastGroundBody`（刚落地/换台/传送后首步）：仅记 `entry.lastGroundBodyPos = GetPosition(gid)`，本步不叠加（防落地瞬间吸附；结果 = 与台面差一个本步位移量，峰值 ≤1.75cm，恒定非漂移，在验收容差内）；
+     - `entry.lastGroundBody = gid; entry.carryVelocity = {0,0,0};`（着台清除惯性，ENG-2「落地后不再额外继承」）。
+   - 否则（空中/非 kinematic 支撑）：
+     - 若 `!entry.lastGroundBody.IsInvalid()`（本步为离地步）：`platformVel = (GetPosition(entry.lastGroundBody) − entry.lastGroundBodyPos) / dt`；`entry.carryVelocity = {platformVel.x, 0, platformVel.z}`（仅水平）；`cv->SetLinearVelocity(toJolt(toGlm(cv->GetLinearVelocity()) + entry.carryVelocity))`（使后续空中步生效）；
+     - `entry.lastGroundBody = JPH::BodyID()`（空中复位，防重复注入）；非 kinematic 支撑（如 static 落地）同时 `entry.carryVelocity = {0,0,0}`。
+4. 传送硬化：CharacterController::setPosition（CharacterController.h:27 复活/瞬移路径）实现处，将对应 entry 的 lastGroundBody 置 invalid、carryVelocity 清零。
+5. 每固定步成本：1 次 GetGroundBodyID + 1 次 goByBodyId 查找 + 至多 2 次 GetPosition + 1 次 SetPosition，O(1)；无分配、无场景遍历。
+
+**可测验收**（设计稿 6 条照准，口径细化）：
+1. 无头/GL 测试：CC 静立（零输入）于 X 轴 ±1m/6s kinematic 平台 → CC 世界 X 与平台中心 X 差恒定（±0.02m），60s 无漂移、无滑落、isGrounded 保持。（位置叠加为精确位移匹配；落地/出生首步恒定滞后峰值 ≤1.75cm，属容差内、非漂移。）
+2. 垂直平台 ±0.65m/6s 升降 → CC 相对顶面高度恒定（±0.02m），全程贴面不悬浮。（差分含垂直分量，StickToFloor 不介入。）
+3. 平台上起跳（平台以 1m/s 平移、玩家无输入）→ 离地期水平位移 ≈ 平台速度×滞空时间，**容差 ±0.05m**（惯性自离地步次一步生效，单步延迟 ≤1.75cm；30FPS 双固定步下位移差分瞬时偏大 ≤2cm/步）。**终审追加两个必测用例（P1-1；原 6 用例全为 override 驱动，读回路径零覆盖）**：
+   - 3.1 读回路径：起跳仅注入一次 setVelocity，后续固定步零脚本输入（走读回分支）→ 离地期水平位移同样 ≈ 平台速度×滞空时间，无逐步累积（验证 carryVelocity 不重复叠加）。
+   - 3.2 30FPS 双固定步：以 step(1/30) 驱动（每渲染帧一次 setVelocity、内部两固定步）→ 离地期水平漂移 ≈ 1× 平台速度（验证第二固定步读回分支不二次叠加）。
+4. 平台运动 + 玩家输入（走/跳/二段跳/冲刺）组合不互相干扰、无穿透、无抖动。（叠加为纯位置量 + 空中纯速度量，与输入速度语义正交。）
+5. 既有回归：NovaTests 物理全部用例 + 示例游戏经典模式冒烟不变（新路径仅「kinematic 支撑」触发；全仓现无 kinematic=true body，V1.3 三台为首例）。
+6. 性能：携带逻辑每固定步 O(1)，无分配、无逐对象全场景查询。
+
+**改动面与回滚**：
+- 改动文件仅 engine/src/Physics/PhysicsWorld.cpp（CharacterEntry 三字段 + stepCharacters 两处块 + setPosition 硬化一处）。
+- engine/include 零变更；CharacterController.h 公开接口零变更；样例脚本零适配。
+- 回滚 = git 还原 PhysicsWorld.cpp 单文件；无 schema/资产/存档残留。
+- 新增测试（无头/GL）归 cR，放 tests/，仅用公开 CC API（setVelocity/isGrounded/velocity/setPosition）。
+
+**兜底（B 计划，不再触发——A 计划已生效；保留备查）**：Levels 把 MPA/MPC 停在基准点（x=2，去掉 Rigidbody+NeonMovingPlatform 改静态）、MPB 停在 (3.0,1.0,−16.5) 静态，X1/X2 移到静态平台上方 1.5m 处直接可拾取；其余（挑战/成就/UI）零改动。B 计划只需改场景 JSON 数值。
+
+### 28.3.15.5 限时挑战模式
+
+**大厅模式选择 UI（Canvas 增改表；按钮标签为按钮的兄弟节点，anchor/offset 与按钮一致——§28.3.5 约定 + KNOWN-ISSUES 波 3 修复）**：现有 StartBtn 语义不变仅改文案/偏移；新增挑战按钮/文案/限时最佳：
+
+| 对象名 | 组件与字段 |
+|---|---|
+| StartBtn（改） | Button offset (−150,0)（原 (0,20)），其余字段不变；StartBtnLabel Text{"经典模式", 32, (1,1,1,1), anchor (0.5,0.5), offset (−150,0)} |
+| ChallengeBtn（新） | Button{color (0.85,0.35,0.15,1), hoverColor (0.95,0.45,0.20,1), pressedColor (0.65,0.25,0.10,1), anchor (0.5,0.5), offset (150,0), size (240,64)}；ChallengeBtnLabel Text{"限时挑战", 32, (1,1,1,1), offset (150,0)} |
+| StartDesc（新） | Text{"不限时 · 冲击最快纪录", 15, (0.75,0.80,0.90,1), offset (−150,44)} |
+| ChallengeDesc（新） | Text{"倒计时 · 拾球加时", 15, (1.0,0.62,0.30,1), offset (150,44)} |
+| BestTimeText（改） | offset (0,86)（原 (0,85)）；文案前缀「经典」 |
+| ChallengeBestText（新） | Text{"限时最佳:暂无", 24, (1.0,0.62,0.30,1), offset (0,128)} |
+| LastRunText（改） | offset (0,168)；文案按 lastResult.mode |
+| HelpText（改） | offset (0,230)，text "W A S D 移动 · 空格 跳跃/二段跳 · Shift 冲刺\n收集全部 10 颗能量球,激活终点传送门\n掉出平台会自动回到最近平台\n限时挑战:初始 60 秒 · 能量球 +4 秒 · 隐藏晶体 +6 秒" |
+
+**场景参数协议扩展（向后兼容）**：
+- 大厅 → 关卡：`setSceneParam("level", R"({"index":1,"orbTotal":10,"mode":"classic"})")` 或 `"mode":"challenge"`。mode 缺失/坏值 → 默认 classic（§28.3.15.2 裁定 3）。
+- 关卡 → 大厅：`setSceneParam("lastResult", {"win":true,"time":34.5,"mode":"classic"})` / `{"win":true,"time":45.2,"mode":"challenge","remaining":49.5}` / `{"win":false,"mode":"challenge"}`。
+
+**规则**：
+- 初始时限 60s；每颗普通球 +4s；每颗隐藏晶体 +6s；不设上限（数学最大 60+10×4+4×6=124s）。数值平衡（已按经典评级分布核算）：新手 90s 走主路线 10 球 → 60+40−90=10s 压线 C（刺激）；普通 50s + 2 隐藏 → 22s = B；熟练 35s 全 14 球 → 89s = S。掉落后时间照扣，无额外惩罚（时间本身就是惩罚）。
+- 时间耗尽（剩余 ≤0）= 失败：立即停表、sfx_fail、BGM 淡出、失败面板（可重试）；失败后 NeonGate 胜利区判定与 finishRun 均须被 `failed` 守卫拦住（双保险）。失败不写任何榜单/幽灵/存档。
+- 通关评级按剩余时间：S ≥40 / A ≥25 / B ≥10 / C >0（§28.3.15.2 裁定 5）。
+- 与幽灵/榜单：独立文件（§28.3.15.2 裁定 4）——通关时读 saves/leaderboard_challenge.novaboard（剩余降序），剩余 > 旧首项（或文件空）→ 写 saves/ghost_challenge.novaghost `{"best":剩余,"samples":[[t,x,y,z]...]}`（刷新纪录才写，同 V1.2 语义）；排行榜追加 + 降序 + TOP5 写回。不写 slot 0（裁定 6）。
+- 幽灵回放：NeonGhost 按 manager->mode() 选文件（经典/限时），其余不变。
+
+**HUD 改动**：
+- TimerText：挑战模式 → `"剩余 %.1f 秒"`；剩余 ≤10s → color (1.0,0.35,0.30,1)（红色告警），>10s → (0.9,0.95,1.0,1)。经典模式照旧（「时间 %.1f 秒」）。
+- 加时反馈 = HUD 数字跳变 + 既有拾取音效（不新增浮动文字，资产/脚本增量最小）。
+
+**失败面板（Canvas 新增；VictoryRoot 同款结构，按钮标签为兄弟节点）**：
+
+| 对象名 | 组件与字段 |
+|---|---|
+| FailRoot | **active false**；子对象：FailBackdrop Image{color (0.05,0.02,0.03,0.85), anchor (0.5,0.5), offset (0,0), size (1280,720)}；FailTitle Text{"时间耗尽!", 72, (1.0,0.45,0.30,1), offset (0,−90)}；FailInfo Text{"收集能量球与隐藏晶体可以增加时间\n再试一次吧!", 24, (0.8,0.85,0.90,1), offset (0,10), wrap true, wrapWidth 600, hAlign "Center"}；FailRetryBtn Button{橙系三色同 ChallengeBtn, offset (−130,140), size (220,56)} + FailRetryLabel Text{"再试一次", 28, 白}；FailLobbyBtn Button{青系三色同 StartBtn, offset (130,140), size (220,56)} + FailLobbyLabel Text{"返回大厅", 28, 白} |
+
+**胜利面板按模式**：挑战模式 WinTime = `"用时 %.1f 秒 · 剩余 %.1f 秒"`；WinBest = `"限时最佳:剩余 %.1f 秒"`（读 leaderboard_challenge 首项）；WinTitle 评级文案不变（评级本身按剩余计算）。经典模式照旧。
+
+### 28.3.15.6 本地成就系统
+
+**存储设计**：`saves/achievements.novaachievements`（JSON，FileUtil::writeText 原子写；编辑器 = 项目根/saves、Player = exe 目录/saves，同 §28.3.12 约定）：
+
+```json
+{"version":1,"unlocked":{"first_clear":1785123456,"all_orbs":1785123512},
+ "stats":{"clear":0,"dash":0,"fall":0,"orb":0}}
+```
+
+- `unlocked` 值 = std::time(nullptr) epoch 秒（仅记录解锁顺序，不用于显示）。
+- `stats` = 跨局累计计数（clear/dash/fall/orb）。缺失/坏 JSON → 空状态 + warn 不崩溃。
+- 写盘时机 = 解锁时 + won/failed 上升沿（§28.3.15.2 裁定 9）。
+
+**成就清单（12 个；判定数据源全部来自既有/新增脚本状态，见 §28.3.15.7）**：
+
+| ID | 名称 | 解锁条件 | 判定数据源 | 判定时机 |
+|---|---|---|---|---|
+| first_clear | 初次通关 | stats.clear==0 且通关（任意模式） | stats + manager.won() | won 边沿 |
+| all_orbs | 满载而归 | 单局集满全部能量球（门激活） | manager.gateActive() | 边沿 |
+| rank_s | 完美评级 | 经典模式通关且评级 S | manager.mode()/rankName() | won 边沿 |
+| hidden_2 | 晶体猎人 | 单局收集 2 颗隐藏晶体 | manager.hiddenCollected() | 边沿（≥2） |
+| deathless | 完美跑者 | 通关且本局 0 次掉落 | manager.fallsRun() | won 边沿 |
+| challenge_clear | 分秒必争 | 限时挑战通关 | manager.mode() | won 边沿 |
+| challenge_s | 时间大师 | 限时挑战评级 S（剩余 ≥40s） | manager.mode()/rankName() | won 边沿 |
+| combo_5 | 连击大师 | 单局连击达到 x5 | manager.maxCombo() | 边沿（≥5） |
+| dash_50 | 冲刺达人 | 累计冲刺 50 次 | stats.dash | notifyDash 累计边沿 |
+| orb_200 | 收集狂 | 累计收集 200 颗能量球（仅普通球） | stats.orb | 收集边沿 |
+| beat_ghost | 超越自我 | 通关且快于幽灵：经典 = 用时 < ghost best；限时 = 剩余 > ghost best；无幽灵文件不判定 | ghost 文件（onStart 读）+ won | won 边沿 |
+| fall_5 | 摔跤艺术家 | 通关且本局掉落 ≥5 次 | manager.fallsRun() | won 边沿 |
+
+**解锁检测位置**：新脚本 **NeonAchievements**（挂 NeonLevel1 "Game" 对象，第三个组件；大厅不挂——解锁全部发生在关卡）。onStart 读文件 + 快照本模式 ghost 文件 best；onUpdate 每帧轮询 manager 上述状态做边沿检测（自维护 prev 值，场景重载后新实例自然复位）；命中 → unlocked[id]=epoch + 原子写文件 + playSfx("assets/audio/sfx_achieve.wav", 1.0f)（经 manager 统一缓存）+ toast 队列 push「★ 成就解锁:名称」（队列上限 8，超出丢最旧 warn）。API：pendingToast()/consumeToast()（NeonLevelHud 轮询消费）。stats 累计全部经轮询边沿：manager.collected() 边沿 → stats.orb++；manager.fallsRun() 边沿 → stats.fall++；manager.dashRun() 边沿 → stats.dash++；won 边沿 → stats.clear++。
+
+**关卡内 toast**：Canvas 新增 ToastText{text "", fontSize 18, color (1.0,0.85,0.35,1), anchor (0.5,1.0), offset (0,−72), wrap false, hAlign "Center", **active false**}，**必须列在 Canvas 子对象列表末位**（绘制序在 VictoryRoot/FailRoot 之后，结算面板上仍可见）。行为：NeonLevelHud 每帧——显示中 → 剩余时间递减，归零 → setActiveSelf(false)（**仅隐藏、不出队**）；空闲且有队列 → pop（consumeToast）+ 显示 3.0s。出队仅发生在「空闲且有队列」分支——归零帧若同时出队会双重出队丢下一条（终审修正 P2-3，2026-11-25）。
+
+**大厅成就墙 UI（Canvas 新增；NeonLobbyUI onStart 直接 FileUtil 读文件填写，不依赖 NeonAchievements 单例）**：
+
+| 对象名 | 组件与字段 |
+|---|---|
+| AchPanel | Image{color (0.03,0.04,0.08,0.72), anchor (0,0.5), offset (36,0), size (300,660)}（左竖条，与中心列无重叠：中心列 HelpText wrapWidth 600 → x≥340，面板 x∈[36,336]） |
+| AchTitle | Text{"成就 0/12", 22, (0.95,0.85,0.35,1), anchor (0,0.5), offset (52,−292), hAlign "Left"} |
+| Ach01..Ach12 | 每行 Text{fontSize 15, anchor (0,0.5), offset (52, −258+i×45)（i=0..11）, hAlign "Left", wrap true, wrapWidth 270}；文案「★ 名称 · 条件」（解锁，color (0.95,0.85,0.35,1)）/「☆ 名称 · 条件」（未解锁，color (0.45,0.48,0.55,1)）。条件文案：初次通关=第一次通关、满载而归=一局集满全部能量球、完美评级=经典模式评级 S、晶体猎人=一局收集 2 颗隐藏晶体、完美跑者=一次不掉落通关、分秒必争=通关限时挑战、时间大师=限时挑战评级 S、连击大师=连击达到 x5、冲刺达人=累计冲刺 50 次、收集狂=累计收集 200 颗能量球、超越自我=通关快于幽灵纪录、摔跤艺术家=掉落 5 次仍通关 |
+
+### 28.3.15.7 脚本分工与接口变更（Scripter 无歧义照做）
+
+全部在 samples/NovaSampleGame/，NovaGame 命名空间，NE_REGISTER_SCRIPT，风格照 §28.3.11。**不改**：NeonCollectible、NeonCameraShake、CharacterWalk、SpinningCube；NeonGate 仅 1 行守卫。
+
+1. **NeonGameManager（改）**：
+   - 新成员：m_mode("classic")、m_remaining(60.0f)、m_failed(false)、m_maxCombo(0)、m_fallsRun(0)、m_dashRun(0)、m_bestRemaining(0.0f)。
+   - onStart：解析 mode（j["mode"] 字符串，"challenge" 才生效，其余含缺失 → "classic"）；m_hiddenTotal = forEachObject 统计名称前缀 "HiddenOrb" 计数（统计 ≥1 才覆盖，否则兜底 2）；m_remaining=60；其余重置照旧。
+   - notifyCollected：挑战 → m_remaining += 4.0f；m_maxCombo = max(m_maxCombo, m_combo)；其余照旧。
+   - notifyHiddenCollected：挑战 → m_remaining += 6.0f；其余照旧。
+   - 新增 notifyFall()：++m_fallsRun。新增 notifyDash()：++m_dashRun。
+   - onUpdate：挑战且 !m_won && !m_failed → m_remaining -= dt；≤0 → m_failed=true、playSfx("assets/audio/sfx_fail.wav", 1.0f)、stopBgm()、日志。幽灵录制条件改为 !m_won && !m_failed。
+   - finishRun：开头 `if (m_failed) return elapsedTime();`（防失败后误结算，与 NeonGate 守卫双保险）。经典分支完全照旧（slot 0/ghost/leaderboard/评级 <20/30/45）。挑战分支：不写 slot 0；评级按剩余（≥40 S、≥25 A、≥10 B、>0 C，复用 m_rankName/m_rankColor）；读 leaderboard_challenge（降序），剩余 > 旧首项或文件空 → 写 ghost_challenge {"best":剩余,"samples":[[t,x,y,z]...]}；排行榜追加+降序+TOP5 写回；m_bestRemaining = max(旧首项, 剩余)；sfx_win + stopBgm。
+   - getters：mode()/failed()/remaining()/maxCombo()/fallsRun()/dashRun()/bestRemaining()。
+2. **NeonMovingPlatform（新）**：序列化字段 int axis=0（0=X/1=Y/2=Z）、float amplitude=1.0f、float periodSec=6.0f、float phaseDeg=0.0f；onStart 快照 m_base = localPosition()；onUpdate：offset = sin(Time::totalTime()×2π/periodSec + phaseDeg×π/180)×amplitude，pos = m_base，pos[axis] += offset，setLocalPosition(pos)；enabled=false 不动。不做任何物理调用（kinematic 由引擎 writeKinematics 每固定步驱动）。挂载：MPA/MPB/MPC（根对象）。
+3. **NeonAchievements（新）**：静态单例 s_instance（§28.3.11 热重载自愈纪律）；挂 NeonLevel1 "Game"。onStart 读 saves/achievements.novaachievements + 快照本模式 ghost best（按 manager->mode() 选文件；经典 ghost 的 best=用时，限时 ghost 的 best=剩余）。onUpdate 按 §28.3.15.6 判定表轮询边沿检测；解锁 → 原子写文件 + 经 manager->playSfx(sfx_achieve) + toast 队列；won/failed 上升沿写盘 stats。API：pendingToast()/consumeToast()。
+4. **NeonLevelHud（改）**：
+   - onStart 追加缓存：FailRoot、FailRetryBtn、FailLobbyBtn、ToastText；**RetryBtn/LobbyBtn onClick 改为「点击时读 mgr->mode()」再拼 level/lastResult 参数**（mode 字符串直接取自当前对局——防止脚本 onStart 顺序导致读到默认值）。
+   - FailRetryBtn onClick：sfx + setSceneParam("level", {"index":1,"orbTotal":10,"mode":"challenge"}) + switchScene("NeonLevel1")；FailLobbyBtn onClick：sfx + setSceneParam("lastResult", {"win":false,"mode":"challenge"}) + switchScene("NeonLobby")。
+   - onUpdate 追加：①TimerText 按 §28.3.15.5（剩余/变色）；②failed 上升沿（且 !won）→ FailRoot setActiveSelf(true)；③toast 消费（§28.3.15.6）；④胜利文案按模式（WinTime/WinBest 挑战版）。
+5. **NeonLobbyUI（改）**：StartBtn onClick 传 mode classic；ChallengeBtn onClick 接线（§28.3.15.5）；BestTimeText 前缀「经典」；ChallengeBestText 读 leaderboard_challenge（首项 + TOP3，格式同 BestTimeText 的 TOP3 行）；LastRunText 按 lastResult.mode（win=true：「上次通关:x.x 秒」/「上次挑战:剩余 x.x 秒」）；成就墙 12 行 + AchTitle 计数（§28.3.15.6）。
+6. **NeonGhost（改）**：onStart 按 manager->mode() 选路径（经典 saves/ghost.novaghost、限时 saves/ghost_challenge.novaghost），其余照旧。
+7. **NeonPlayerWatcher（改）**：掉落复活分支追加 `if (auto* mgr = NeonGameManager::instance()) mgr->notifyFall();`；Dash 边沿分支（现 sfx_dash 处）追加 `mgr->notifyDash();`。其余照旧（复活点列表 kPadNames **不加**移动平台，§28.3.15.2 裁定 10）。
+8. **NeonGate（改 1 行）**：胜利区判定条件追加 `!mgr->failed()`（与 finishRun 守卫双保险）。
+9. **samples/CMakeLists.txt**：NOVA_GAME_SOURCES 追加 NeonMovingPlatform.cpp、NeonAchievements.cpp。
+
+### 28.3.15.8 场景/资产变更清单（Levels 无歧义照做）
+
+- assets/scenes/NeonLevel1.nova.json 增改：三台平台（§28.3.15.3 结构表）、信标 ×6、HiddenOrb3/4、Canvas 增 FailRoot 组 + ToastText（末位）。
+- assets/scenes/NeonLobby.nova.json 增改：§28.3.15.5 UI 表 + §28.3.15.6 成就墙表。
+- assets/build.novabuild：**不变**（场景名/路径未变）。
+- 新音效（主会话合成；接线 = 脚本 play(Sfx, spatialBlend 0)，音量纪律 -6dB 沿用 §28.3.9）：
+
+| 文件 | 用途 | 建议时长 | 建议音高/音色 |
+|---|---|---|---|
+| sfx_fail.wav | 时间耗尽 | 0.9s | 660→220Hz 下行双音 + 轻微噪声，低沉 |
+| sfx_achieve.wav | 成就解锁 | 0.5s | 880→1320Hz 上行双音短促明亮（与 sfx_pickup 单音区分：双音 + 0.1s 尾音） |
+
+### 28.3.15.9 验收清单（V1.3）
+
+**机器可验证**：
+1. 大厅 Play：两个模式按钮可见；点「限时挑战」→ 进 NeonLevel1 且日志 mode=challenge；点「经典模式」→ mode=classic。
+2. 直启 Player（无参）→ 大厅；`--scene NeonLevel1` 直启 → 默认 classic 可玩（mode 缺失回退）。
+3. 移动平台：三平台按 sin 周期运动（日志坐标核对：MPA x∈[1,3]、MPB 顶面 y∈[0.45,1.75]、MPC x∈[1,3]）；站台不滑落/被携带（§28.3.15.4 引擎验收为主，游戏侧目测兜底）；HiddenText 显示 0/4；收集 X1/X2 → 隐藏晶体计数 2/4、3/4。
+4. 经典回归：全收集→门激活→通关→slot 0 写入→大厅「经典最佳」更新；leaderboard.novaboard/ghost.novaghost 行为与 V1.2 一致；「再玩一次」计数/计时/球复位照旧。
+5. 挑战模式：初始剩余 60；拾普通球 +4、隐藏 +6（数字跳变）；倒计时递减；≤10s 变红；耗尽 → FailRoot + sfx_fail + 计时停止；「再试一次」→ 重新 60s；通关 → leaderboard_challenge 降序 TOP5、ghost_challenge 仅破纪录时更新、**slot 0 不变**；评级按剩余（≥40 S）；失败后进胜利区不触发结算。
+6. 成就：12 成就逐个实测触发（或注入状态），unlocked 文件内容正确、原子写；大厅成就墙计数/置灰/金色正确；重开进程保持；toast 显示 3s 后消失、队列不卡死、胜利面板上可见。
+7. 脚本合规：grep 新脚本无 engine/src 私有头引用；场景 JSON version=4 且键名全部在本节出现过的集合内；Rigidbody 键名与 PhysicsTest 模板一致。
+8. 性能：关卡 1280×720 ≥60FPS 不变（3 脚本 + 成就轮询均 O(1)）。
+
+**人工体验（非技术用户步骤清单）**：
+1. 大厅：两个按钮一眼可读，按钮下有「不限时/倒计时」说明；左侧成就墙，未解锁灰、已解锁金，计数正确。
+2. 移动平台：看到会动、带发光灯条与尾迹粒子的平台；站上去会被带着走；垂直平台会把人托起/降下；平台把人送到捷径并拿到橙色隐藏晶体；没站住掉下去会自动回到最近的平台。
+3. 限时挑战：右上角倒计时压力可感；捡球后时间明显跳增；时间不够 → 「时间耗尽!」面板，点「再试一次」直接重开；通关时看到「剩余时间」与评级。
+4. 成就：通关/全收集/拿隐藏晶体/限时通关时，屏幕上方弹出「★ 成就解锁:××」；回大厅成就墙对应行变金。
+5. 回归：经典模式一切照旧（最佳纪录/幽灵/TOP3/评级）。
+
 ## 28.4 文档化与迁移指南（cC，V1.0-14）
 
 **新文档三件（本契约明确授权新增 md——Architect 角色约束「不新增 md」的例外条款）**：

@@ -49,6 +49,16 @@ public:
     int hiddenCollected() const { return m_hiddenCollected; }
     int hiddenTotal() const { return m_hiddenTotal; }
     float bestSplit() const { return m_bestSplit; }   // 本次最佳分段（球到球用时）
+    // ===== V1.3 限时挑战 / 成就统计 =====
+    const std::string& mode() const { return m_mode; }   // "classic"/"challenge"（§28.3.15.2 裁定 3）
+    bool failed() const { return m_failed; }
+    float remaining() const { return m_remaining; }
+    int maxCombo() const { return m_maxCombo; }
+    int fallsRun() const { return m_fallsRun; }
+    int dashRun() const { return m_dashRun; }
+    float bestRemaining() const { return m_bestRemaining; }   // 限时最佳剩余（leaderboard_challenge 首项）
+    void notifyFall();                         // 掉落 +1（成就 stats.fall 用）
+    void notifyDash();                         // 冲刺 +1（成就 stats.dash 用）
 
 private:
     static NeonGameManager* s_instance;
@@ -75,11 +85,20 @@ private:
 
     // ===== V1.2 竞速状态（运行时，不序列化）=====
     int m_hiddenCollected = 0;                // 隐藏晶体已收集
-    int m_hiddenTotal = 2;                    // 隐藏晶体总数（§28.3 扩展位约定）
+    int m_hiddenTotal = 2;                    // 隐藏晶体总数（§28.3.15.2 裁定 7：onStart 按场景统计覆盖，0 → 兜底 2）
     float m_bestSplit = 0.0f;                 // 本次最佳分段
     float m_recAccum = 0.0f;                  // 幽灵采样计时累积
     std::vector<std::pair<float, glm::vec3>> m_recording;   // 幽灵轨迹（t, pos）
     std::vector<float> m_splitTimes;          // 每颗晶体收集时刻（分段计时）
+
+    // ===== V1.3 挑战/成就状态（运行时，不序列化）=====
+    std::string m_mode = "classic";           // 关卡模式（level 参数 mode 字段，仅 "challenge" 生效）
+    float m_remaining = 60.0f;                // 限时剩余（秒；普通球 +4 / 隐藏晶体 +6）
+    bool m_failed = false;                    // 时间耗尽失败（守卫结算，双保险）
+    int m_maxCombo = 0;                       // 本局最高连击（成就 combo_5 用）
+    int m_fallsRun = 0;                       // 本局掉落次数（成就 deathless/fall_5 + stats.fall 用）
+    int m_dashRun = 0;                        // 本局冲刺次数（成就 stats.dash 用）
+    float m_bestRemaining = 0.0f;             // 限时最佳剩余（结算后 = max(旧首项, 本次剩余)）
 
     void stopBgm();             // 当前场景 "BGM" AudioSource → Stop()（fadeOutSeconds 生效，防爆音）
     void updateDimensionLight(float dt);   // V1.1 维度突破：环境随收集渐亮 + 灯带点亮

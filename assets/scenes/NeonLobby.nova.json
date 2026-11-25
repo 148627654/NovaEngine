@@ -1451,8 +1451,8 @@
             0.5
           ],
           "offset": [
-            0,
-            20
+            -150,
+            0
           ],
           "size": [
             240,
@@ -1488,7 +1488,7 @@
           "type": "Transform"
         },
         {
-          "text": "开始游戏",
+          "text": "经典模式",
           "fontSize": 32.0,
           "color": [
             1.0,
@@ -1502,8 +1502,8 @@
             0.5
           ],
           "offset": [
-            0,
-            4
+            -150,
+            0
           ],
           "type": "Text"
         }
@@ -1535,7 +1535,7 @@
           "type": "Transform"
         },
         {
-          "text": "最佳纪录:暂无",
+          "text": "经典最佳:暂无",
           "fontSize": 24.0,
           "color": [
             1.0,
@@ -1550,7 +1550,7 @@
           ],
           "offset": [
             0,
-            85
+            86
           ],
           "type": "Text"
         }
@@ -1597,7 +1597,7 @@
           ],
           "offset": [
             0,
-            115
+            168
           ],
           "type": "Text"
         }
@@ -1629,7 +1629,7 @@
           "type": "Transform"
         },
         {
-          "text": "操作说明\nW A S D 移动 · 空格 跳跃\n收集全部 10 颗能量球,激活终点传送门\n掉出平台会自动回到起点",
+          "text": "W A S D 移动 · 空格 跳跃/二段跳 · Shift 冲刺\n收集全部 10 颗能量球,激活终点传送门\n掉出平台会自动回到最近平台\n限时挑战:初始 60 秒 · 能量球 +4 秒 · 隐藏晶体 +6 秒",
           "fontSize": 20.0,
           "color": [
             0.75,
@@ -1644,7 +1644,7 @@
           ],
           "offset": [
             0,
-            150
+            230
           ],
           "wrap": true,
           "wrapWidth": 600.0,
@@ -1816,6 +1816,962 @@
       "id": 7110000000000000086,
       "name": "DashTrail",
       "parent": 7100000000000000001
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "color": [
+            0.85,
+            0.35,
+            0.15,
+            1.0
+          ],
+          "hoverColor": [
+            0.95,
+            0.45,
+            0.2,
+            1.0
+          ],
+          "pressedColor": [
+            0.65,
+            0.25,
+            0.1,
+            1.0
+          ],
+          "anchor": [
+            0.5,
+            0.5
+          ],
+          "offset": [
+            150,
+            0
+          ],
+          "size": [
+            240,
+            64
+          ],
+          "type": "Button"
+        }
+      ],
+      "id": 7110000000000000087,
+      "name": "ChallengeBtn",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "限时挑战",
+          "fontSize": 32.0,
+          "color": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.5,
+            0.5
+          ],
+          "offset": [
+            150,
+            0
+          ],
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000088,
+      "name": "ChallengeBtnLabel",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "不限时 · 冲击最快纪录",
+          "fontSize": 15.0,
+          "color": [
+            0.75,
+            0.8,
+            0.9,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.5,
+            0.5
+          ],
+          "offset": [
+            -150,
+            44
+          ],
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000089,
+      "name": "StartDesc",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "倒计时 · 拾球加时",
+          "fontSize": 15.0,
+          "color": [
+            1.0,
+            0.62,
+            0.3,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.5,
+            0.5
+          ],
+          "offset": [
+            150,
+            44
+          ],
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000090,
+      "name": "ChallengeDesc",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "限时最佳:暂无",
+          "fontSize": 24.0,
+          "color": [
+            1.0,
+            0.62,
+            0.3,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.5,
+            0.5
+          ],
+          "offset": [
+            0,
+            128
+          ],
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000091,
+      "name": "ChallengeBestText",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "spritePath": "",
+          "color": [
+            0.03,
+            0.04,
+            0.08,
+            0.72
+          ],
+          "slice9": [
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ],
+          "anchor": [
+            0.0,
+            0.5
+          ],
+          "offset": [
+            36,
+            0
+          ],
+          "size": [
+            300,
+            660
+          ],
+          "fillType": "None",
+          "fillAmount": 1.0,
+          "fillClockwise": true,
+          "type": "Image"
+        }
+      ],
+      "id": 7110000000000000092,
+      "name": "AchPanel",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "成就 0/12",
+          "fontSize": 22.0,
+          "color": [
+            0.95,
+            0.85,
+            0.35,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.0,
+            0.5
+          ],
+          "offset": [
+            52,
+            -292
+          ],
+          "wrap": false,
+          "wrapWidth": 0,
+          "hAlign": "Left",
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000093,
+      "name": "AchTitle",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "☆ 初次通关 · 第一次通关",
+          "fontSize": 15.0,
+          "color": [
+            0.45,
+            0.48,
+            0.55,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.0,
+            0.5
+          ],
+          "offset": [
+            52,
+            -258
+          ],
+          "wrap": true,
+          "wrapWidth": 270,
+          "hAlign": "Left",
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000094,
+      "name": "Ach01",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "☆ 满载而归 · 一局集满全部能量球",
+          "fontSize": 15.0,
+          "color": [
+            0.45,
+            0.48,
+            0.55,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.0,
+            0.5
+          ],
+          "offset": [
+            52,
+            -213
+          ],
+          "wrap": true,
+          "wrapWidth": 270,
+          "hAlign": "Left",
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000095,
+      "name": "Ach02",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "☆ 完美评级 · 经典模式评级 S",
+          "fontSize": 15.0,
+          "color": [
+            0.45,
+            0.48,
+            0.55,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.0,
+            0.5
+          ],
+          "offset": [
+            52,
+            -168
+          ],
+          "wrap": true,
+          "wrapWidth": 270,
+          "hAlign": "Left",
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000096,
+      "name": "Ach03",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "☆ 晶体猎人 · 一局收集 2 颗隐藏晶体",
+          "fontSize": 15.0,
+          "color": [
+            0.45,
+            0.48,
+            0.55,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.0,
+            0.5
+          ],
+          "offset": [
+            52,
+            -123
+          ],
+          "wrap": true,
+          "wrapWidth": 270,
+          "hAlign": "Left",
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000097,
+      "name": "Ach04",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "☆ 完美跑者 · 一次不掉落通关",
+          "fontSize": 15.0,
+          "color": [
+            0.45,
+            0.48,
+            0.55,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.0,
+            0.5
+          ],
+          "offset": [
+            52,
+            -78
+          ],
+          "wrap": true,
+          "wrapWidth": 270,
+          "hAlign": "Left",
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000098,
+      "name": "Ach05",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "☆ 分秒必争 · 通关限时挑战",
+          "fontSize": 15.0,
+          "color": [
+            0.45,
+            0.48,
+            0.55,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.0,
+            0.5
+          ],
+          "offset": [
+            52,
+            -33
+          ],
+          "wrap": true,
+          "wrapWidth": 270,
+          "hAlign": "Left",
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000099,
+      "name": "Ach06",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "☆ 时间大师 · 限时挑战评级 S",
+          "fontSize": 15.0,
+          "color": [
+            0.45,
+            0.48,
+            0.55,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.0,
+            0.5
+          ],
+          "offset": [
+            52,
+            12
+          ],
+          "wrap": true,
+          "wrapWidth": 270,
+          "hAlign": "Left",
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000100,
+      "name": "Ach07",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "☆ 连击大师 · 连击达到 x5",
+          "fontSize": 15.0,
+          "color": [
+            0.45,
+            0.48,
+            0.55,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.0,
+            0.5
+          ],
+          "offset": [
+            52,
+            57
+          ],
+          "wrap": true,
+          "wrapWidth": 270,
+          "hAlign": "Left",
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000101,
+      "name": "Ach08",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "☆ 冲刺达人 · 累计冲刺 50 次",
+          "fontSize": 15.0,
+          "color": [
+            0.45,
+            0.48,
+            0.55,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.0,
+            0.5
+          ],
+          "offset": [
+            52,
+            102
+          ],
+          "wrap": true,
+          "wrapWidth": 270,
+          "hAlign": "Left",
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000102,
+      "name": "Ach09",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "☆ 收集狂 · 累计收集 200 颗能量球",
+          "fontSize": 15.0,
+          "color": [
+            0.45,
+            0.48,
+            0.55,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.0,
+            0.5
+          ],
+          "offset": [
+            52,
+            147
+          ],
+          "wrap": true,
+          "wrapWidth": 270,
+          "hAlign": "Left",
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000103,
+      "name": "Ach10",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "☆ 超越自我 · 通关快于幽灵纪录",
+          "fontSize": 15.0,
+          "color": [
+            0.45,
+            0.48,
+            0.55,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.0,
+            0.5
+          ],
+          "offset": [
+            52,
+            192
+          ],
+          "wrap": true,
+          "wrapWidth": 270,
+          "hAlign": "Left",
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000104,
+      "name": "Ach11",
+      "parent": 7100000000000000024
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "type": "Transform"
+        },
+        {
+          "text": "☆ 摔跤艺术家 · 掉落 5 次仍通关",
+          "fontSize": 15.0,
+          "color": [
+            0.45,
+            0.48,
+            0.55,
+            1.0
+          ],
+          "fontPath": "",
+          "anchor": [
+            0.0,
+            0.5
+          ],
+          "offset": [
+            52,
+            237
+          ],
+          "wrap": true,
+          "wrapWidth": 270,
+          "hAlign": "Left",
+          "type": "Text"
+        }
+      ],
+      "id": 7110000000000000105,
+      "name": "Ach12",
+      "parent": 7100000000000000024
     }
   ],
   "version": 4
