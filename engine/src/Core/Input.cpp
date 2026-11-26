@@ -329,6 +329,19 @@ void Input::beginFrame() {
         g_prevMousePos = g_mousePos;
         g_mousePos = glm::vec2(static_cast<float>(mx), static_cast<float>(my));
         g_mouseDelta = g_mousePos - g_prevMousePos;   // 首帧为 0
+
+        // 鼠标调试日志（NOVA_DBG_MOUSE=1）：左键边沿打印窗口逻辑坐标 + 每 30 帧一次位置
+        // （排障用：验证「屏幕点击 → 游戏所见坐标」换算链路；生产不设变量 = 零开销）
+        if (std::getenv("NOVA_DBG_MOUSE") != nullptr) {
+            static int frame = 0;
+            ++frame;
+            if (g_mouseDown[0] && !g_mousePrevDown[0])
+                Logger::info("[Input] 鼠标左键按下 @ ({:.1f}, {:.1f})", g_mousePos.x, g_mousePos.y);
+            else if (!g_mouseDown[0] && g_mousePrevDown[0])
+                Logger::info("[Input] 鼠标左键松开 @ ({:.1f}, {:.1f})", g_mousePos.x, g_mousePos.y);
+            else if (frame % 30 == 0)
+                Logger::info("[Input] 鼠标位置 ({:.1f}, {:.1f})", g_mousePos.x, g_mousePos.y);
+        }
     }
 
     // 手柄轮询放在 win 判定之外：GLFW 手柄查询不依赖窗口上下文

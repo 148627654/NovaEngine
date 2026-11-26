@@ -24,6 +24,8 @@
 
 #include <glad/gl.h>                    // glViewport
 #include <GLFW/glfw3.h>                  // glfwSetWindowAttrib（固定窗口；GLFW_INCLUDE_NONE 已定义）
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>            // glfwGetWin32Window（V1.3.1 OS 级光标换算）
 #include <glm/gtc/matrix_transform.hpp> // lookAt / perspective / radians
 
 #include <chrono>      // V1.0-1 波 1 合波接线：Profiler 模块档计时
@@ -255,9 +257,27 @@ int main(int argc, char** argv) {
         window->getContentScale(csx, csy);
         const float contentScale = std::max(csx, 1.0f);
         UIRenderer::setDpiScale(contentScale);
-        glm::vec2 uiMouse =
-            UIRenderer::layoutFromWindowPoint(Input::mousePosition(), contentScale);
-        uiMouse *= contentScale;   // 布局 → 物理 FBO（processInput 契约：内部 ÷dpiScale）
+        // V1.3.1 修复（用户实测「按钮点不了」）：远程会话/窗口管理器可把窗口物理尺寸
+        // 拉伸离开逻辑尺寸、且 GLFW 内容缩放可能误报（本会话实测 = 1.0）——此时
+        // glfwGetCursorPos 的坐标空间不可信（实测返回物理客户区坐标，可达 1775>1280）。
+        // 改为 OS 权威链路：屏幕光标 → ScreenToClient（物理客户区）→ 按实际客户区
+        // 尺寸归一化到 1280×720 布局空间——任何 DPI/拉伸组合下与目视位置精确一致。
+        // （layoutFromWindowPoint 仍服务编辑器侧路径；本块失败时回退 Input 坐标链）
+        glm::vec2 uiMouse = Input::mousePosition();
+        {
+            GLFWwindow* native = window->nativeHandle();
+            HWND hwnd = glfwGetWin32Window(native);
+            POINT p{};
+            if (hwnd && GetCursorPos(&p) && ScreenToClient(hwnd, &p)) {
+                RECT cr{};
+                if (GetClientRect(hwnd, &cr) && cr.right > 0 && cr.bottom > 0) {
+                    uiMouse = glm::vec2(static_cast<float>(p.x), static_cast<float>(p.y)) *
+                              glm::vec2(1280.0f / static_cast<float>(cr.right),
+                                        720.0f / static_cast<float>(cr.bottom));
+                }
+            }
+        }
+        uiMouse *= contentScale;   // 布局逻辑 → 物理 FBO（processInput 契约：内部 ÷dpiScale）
         UIRenderer::processInput(scene, uiMouse, Input::isMouseDown(MouseButton::Left),
                                  Input::isMousePressed(MouseButton::Left));
 
